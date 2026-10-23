@@ -171,12 +171,17 @@ func main() {
 	configFile := flag.String("c", "", "path to json config file")
 	showVersion := flag.Bool("v", false, "show version and build info")
 	showVersionLong := flag.Bool("version", false, "show version and build info")
+    protocolInfo := flag.Bool("security-protocol", false, "show fixed release/wire/schema identity")
 	flag.Usage = func() {
 		fmt.Print(usage)
 	}
 
 	flag.Parse()
 
+    if *protocolInfo {
+        fmt.Println("pingtunnel-go-core=3.2.0 config-schema=3 wire=4")
+        return
+    }
 	if *showVersion || *showVersionLong {
 		fmt.Println("pingtunnel " + pingtunnel.GetVersionInfo())
 		return
