@@ -60,10 +60,11 @@ if (( ! prebuilt )); then
   cargo build --release --manifest-path "$work/source/Pingtunnel_manager-main/Rust/Cargo.toml"
   cp "$work/source/Pingtunnel_manager-main/Rust/target/release/pingtunnel" "$work/manager"
 fi
-# Do not accidentally install a stale rolling release while upgrading the manager.
+# Do not install stale rolling assets when removing legacy HA.
+chmod 755 "$work/manager"
 manager_version="$("$work/manager" --version)"
-if [[ "$manager_version" != "2.3.0" ]]; then
-  echo "Expected Pingtunnel Manager 2.3.0 with unified automatic menu, got: $manager_version" >&2
+if [[ "$manager_version" != "2.4.0" ]]; then
+  echo "Expected Pingtunnel Manager 2.4.0 (single direct tunnel), got: $manager_version" >&2
   echo "Check the current rust-latest release assets before retrying." >&2
   exit 1
 fi
@@ -79,7 +80,7 @@ if [[ "${PINGTUNNEL_REFRESH_GO:-0}" == "1" || ! -f "$CORE" ]]; then
 fi
 configured=0
 if [[ -f "$CONFIG" ]]; then
-  "$work/manager" validate
+  # Legacy multi-route JSON is validated only AFTER the 2.4 migration.
   chmod 600 "$CONFIG"
   configured=1
 else
@@ -90,11 +91,12 @@ fi
 echo "[3/4] Atomic manager installation..."
 previously_active=0
 if systemctl is-active --quiet pingtunnel.service; then previously_active=1; fi
-had_manager=0; had_core=0; had_unit=0; had_dropin=0
+had_manager=0; had_core=0; had_unit=0; had_dropin=0; had_config=0
 if [[ -e "$MANAGER" || -L "$MANAGER" ]]; then cp -a "$MANAGER" "$work/old-manager"; had_manager=1; fi
 if [[ -e "$CORE" ]]; then cp -a "$CORE" "$work/old-core"; had_core=1; fi
 if [[ -e "$UNIT" ]]; then cp -a "$UNIT" "$work/old-unit"; had_unit=1; fi
 if [[ -e "$DROPIN" ]]; then cp -a "$DROPIN" "$work/old-dropin"; had_dropin=1; fi
+if [[ -e "$CONFIG" ]]; then cp -a "$CONFIG" "$work/old-config"; had_config=1; fi
 rollback() {
   code=$?
   trap - ERR
@@ -105,6 +107,7 @@ rollback() {
   if (( had_core )); then cp -a "$work/old-core" "$CORE"; else rm -f "$CORE"; fi
   if (( had_unit )); then cp -a "$work/old-unit" "$UNIT"; else rm -f "$UNIT"; fi
   if (( had_dropin )); then mkdir -p "$(dirname "$DROPIN")"; cp -a "$work/old-dropin" "$DROPIN"; else rm -f "$DROPIN"; fi
+  if (( had_config )); then cp -a "$work/old-config" "$CONFIG"; fi
   systemctl daemon-reload || true
   if (( previously_active )); then systemctl restart pingtunnel.service || true; fi
   exit "$code"
@@ -125,6 +128,8 @@ if [[ -f "$work/core" ]]; then
   core_new=""
 fi
 if (( configured )); then
+  "$MANAGER" migrate
+  "$MANAGER" validate
   "$MANAGER" service-install
   if (( previously_active )) || systemctl is-enabled --quiet pingtunnel.service; then
     systemctl restart pingtunnel.service
@@ -136,4 +141,4 @@ fi
 trap - ERR
 echo "[4/4] Installed successfully."
 echo "Type: pingtunnel"
-echo "All options are in its menu; choose Easy setup once to pair the two servers."
+echo "One Iran VPS + one foreign VPS. Choose Easy setup once in the menu."
