@@ -23,7 +23,7 @@ const SECURITY_STATUS: &str = "/run/pingtunnel-security.json";
 const UNIT: &str = "/etc/systemd/system/pingtunnel.service";
 const DROPIN: &str = "/etc/systemd/system/pingtunnel.service.d/memory.conf";
 const UPDATE_URL: &str =
-    "https://raw.githubusercontent.com/meysamrn/Pingtunnel_manager/main/Source/install.sh";
+    "https://raw.githubusercontent.com/MSMSofts/Pingtunnel_manager/main/Source/install.sh";
 
 fn failure(message: impl Into<String>) -> Box<dyn Error> {
     io::Error::new(io::ErrorKind::Other, message.into()).into()
@@ -333,7 +333,7 @@ fn help(){
     println!("  pingtunnel            Unified menu");
     println!("  pingtunnel setup      Five questions on each VPS");
     println!("  pingtunnel key        Show existing pairing key (root only)");
-    println!("  pingtunnel validate | performance | security | dry-run");
+    println!("  pingtunnel validate | performance | security | health | dry-run");
     println!("  pingtunnel start | stop | restart | status | logs [lines]");
     println!("  pingtunnel update | uninstall [--purge]");
 }
@@ -358,7 +358,7 @@ fn menu()->Result<()>{
         }else{println!("Not configured for v3 — choose Setup.");}
         println!("1) Status    2) Start     3) Stop      4) Restart");
         println!("5) Logs      6) Setup     7) Pair key  8) Performance");
-        println!("9) Validate 10) Update   11) Uninstall 12) Exit  13) Security");
+        println!("9) Validate 10) Update   11) Uninstall 12) Exit  13) Security 14) Health");
         let choice=prompt("Choose",if cfg.is_some(){"1"}else{"6"})?;
         let action=match choice.as_str(){
             "1"=>run_systemctl(&["status","pingtunnel.service","--no-pager"]),
@@ -373,11 +373,34 @@ fn menu()->Result<()>{
             "10"=>update(),
             "11"=>uninstall(false),
             "13"=>show_security_status(),
+            "14"=>show_health(),
             "12"|"q"|"Q"=>return Ok(()),
             _=>{println!("Select 1..12");continue}
         };
         if let Err(e)=action{eprintln!("Operation failed: {e}");}
     }
+}
+
+fn show_health() -> Result<()> {
+    // Verify process liveness separately from ICMP path quality.
+    let service = Command::new("systemctl").args(["is-active","--quiet","pingtunnel.service"]).status()?;
+    if !service.success() {
+        return Err(failure("Pingtunnel systemd service is not active; inspect sudo pingtunnel logs 100."));
+    }
+    let meta=fs::metadata(SECURITY_STATUS)
+        .map_err(|_|failure("Service is active but the Go security heartbeat is missing"))?;
+    let age=meta.modified()?.elapsed()?.as_secs();
+    if age>10 {
+        return Err(failure(format!("Go security heartbeat stale by {age} seconds; core workers may have failed")));
+    }
+    let status:Value=serde_json::from_slice(&fs::read(SECURITY_STATUS)?)?;
+    if status["wire_version"].as_i64()!=Some(4) || status["config_schema"].as_i64()!=Some(3) {
+        return Err(failure("Go runtime status is incompatible with config schema 3 / wire 4"));
+    }
+    println!("Service active and Go workers reporting (heartbeat {}s ago).",age);
+    println!("Security session state: {}",status["state"].as_str().unwrap_or("unknown"));
+    println!("Last authenticated peer traffic: {} seconds ago (may be idle).",status["last_valid_age_seconds"]);
+    Ok(())
 }
 
 fn show_security_status() -> Result<()> {
@@ -463,6 +486,7 @@ fn main_inner()->Result<()>{
         "key"=>display_pair_key(),
         "performance"=>show_adaptive_status(),
         "security"=>show_security_status(),
+        "health"=>show_health(),
         "service-install"=>service_install(),
         "validate"=>{load_config()?;println!("Version-3 configuration valid");Ok(())},
         "dry-run"=>run_core(true),
