@@ -593,10 +593,12 @@ mod tests {
     }
 
     #[test]
-    fn rejects_udp_and_duplicate_paths() {
+    fn rejects_invalid_protocol_and_duplicate_paths() {
         let mut c = cfg();
-        c["tcp"] = json!(0);
+        c["tcp"] = json!(2);
         assert!(parse(&c).is_err());
+        c["tcp"] = json!(0);
+        assert!(parse(&c).is_ok());
         c["tcp"] = json!(1);
         c["ha"]["endpoints"][1]["server"] = json!("203.0.113.1");
         assert!(parse(&c).is_err());
