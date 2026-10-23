@@ -2,15 +2,15 @@
 
 **A lightweight, encrypted ICMP tunnel between exactly two Linux VPSs, with a five-question setup wizard.**
 
-[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.2.1](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.1)
+[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.2.2](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.2)
 
-![Version](https://img.shields.io/badge/version-3.2.1-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.2.2-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml)
 
 Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** between an **Iran-side VPS** and an **overseas VPS**. Local TCP or UDP traffic enters the Iran VPS, travels inside authenticated, encrypted ICMP packets, and is forwarded by the overseas VPS to its configured local service.
 
 **This is a transport layer—not a standalone VPN server.** Services such as Hysteria 2, s-ui or other TCP/UDP applications run and are configured separately.
 
-**Current release: 3.2.1** · Rust management CLI · Modified Go Pingtunnel core · Config schema **3** · Secure wire protocol **4** · Direct Iran → foreign ICMP only.
+**Current release: 3.2.2** · Rust management CLI · Modified Go Pingtunnel core · Config schema **3** · Secure wire protocol **4** · Direct Iran → foreign ICMP only.
 
 ## Highlights
 
@@ -86,7 +86,7 @@ sudo bash /tmp/pingtunnel-install.sh
 
 Review downloaded scripts before executing them with elevated privileges.
 
-The installer pins the [v3.2.1 release](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.1), checks SHA256 and the release manifest, verifies manager/core compatibility, and backs up existing installed files for failure rollback.
+The installer pins the [v3.2.2 release](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.2), checks SHA256 and the release manifest, verifies manager/core compatibility, and backs up existing installed files for failure rollback.
 
 ### Set up the overseas VPS first
 
@@ -113,6 +113,79 @@ Run the same command and answer:
 5. **This VPS's port:** the TCP/UDP port clients should reach in Iran (for example, **444**).
 
 Suggested default ports are **TCP 443** and **UDP 444** on either VPS, but you can choose independent ports. The shared key is **not regenerated** when setup is repeated. To retrieve it intentionally, use `sudo pingtunnel key` and protect its output.
+
+## Interactive terminal menu
+
+Run `sudo pingtunnel` to open the redesigned **v3.2.2** menu. The header shows the physical server location, opposite VPS IPv4, this VPS's TCP/UDP port, and the current systemd service state **without revealing the pairing key**. The interface groups all **14 original numbered actions** into four sections.
+
+~~~text
++--------------------------------------------------------------------+
+|   PINGTUNNEL MANAGER                                               |
+|   SECURE ICMP TUNNEL  |  v3.2.2  |  Wire v4                        |
++--------------------------------------------------------------------+
+
+  TUNNEL OVERVIEW
+  ------------------------------------------------------------------
+  Location          : Iran (ingress)
+  Peer IPv4         : 203.0.113.10
+  Local transport   : UDP / 444
+  Service status    : active
+
+  SERVICE CONTROLS
+  ------------------------------------------------------------------
+   1) Status                      2) Start
+   3) Stop                        4) Restart
+   5) View logs
+
+  SETUP & CONFIGURATION
+  ------------------------------------------------------------------
+   6) Setup Wizard                7) Show pairing key
+
+  DIAGNOSTICS
+  ------------------------------------------------------------------
+   8) Adaptive Performance        9) Validate config
+  13) Security status            14) Health check
+
+  MAINTENANCE
+  ------------------------------------------------------------------
+  10) Update                     11) Uninstall
+  12) Exit
+~~~
+
+This is an illustrative screen, not live server output. With a UTF-8 terminal the interface uses subtle cyan section headings and a Unicode border. It automatically disables ANSI color codes for redirected output, `NO_COLOR`, or `TERM=dumb` and falls back to ASCII for non-UTF-8 locales. The displayed version is taken from the actual manager package, not hard-coded into the Rust menu.
+
+### Every menu option explained
+
+| No. | Group | Action |
+| --- | --- | --- |
+| **1 — Status** | Service | Show systemd status |
+| **2 — Start** | Service | Start the encrypted ICMP service |
+| **3 — Stop** | Service | Stop the service |
+| **4 — Restart** | Service | Restart service; active VPN sessions may be interrupted |
+| **5 — View logs** | Service | Show the last 100 systemd journal lines |
+| **6 — Setup Wizard** | Configuration | Configure the current VPS using the five-question wizard |
+| **7 — Show pairing key** | Configuration | Reveal the **sensitive** shared 256-bit secret; keep it private |
+| **8 — Adaptive Performance** | Diagnostics | View ICMP RTT/jitter, probe loss estimate, and new-TCP tuning |
+| **9 — Validate config** | Diagnostics | Verify persisted configuration schema and key format |
+| **10 — Update** | Maintenance | Download the version-pinned signed-off release set via the installer |
+| **11 — Uninstall** | Maintenance | Remove service/binaries with explicit confirmation; config remains by default |
+| **12 — Exit** | Maintenance | Leave manager without stopping the running service |
+| **13 — Security status** | Diagnostics | View authenticated session, replay drops, authentication errors, recovery |
+| **14 — Health check** | Diagnostics | Check service liveness and Go core heartbeat freshness |
+
+### Five-step setup explained
+
+Complete the wizard on the **overseas VPS first**, then on the **Iran VPS**. Menu option **6** and the command `sudo pingtunnel setup` start exactly the same wizard.
+
+1. **Physical region:** Choose *Foreign* on the overseas VPS and *Iran* on the Iran VPS. This is not a direct/reverse tunnel switch.
+2. **Opposite VPS IPv4:** Enter the public IPv4 address of the *other* server. The overseas VPS needs the Iran address; the Iran VPS needs the overseas address.
+3. **Pairing key:** On first setup, the overseas VPS generates a random 256-bit root secret. Transfer it securely and enter that same value using the Iran VPS's hidden input. Re-running Setup retains the existing pairing root.
+4. **TCP or UDP:** Select the **same forwarded protocol** on both VPSs. The outside carrier remains ICMP.
+5. **This VPS's port:** Select the users' ingress TCP/UDP port on Iran; select the actual local target service port overseas. The ports can **differ** (e.g. UDP 444 in Iran, UDP 8443 overseas). Suggested defaults: TCP 443, UDP 444.
+
+The manager stores the configuration with restricted permissions, configures systemd, and applies it. Runtime cryptographic algorithm selection and performance measurement require no extra setup questions. For Hysteria 2, configure the overseas service to listen at `127.0.0.1:8443/UDP` and users to reach `IRAN_IP:444`.
+
+After setup, use menu **1 / 13 / 14 / 8** or run `pingtunnel status`, `pingtunnel security`, `pingtunnel health`, and `pingtunnel performance`.
 
 ## CLI reference
 
@@ -164,7 +237,8 @@ These features **do not guarantee uninterrupted VPN sessions**, live adaptation 
 
 | Version | Config schema | Wire format | Compatibility |
 | --- | --- | --- | --- |
-| **3.2.1** | 3 | **v4** (`PTH4/PTD4`) | Current; wire-compatible with 3.2.0 / 3.1 |
+| **3.2.2** | 3 | **v4** (`PTH4/PTD4`) | Current; wire-compatible with 3.2.0 / 3.1 |
+| **3.2.1** | 3 | **v4** | Previous compatible maintenance release |
 | **3.2.0** | 3 | **v4** | Previous patch release; wire-compatible |
 | **3.1.0** | 3 | **v4** | Introduced ephemeral exchange and anti-replay |
 | **3.0.0** | 3 | Earlier `PTA1` | Config preserved but incompatible with 3.1/3.2 over the wire |
@@ -174,7 +248,7 @@ Upgrading both VPSs is recommended during a maintenance window. The manager pres
 
 > **Repository transfer note:** For updates, use the canonical installer URL under `MSMSofts/Pingtunnel_manager` shown in the Install section. Earlier manager binaries may still use the former repository owner in the built-in `pingtunnel update` URL.
 
-[Version history](CHANGELOG.md) · [Pinned release](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.1) · [Rolling assets](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/rust-latest)
+[Version history](CHANGELOG.md) · [Pinned release](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.2) · [Rolling assets](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/rust-latest)
 
 ## Important paths
 
@@ -200,7 +274,7 @@ Upgrading both VPSs is recommended during a maintenance window. The manager pres
 
 ## Scope & limitations
 
-**Not implemented as of 3.2.1:** actual reverse tunnel forwarding, automatic Direct/Reverse switching, high availability, multiple VPSs, simultaneous TCP+UDP forwarding through one configured tunnel, or guaranteed ICMP traffic camouflage.
+**Not implemented as of 3.2.2:** actual reverse tunnel forwarding, automatic Direct/Reverse switching, high availability, multiple VPSs, simultaneous TCP+UDP forwarding through one configured tunnel, or guaranteed ICMP traffic camouflage.
 
 **Still required before high-assurance deployment:** testing two real VPSs with ICMP packet loss/jitter, Hysteria 2 end-to-end testing, restart/upgrade interruption testing, and independent cryptographic review.
 
