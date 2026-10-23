@@ -454,38 +454,34 @@ fn help() {
     println!("  pingtunnel run               Internal: exec() the Go tunnel core");
 }
 
-fn ha_setup_apply() -> Result<()> {
-    let mut cfg = load_config()?;
-    ha::setup(&mut cfg)?;
-    apply_config()
-}
-
 fn menu() -> Result<()> {
     root_required()?;
+    if migrate_legacy_multi_route()? {
+        apply_config()?;
+    }
     loop {
         let installed = config_path().exists();
         println!("\n╔══════════════════════════════════════════════╗");
         println!("║       Pingtunnel Manager {}              ║", env!("CARGO_PKG_VERSION"));
         println!("╚══════════════════════════════════════════════╝");
-        if !installed {
-            println!("No tunnel configuration yet. Choose 6 to connect your servers.");
-        } else {
+        println!("  Topology: Iran Client -> foreign Server (one ICMP tunnel)");
+        if installed {
             match load_config() {
                 Ok(cfg) => {
                     let role = get_string(&cfg, "type").unwrap_or("server");
-                    let mode = if get_number(&cfg, "tcp", 1).unwrap_or(1) == 1 { "TCP" } else { "UDP" };
-                    let ha_mode = if ha::is_enabled(&cfg) { "Auto HA" } else { "Single-path" };
-                    println!("  Role: {role}   Traffic: {mode}   Routing: {ha_mode}");
+                    let protocol = if get_number(&cfg, "tcp", 1).unwrap_or(1) == 0 { "UDP" } else { "TCP" };
+                    println!("  Role: {role}   Forwarded traffic: {protocol}");
                 }
-                Err(e) => eprintln!("Configuration needs attention: {e}"),
+                Err(error) => eprintln!("  Config problem: {error}"),
             }
+        } else {
+            println!("  First setup: option 6 pairs your two VPS servers.");
         }
-        println!("1) Status       2) Start          3) Stop          4) Restart");
-        println!("5) Logs         6) Easy setup     7) Advanced config");
-        println!("8) TCP / UDP    9) Add HA backup 10) HA status    11) Disable HA");
-        println!("12) Validate    13) Update       14) Uninstall    15) Exit");
-        println!("16) Expert settings (JSON editor + auto-apply)");
-        let choice = prompt("Choose option", if installed { "1" } else { "6" })?;
+        println!("1) Status       2) Start        3) Stop         4) Restart");
+        println!("5) Logs         6) Easy setup   7) Settings     8) TCP / UDP");
+        println!("9) Validate    10) Update      11) Uninstall  12) Expert editor");
+        println!("13) Exit");
+        let choice = prompt("Choose", if installed { "1" } else { "6" })?;
         let action = match choice.as_str() {
             "1" => run_systemctl(&["status", "pingtunnel.service", "--no-pager"]),
             "2" => run_systemctl(&["start", "pingtunnel.service"]),
@@ -495,25 +491,21 @@ fn menu() -> Result<()> {
             "6" => setup::wizard(),
             "7" => configure(),
             "8" => setup::protocol_menu(),
-            "9" => ha_setup_apply(),
-            "10" => ha::show_status(),
-            "11" => setup::ha_disable(),
-            "12" => match load_config() {
+            "9" => match load_config() {
                 Ok(_) => { println!("Configuration OK."); Ok(()) },
-                Err(e) => Err(e)
+                Err(error) => Err(error),
             },
-            "13" => update(),
-            "14" => return uninstall(false),
-            "15" | "q" | "Q" => return Ok(()),
-            "16" => edit_config(),
+            "10" => update(),
+            "11" => uninstall(false),
+            "12" => edit_config(),
+            "13" | "q" | "Q" => return Ok(()),
             _ => {
-                println!("Unknown option. Use 1..15.");
+                println!("Unknown option; choose 1..13.");
                 continue;
             }
         };
         if let Err(error) = action {
             eprintln!("Operation failed: {error}");
-            // One invalid setting should never exit the interactive menu.
         }
     }
 }
