@@ -62,7 +62,7 @@ type Server struct {
 	recvPacket       atomic.Uint64
 	sendPacketSize   atomic.Uint64
 	recvPacketSize   atomic.Uint64
-	localConnMapSize int
+	localConnMapSize atomic.Int64
 
 	processtp   *thread.ThreadPool
 	recvcontrol chan int
@@ -85,8 +85,8 @@ type ServerConn struct {
 	rproto         int
 	fm             *network.FrameMgr
 	tcpmode        int
-	echoId         int
-	echoSeq        int
+	echoId         atomic.Int64
+	echoSeq        atomic.Int64
 	activity       chan struct{}
 }
 
@@ -196,8 +196,8 @@ func (p *Server) processDataPacketNewConn(id string, packet *Packet) *ServerConn
 
 	loggo.Info("start add new connect  %s %s", id, packet.my.Target)
 
-	if p.maxconn > 0 && p.localConnMapSize >= p.maxconn {
-		loggo.Info("too many connections %d, server connected target fail %s", p.localConnMapSize, packet.my.Target)
+	if p.maxconn > 0 && p.localConnMapSize.Load() >= int64(p.maxconn) {
+		loggo.Info("too many connections %d, server connected target fail %s", p.localConnMapSize.Load(), packet.my.Target)
 		p.remoteError(packet.echoId, packet.echoSeq, id, (int)(packet.my.Rproto), packet.src)
 		return nil
 	}
@@ -318,8 +318,8 @@ func (p *Server) processDataPacket(packet *Packet) {
 	}
 
 	localConn.activeRecvUnixNano.Store(now.UnixNano())
-	localConn.echoId = packet.echoId
-	localConn.echoSeq = packet.echoSeq
+	localConn.echoId.Store(int64(packet.echoId))
+	localConn.echoSeq.Store(int64(packet.echoSeq))
 
 	if packet.my.Type == (int32)(MyMsg_DATA) {
 
@@ -399,7 +399,7 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
 		for e := sendlist.Front(); e != nil; e = e.Next() {
 			f := e.Value.(*network.Frame)
 			mb, _ := conn.fm.MarshalFrame(f)
-			sendICMP(conn.echoId, conn.echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
+			sendICMP(int(conn.echoId.Load()), int(conn.echoSeq.Load()), *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
 				conn.rproto, -1, p.key, 0,
 				0, 0, 0, 0, 0,
 				0, p.cryptoConfig)
@@ -411,7 +411,7 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
 		if diffclose > time.Second*5 {
 			loggo.Info("can not connect remote tcp %s %s", conn.id, conn.tcpaddrTarget.String())
 			p.close(conn)
-			p.remoteError(conn.echoId, conn.echoSeq, id, conn.rproto, src)
+			p.remoteError(int(conn.echoId.Load()), int(conn.echoSeq.Load()), id, conn.rproto, src)
 			return
 		}
 		if hadWork {
@@ -501,7 +501,7 @@ mainLoop:
 					loggo.Error("Error tcp Marshal %s %s %s", conn.id, conn.tcpaddrTarget.String(), err)
 					continue
 				}
-				sendICMP(conn.echoId, conn.echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
+				sendICMP(int(conn.echoId.Load()), int(conn.echoSeq.Load()), *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
 					conn.rproto, -1, p.key, 0,
 					0, 0, 0, 0, 0,
 					0, p.cryptoConfig)
@@ -587,7 +587,7 @@ mainLoop:
 		for e := sendlist.Front(); e != nil; e = e.Next() {
 			f := e.Value.(*network.Frame)
 			mb, _ := conn.fm.MarshalFrame(f)
-			sendICMP(conn.echoId, conn.echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
+			sendICMP(int(conn.echoId.Load()), int(conn.echoSeq.Load()), *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
 				conn.rproto, -1, p.key, 0,
 				0, 0, 0, 0, 0,
 				0, p.cryptoConfig)
@@ -673,7 +673,7 @@ func (p *Server) Recv(conn *ServerConn, id string, src *net.IPAddr) {
 			payload = parsedPayload
 		}
 
-		sendICMP(conn.echoId, conn.echoSeq, *p.conn, src, targetAddr, id, (uint32)(MyMsg_DATA), payload,
+		sendICMP(int(conn.echoId.Load()), int(conn.echoSeq.Load()), *p.conn, src, targetAddr, id, (uint32)(MyMsg_DATA), payload,
 			conn.rproto, -1, p.key, 0,
 			0, 0, 0, 0, 0,
 			0, p.cryptoConfig)
@@ -756,13 +756,13 @@ func sameUDPAddr(a *net.UDPAddr, b *net.UDPAddr) bool {
 }
 
 func (p *Server) showNet() {
-	p.localConnMapSize = 0
+	p.localConnMapSize.Store(0)
 	p.localConnMap.Range(func(key, value interface{}) bool {
-		p.localConnMapSize++
+		p.localConnMapSize.Add(1)
 		return true
 	})
 	loggo.Info("send %dPacket/s %dKB/s recv %dPacket/s %dKB/s %dConnections",
-		p.sendPacket.Load(), p.sendPacketSize.Load()/1024, p.recvPacket.Load(), p.recvPacketSize.Load()/1024, p.localConnMapSize)
+		p.sendPacket.Load(), p.sendPacketSize.Load()/1024, p.recvPacket.Load(), p.recvPacketSize.Load()/1024, p.localConnMapSize.Load())
 	p.sendPacket.Store(0)
 	p.recvPacket.Store(0)
 	p.sendPacketSize.Store(0)
