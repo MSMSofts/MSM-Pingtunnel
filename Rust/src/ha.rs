@@ -563,6 +563,28 @@ mod tests {
     }
 
     #[test]
+    fn udp_core_data_uses_udp_probe_stays_tcp() {
+        let mut config = cfg();
+        config["tcp"] = json!(0);
+        let settings = parse(&config).unwrap();
+        assert!(!settings.tcp);
+        assert_eq!(core_json(&settings, &settings.routes[0], false)["tcp"], 0);
+        assert_eq!(core_json(&settings, &settings.routes[0], true)["tcp"], 1);
+        assert_eq!(status_json(&settings, &RouterState {
+            active: None, switches: 0, last_switch: Instant::now(),
+            health: vec![Health::default(); settings.routes.len()]
+        })["protocol"], "udp");
+    }
+
+    #[test]
+    fn udp_requires_real_health_probes() {
+        let mut config = cfg();
+        config["tcp"] = json!(0);
+        config["ha"]["probe_enabled"] = json!(false);
+        assert!(parse(&config).is_err());
+    }
+
+    #[test]
     fn validate_ha_settings() {
         let settings = parse(&cfg()).unwrap();
         assert_eq!(settings.routes.len(), 2);
