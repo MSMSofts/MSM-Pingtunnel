@@ -497,6 +497,7 @@ fn menu() -> Result<()> {
         println!("5) Logs         6) Easy setup     7) Advanced config");
         println!("8) TCP / UDP    9) Add HA backup 10) HA status    11) Disable HA");
         println!("12) Validate    13) Update       14) Uninstall    15) Exit");
+        println!("16) Expert settings (JSON editor + auto-apply)");
         let choice = prompt("Choose option", if installed { "1" } else { "6" })?;
         let action = match choice.as_str() {
             "1" => run_systemctl(&["status", "pingtunnel.service", "--no-pager"]),
@@ -517,6 +518,7 @@ fn menu() -> Result<()> {
             "13" => update(),
             "14" => return uninstall(false),
             "15" | "q" | "Q" => return Ok(()),
+            "16" => edit_config(),
             _ => {
                 println!("Unknown option. Use 1..15.");
                 continue;
