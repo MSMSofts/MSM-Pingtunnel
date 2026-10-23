@@ -301,7 +301,8 @@ async fn probe_route(settings: &Settings, route: &Route) -> Option<u64> {
 }
 
 fn update_health(state: &mut RouterState, index: usize, latency: Option<u64>,
-                 settings: &Settings, now: Instant) {
+                 settings: &Settings) {
+    let is_startup = state.active.is_none();
     let h = &mut state.health[index];
     match latency {
         Some(ms) => {
@@ -309,7 +310,11 @@ fn update_health(state: &mut RouterState, index: usize, latency: Option<u64>,
             h.smoothed_ms = Some(h.smoothed_ms.map_or(ms as f64, |v| v * 0.65 + ms as f64 * 0.35));
             h.success_streak = h.success_streak.saturating_add(1);
             h.failure_streak = 0;
-            if h.success_streak >= settings.success_threshold {
+            // First successful end-to-end probe can bring up the first path
+            // promptly. Established routes still require repeated successes.
+            if h.success_streak >= settings.success_threshold
+                || (is_startup && h.success_streak > 0)
+            {
                 h.good = true;
             }
         }
@@ -323,9 +328,6 @@ fn update_health(state: &mut RouterState, index: usize, latency: Option<u64>,
             }
         }
     }
-    // Failover is immediate once a backup is healthy. Changing on a small
-    // latency improvement requires repeated proof and a cooldown.
-    select_route(state, settings, now);
 }
 
 fn select_route(state: &mut RouterState, settings: &Settings, now: Instant) {
@@ -396,19 +398,25 @@ async fn monitor(settings: Settings, state: Arc<Mutex<RouterState>>) {
             let config = settings.clone();
             probes.spawn(async move { (i, probe_route(&config, &route).await) });
         }
+        let mut measurements = Vec::with_capacity(settings.routes.len());
         while let Some(result) = probes.join_next().await {
             if let Ok((i, latency)) = result {
-                let now = Instant::now();
-                let snapshot = {
-                    let mut guard = state.lock().unwrap();
-                    update_health(&mut guard, i, latency, &settings, now);
-                    status_json(&settings, &guard)
-                };
-                if let Ok(data) = serde_json::to_vec_pretty(&snapshot) {
-                    if let Err(error) = atomic_save(Path::new(STATUS), &data, 0o600) {
-                        eprintln!("HA: status write error: {error}");
-                    }
-                }
+                measurements.push((i, latency));
+            }
+        }
+        // Evaluate once per FULL measurement round; otherwise a 3-round
+        // hysteresis could accidentally finish in 1-2 rounds.
+        let snapshot = {
+            let mut guard = state.lock().unwrap();
+            for (i, latency) in measurements {
+                update_health(&mut guard, i, latency, &settings);
+            }
+            select_route(&mut guard, &settings, Instant::now());
+            status_json(&settings, &guard)
+        };
+        if let Ok(data) = serde_json::to_vec_pretty(&snapshot) {
+            if let Err(error) = atomic_save(Path::new(STATUS), &data, 0o600) {
+                eprintln!("HA: status write error: {error}");
             }
         }
     }
@@ -560,8 +568,45 @@ mod tests {
         state.health[1].good = true;
         state.health[1].smoothed_ms = Some(30.0);
         state.health[0].smoothed_ms = Some(40.0);
-        update_health(&mut state, 0, None, &settings, now);
-        update_health(&mut state, 0, None, &settings, now);
+        update_health(&mut state, 0, None, &settings);
+        update_health(&mut state, 0, None, &settings);
+        select_route(&mut state, &settings, now);
+        assert_eq!(state.active, Some(1));
+    }
+
+    #[test]
+    fn warmup_uses_first_successful_end_to_end_probe() {
+        let settings = parse(&cfg()).unwrap();
+        let now = Instant::now();
+        let mut state = RouterState {
+            active: None, switches: 0, last_switch: now,
+            health: vec![Health::default(), Health::default()]
+        };
+        update_health(&mut state, 1, Some(52), &settings);
+        select_route(&mut state, &settings, now);
+        assert_eq!(state.active, Some(1));
+    }
+
+    #[test]
+    fn improved_latency_requires_three_full_rounds() {
+        let settings = parse(&cfg()).unwrap();
+        let now = Instant::now();
+        let mut state = RouterState {
+            active: Some(0),
+            switches: 0,
+            last_switch: now - Duration::from_secs(300),
+            health: vec![Health::default(), Health::default()]
+        };
+        state.health[0].good = true;
+        state.health[0].smoothed_ms = Some(500.0);
+        state.health[1].good = true;
+        state.health[1].smoothed_ms = Some(80.0);
+        for round in 0..settings.switch_streak {
+            select_route(&mut state, &settings, now);
+            if round + 1 < settings.switch_streak {
+                assert_eq!(state.active, Some(0));
+            }
+        }
         assert_eq!(state.active, Some(1));
     }
 
