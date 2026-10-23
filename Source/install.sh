@@ -120,7 +120,12 @@ rollback() {
   if (( had_dropin )); then mkdir -p "$(dirname "$DROPIN")"; cp -a "$work/old-dropin" "$DROPIN"; else rm -f "$DROPIN"; fi
   if (( had_config )); then cp -a "$work/old-config" "$CONFIG"; fi
   systemctl daemon-reload || true
-  if (( previously_active )); then systemctl restart pingtunnel.service || true; fi
+  if (( previously_active )); then
+    systemctl restart pingtunnel.service || true
+  else
+    # Restore the pre-update stopped state if this was an offline service.
+    systemctl stop pingtunnel.service || true
+  fi
   exit "$code"
 }
 manager_new=""
