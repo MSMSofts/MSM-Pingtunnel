@@ -8,7 +8,6 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command, Stdio};
 
-mod ha;
 mod setup;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -102,7 +101,6 @@ fn validate(cfg: &Value) -> Result<()> {
             }
         }
     }
-    ha::validate(cfg)?;
     Ok(())
 }
 
@@ -143,6 +141,46 @@ fn store_config(cfg: &Value) -> Result<()> {
     let mut json = serde_json::to_vec_pretty(cfg)?;
     json.push(b'\n');
     atomic_save(&config_path(), &json, 0o600)
+}
+
+// Compatibility-only: convert legacy HA configurations to the sole direct route.
+// Keep the original authentication key, forwarding port, target and TCP/UDP mode.
+fn strip_legacy_multi_route(cfg: &mut Value) -> bool {
+    let previous_primary = cfg.get("ha")
+        .and_then(|v| v.get("endpoints"))
+        .and_then(Value::as_array)
+        .and_then(|v| v.first())
+        .and_then(|v| v.get("server"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let Some(obj) = cfg.as_object_mut() else { return false };
+    if obj.remove("ha").is_none() { return false; }
+    let missing_server = obj.get("server").and_then(Value::as_str)
+        .map(|v| v.trim().is_empty()).unwrap_or(true);
+    if missing_server && obj.get("type").and_then(Value::as_str) == Some("client") {
+        if let Some(server) = previous_primary {
+            obj.insert("server".into(), Value::String(server));
+        }
+    }
+    true
+}
+
+fn migrate_legacy_multi_route() -> Result<bool> {
+    root_required()?;
+    if !config_path().exists() { return Ok(false); }
+    let original = fs::read(config_path())?;
+    let mut cfg: Value = serde_json::from_slice(&original)?;
+    if !strip_legacy_multi_route(&mut cfg) { return Ok(false); }
+    validate(&cfg)?;
+    // Safe one-time snapshot with restrictive permissions.
+    let backup = PathBuf::from(format!("{CONFIG}.before-single-route.bak"));
+    if !backup.exists() {
+        atomic_save(&backup, &original, 0o600)?;
+    }
+    store_config(&cfg)?;
+    println!("Legacy multi-route settings converted to a single direct tunnel.");
+    println!("Backup: {}", backup.display());
+    Ok(true)
 }
 
 fn core_binary(cfg: &Value) -> PathBuf {
@@ -191,9 +229,6 @@ fn core_args(cfg: &Value) -> Result<Vec<String>> {
 
 fn run_core(dry_run: bool) -> Result<()> {
     let cfg = load_config()?;
-    if ha::is_enabled(&cfg) && !dry_run {
-        return Err(failure("HA mode requires 'pingtunnel ha-run' (systemd service)."));
-    }
     let bin = core_binary(&cfg);
     if !bin.is_file() {
         return Err(failure(format!("Core binary is missing: {}", bin.display())));
@@ -305,6 +340,7 @@ fn configure() -> Result<()> {
 
 fn service_install() -> Result<()> {
     root_required()?;
+    migrate_legacy_multi_route()?;
     let cfg = load_config()?;
     if !Path::new("/run/systemd/system").exists() {
         return Err(failure("systemd is not running on this host."));
@@ -335,10 +371,8 @@ SyslogIdentifier=pingtunnel
 [Install]
 WantedBy=multi-user.target
 "#;
-    let run_command = if ha::is_enabled(&cfg) { "ha-run" } else { "run" };
-    let unit = service.replace("ExecStart=/usr/local/bin/pingtunnel run",
-        &format!("ExecStart=/usr/local/bin/pingtunnel {run_command}"));
-    atomic_save(Path::new(UNIT), unit.as_bytes(), 0o644)?;
+    // One direct ICMP route only; systemd supervises the Go core.
+    atomic_save(Path::new(UNIT), service.as_bytes(), 0o644)?;
     let memory = get_number(&cfg, "memory_mb", 0)?;
     if memory > 0 {
         let contents = format!("[Service]\nMemoryMax={memory}M\n");
@@ -353,11 +387,7 @@ WantedBy=multi-user.target
         // Preserve explicit start/stop choice. Do not auto-start a disabled service.
         run_systemctl(&["disable", "pingtunnel.service"])?;
     }
-    if ha::is_enabled(&cfg) {
-        println!("HA systemd unit installed; Rust controls TCP/UDP forwarding and health checks.");
-    } else {
-        println!("Native systemd unit installed; no resident manager process.");
-    }
+    println!("Single-route Go service installed; no resident Rust manager.");
     Ok(())
 }
 
@@ -453,10 +483,7 @@ fn help() {
     println!("  pingtunnel setup             First-run automatic wizard (minimum peer details)");
     println!("  pingtunnel configure         Advanced config in menu; applies immediately");
     println!("  pingtunnel protocol          Choose TCP/UDP in menu; applies immediately");
-    println!("  pingtunnel ha-off            Disable HA and apply immediately");
     println!("  pingtunnel service-install   Write a native systemd unit");
-    println!("  pingtunnel ha-setup          Add foreign backup endpoint (TCP or UDP)");
-    println!("  pingtunnel ha-status         Show real end-to-end route health and selection");
     println!("  pingtunnel validate          Validate configuration");
     println!("  pingtunnel dry-run           Show the generated core command with key redacted");
     println!("  pingtunnel start|stop|restart|status");
@@ -467,38 +494,34 @@ fn help() {
     println!("  pingtunnel run               Internal: exec() the Go tunnel core");
 }
 
-fn ha_setup_apply() -> Result<()> {
-    let mut cfg = load_config()?;
-    ha::setup(&mut cfg)?;
-    apply_config()
-}
-
 fn menu() -> Result<()> {
     root_required()?;
+    if migrate_legacy_multi_route()? {
+        apply_config()?;
+    }
     loop {
         let installed = config_path().exists();
         println!("\n╔══════════════════════════════════════════════╗");
         println!("║       Pingtunnel Manager {}              ║", env!("CARGO_PKG_VERSION"));
         println!("╚══════════════════════════════════════════════╝");
-        if !installed {
-            println!("No tunnel configuration yet. Choose 6 to connect your servers.");
-        } else {
+        println!("  Topology: Iran Client -> foreign Server (one ICMP tunnel)");
+        if installed {
             match load_config() {
                 Ok(cfg) => {
                     let role = get_string(&cfg, "type").unwrap_or("server");
-                    let mode = if get_number(&cfg, "tcp", 1).unwrap_or(1) == 1 { "TCP" } else { "UDP" };
-                    let ha_mode = if ha::is_enabled(&cfg) { "Auto HA" } else { "Single-path" };
-                    println!("  Role: {role}   Traffic: {mode}   Routing: {ha_mode}");
+                    let protocol = if get_number(&cfg, "tcp", 1).unwrap_or(1) == 0 { "UDP" } else { "TCP" };
+                    println!("  Role: {role}   Forwarded traffic: {protocol}");
                 }
-                Err(e) => eprintln!("Configuration needs attention: {e}"),
+                Err(error) => eprintln!("  Config problem: {error}"),
             }
+        } else {
+            println!("  First setup: option 6 pairs your two VPS servers.");
         }
-        println!("1) Status       2) Start          3) Stop          4) Restart");
-        println!("5) Logs         6) Easy setup     7) Advanced config");
-        println!("8) TCP / UDP    9) Add HA backup 10) HA status    11) Disable HA");
-        println!("12) Validate    13) Update       14) Uninstall    15) Exit");
-        println!("16) Expert settings (JSON editor + auto-apply)");
-        let choice = prompt("Choose option", if installed { "1" } else { "6" })?;
+        println!("1) Status       2) Start        3) Stop         4) Restart");
+        println!("5) Logs         6) Easy setup   7) Settings     8) TCP / UDP");
+        println!("9) Validate    10) Update      11) Uninstall  12) Expert editor");
+        println!("13) Exit");
+        let choice = prompt("Choose", if installed { "1" } else { "6" })?;
         let action = match choice.as_str() {
             "1" => run_systemctl(&["status", "pingtunnel.service", "--no-pager"]),
             "2" => run_systemctl(&["start", "pingtunnel.service"]),
@@ -508,25 +531,21 @@ fn menu() -> Result<()> {
             "6" => setup::wizard(),
             "7" => configure(),
             "8" => setup::protocol_menu(),
-            "9" => ha_setup_apply(),
-            "10" => ha::show_status(),
-            "11" => setup::ha_disable(),
-            "12" => match load_config() {
+            "9" => match load_config() {
                 Ok(_) => { println!("Configuration OK."); Ok(()) },
-                Err(e) => Err(e)
+                Err(error) => Err(error),
             },
-            "13" => update(),
-            "14" => return uninstall(false),
-            "15" | "q" | "Q" => return Ok(()),
-            "16" => edit_config(),
+            "10" => update(),
+            "11" => uninstall(false),
+            "12" => edit_config(),
+            "13" | "q" | "Q" => return Ok(()),
             _ => {
-                println!("Unknown option. Use 1..15.");
+                println!("Unknown option; choose 1..13.");
                 continue;
             }
         };
         if let Err(error) = action {
             eprintln!("Operation failed: {error}");
-            // One invalid setting should never exit the interactive menu.
         }
     }
 }
@@ -566,13 +585,10 @@ fn main_inner() -> Result<()> {
     let sub = args.first().map(String::as_str).unwrap_or("menu");
     match sub {
         "menu" => menu(),
+        "migrate" => { migrate_legacy_multi_route()?; Ok(()) },
         "setup" | "quick-setup" => setup::wizard(),
         "configure" | "config" => configure(),
         "protocol" => setup::protocol_menu(),
-        "ha-off" | "ha-disable" => setup::ha_disable(),
-        "ha-setup" => ha_setup_apply(),
-        "ha-status" => ha::show_status(),
-        "ha-run" => ha::run(load_config()?),
         "service-install" => service_install(),
         "validate" => {
             load_config()?;
@@ -615,6 +631,45 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn migration_keeps_primary_endpoint_and_forwarding_protocol() {
+        let mut cfg = json!({
+            "type":"client", "server":"foreign.example", "key":"1234",
+            "l_port":4455, "target":"127.0.0.1:443", "tcp":0,
+            "ha":{"enabled":true,"endpoints":[
+                {"name":"primary","server":"foreign.example"},
+                {"name":"backup","server":"another.example"}
+            ]}
+        });
+        assert!(strip_legacy_multi_route(&mut cfg));
+        assert!(cfg.get("ha").is_none());
+        assert_eq!(cfg["server"], "foreign.example");
+        assert_eq!(cfg["tcp"], 0);
+        assert_eq!(cfg["l_port"], 4455);
+        assert_eq!(cfg["target"], "127.0.0.1:443");
+        assert!(validate(&cfg).is_ok());
+        assert!(!strip_legacy_multi_route(&mut cfg));
+    }
+
+    #[test]
+    fn migration_recovers_missing_client_address_from_old_primary() {
+        let mut cfg = json!({
+            "type":"client", "key":"1234", "l_port":4455,
+            "ha":{"enabled":true,"endpoints":[{"server":"foreign.example"}]}
+        });
+        assert!(strip_legacy_multi_route(&mut cfg));
+        assert_eq!(cfg["server"], "foreign.example");
+        assert!(validate(&cfg).is_ok());
+    }
+
+    #[test]
+    fn direct_mode_supports_tcp_and_udp() {
+        let mut cfg = json!({"type":"client","key":"1234","server":"foreign.example","l_port":4455,"tcp":1});
+        assert!(validate(&cfg).is_ok());
+        cfg["tcp"] = json!(0);
+        assert!(validate(&cfg).is_ok());
+    }
 
     #[test]
     fn legacy_server_configuration() {
