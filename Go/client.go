@@ -125,10 +125,10 @@ type Client struct {
 	localAddrToConnMap sync.Map
 	localIdToConnMap   sync.Map
 
-	sendPacket             uint64
-	recvPacket             uint64
-	sendPacketSize         uint64
-	recvPacketSize         uint64
+	sendPacket             atomic.Uint64
+	recvPacket             atomic.Uint64
+	sendPacketSize         atomic.Uint64
+	recvPacketSize         atomic.Uint64
 	localAddrToConnMapSize int
 	localIdToConnMapSize   int
 
@@ -190,19 +190,19 @@ func (p *Client) RTT() time.Duration {
 }
 
 func (p *Client) RecvPacketSize() uint64 {
-	return p.recvPacketSize
+	return p.recvPacketSize.Load()
 }
 
 func (p *Client) SendPacketSize() uint64 {
-	return p.sendPacketSize
+	return p.sendPacketSize.Load()
 }
 
 func (p *Client) RecvPacket() uint64 {
-	return p.recvPacket
+	return p.recvPacket.Load()
 }
 
 func (p *Client) SendPacket() uint64 {
-	return p.sendPacket
+	return p.sendPacket.Load()
 }
 
 func (p *Client) LocalIdToConnMapSize() int {
@@ -469,8 +469,8 @@ func (p *Client) AcceptTcpConn(conn *net.TCPConn, targetAddr string) {
 				SEND_PROTO, RECV_PROTO, p.key,
 				p.tcpmode, perf.BufferBytes, perf.Window, perf.ResendMs, p.tcpmode_compress, p.tcpmode_stat,
 				p.timeout, p.cryptoConfig)
-			p.sendPacket++
-			p.sendPacketSize += (uint64)(len(mb))
+			p.sendPacket.Add(1)
+			p.sendPacketSize.Add(uint64(len(mb)))
 		}
 		now := common.GetNowUpdateInSecond()
 		diffclose := now.Sub(startConnectTime)
@@ -572,8 +572,8 @@ mainLoop:
 					SEND_PROTO, RECV_PROTO, p.key,
 					p.tcpmode, 0, 0, 0, 0, 0,
 					0, p.cryptoConfig)
-				p.sendPacket++
-				p.sendPacketSize += (uint64)(len(mb))
+				p.sendPacket.Add(1)
+				p.sendPacketSize.Add(uint64(len(mb)))
 			}
 			p.touchActivity()
 		}
@@ -661,8 +661,8 @@ mainLoop:
 				SEND_PROTO, RECV_PROTO, p.key,
 				p.tcpmode, 0, 0, 0, 0, 0,
 				0, p.cryptoConfig)
-			p.sendPacket++
-			p.sendPacketSize += (uint64)(len(mb))
+			p.sendPacket.Add(1)
+			p.sendPacketSize.Add(uint64(len(mb)))
 		}
 
 		nodatarecv := true
@@ -742,8 +742,8 @@ func (p *Client) Accept() error {
 
 		
 
-		p.sendPacket++
-		p.sendPacketSize += (uint64)(n)
+		p.sendPacket.Add(1)
+		p.sendPacketSize.Add(uint64(n))
 		p.touchActivity()
 	}
 	return nil
@@ -834,8 +834,8 @@ func (p *Client) processPacket(packet *Packet) {
 		}
 	}
 
-	p.recvPacket++
-	p.recvPacketSize += (uint64)(len(packet.my.Data))
+	p.recvPacket.Add(1)
+	p.recvPacketSize.Add(uint64(len(packet.my.Data)))
 	if packet.my.Type == (int32)(MyMsg_DATA) && len(packet.my.Data) > 0 {
 		p.touchActivity()
 	}
@@ -918,11 +918,11 @@ func (p *Client) showNet() {
 		return true
 	})
 	loggo.Info("send %dPacket/s %dKB/s recv %dPacket/s %dKB/s %d/%dConnections",
-		p.sendPacket, p.sendPacketSize/1024, p.recvPacket, p.recvPacketSize/1024, p.localAddrToConnMapSize, p.localIdToConnMapSize)
-	p.sendPacket = 0
-	p.recvPacket = 0
-	p.sendPacketSize = 0
-	p.recvPacketSize = 0
+		p.sendPacket.Load(), p.sendPacketSize.Load()/1024, p.recvPacket.Load(), p.recvPacketSize.Load()/1024, p.localAddrToConnMapSize, p.localIdToConnMapSize)
+	p.sendPacket.Store(0)
+	p.recvPacket.Store(0)
+	p.sendPacketSize.Store(0)
+	p.recvPacketSize.Store(0)
 }
 
 func (p *Client) AcceptSock5Conn(conn *net.TCPConn) {
@@ -1103,8 +1103,8 @@ func (p *Client) recvSock5UDP(relayConn *net.UDPConn, expectedIP net.IP, expecte
 			p.timeout, p.cryptoConfig)
 
 		
-		p.sendPacket++
-		p.sendPacketSize += (uint64)(len(payload))
+		p.sendPacket.Add(1)
+		p.sendPacketSize.Add(uint64(len(payload)))
 		p.touchActivity()
 	}
 }
