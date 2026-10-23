@@ -2,7 +2,7 @@
 set -e
 
 PYTHON_BIN="python3"
-INSTALLER_URL="https://raw.githubusercontent.com/hoseinlolready/Pingtunnel_manager/refs/heads/main/Source/Pingtunnel.py" 
+INSTALLER_URL="https://raw.githubusercontent.com/meysamrn/Pingtunnel_manager/main/Source/Pingtunnel.py" 
 INSTALLER_PATH="/usr/local/bin/install_pingtunnel.py"
 
 check_root() {
@@ -14,8 +14,8 @@ check_root() {
 
 download_installer() {
   echo "⬇️ Downloading Python installer..."
-  apt install python3 python3-pip wget curl -y
-  pip3 install colorama
+  apt-get update
+  apt-get install -y python3 python3-colorama curl ca-certificates
   curl -fsSL "$INSTALLER_URL" -o "$INSTALLER_PATH"
   chmod +x "$INSTALLER_PATH"
   echo "✅ Installer saved at $INSTALLER_PATH"

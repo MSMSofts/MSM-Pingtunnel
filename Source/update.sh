@@ -1,34 +1,27 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+# Refresh the manager installer and Pingtunnel binary without deleting config.
+set -Eeuo pipefail
+RAW_BASE="https://raw.githubusercontent.com/meysamrn/Pingtunnel_manager/main"
+if (( EUID != 0 )); then
+  echo "Run as root: sudo pingtunnel update" >&2
+  exit 1
+fi
 
-PYTHON_BIN="python3"
-INSTALLER_URL="https://raw.githubusercontent.com/hoseinlolready/Pingtunnel_manager/refs/heads/main/Source/Pingtunnel.py"
-INSTALLER_PATH="/usr/local/bin/updater_pingtunnel.py"
-
-check_root() {
-  if [ "$(id -u)" -ne 0 ]; then
-    echo "❌ Please run as root (sudo)."
-    exit 1
+was_active=0
+if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+  if systemctl is-active --quiet pingtunnel.service; then
+    was_active=1
+    systemctl stop pingtunnel.service
   fi
-}
+fi
 
-download_updater() {
-  echo "⬇️ Downloading Python updater..."
-  apt install python3 python3-pip wget curl -y
-  pip3 install colorama
-  curl -fsSL "$INSTALLER_URL" -o "$INSTALLER_PATH"
-  chmod +x "$INSTALLER_PATH"
-  echo "✅ Installer saved at $INSTALLER_PATH"
-}
+tmp_file="$(mktemp)"
+trap 'rm -f "$tmp_file"' EXIT
+curl --fail --location --silent --show-error --retry 3 \
+  "$RAW_BASE/Source/install.sh" -o "$tmp_file"
+bash "$tmp_file"
 
-updater_pingtunnel() {
-  check_root
-  download_updater
-  echo "🚀 Running Updater..."
-  pingtunnel stop
-  $PYTHON_BIN "$INSTALLER_PATH"
-  read -n 1 -s -r -p "Press any key to continue..."
-}
-
-echo "Starting To Update"
-updater_pingtunnel
+if (( was_active )); then
+  systemctl restart pingtunnel.service
+fi
+echo "Update finished. Existing configuration was preserved."

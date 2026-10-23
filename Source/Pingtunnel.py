@@ -15,9 +15,10 @@ PID_FILE = Path("/run/pingtunnel.pid")
 URLS = {
     "x86_64": "https://github.com/esrrhs/pingtunnel/releases/latest/download/pingtunnel_linux_amd64.zip",
     "amd64":  "https://github.com/esrrhs/pingtunnel/releases/latest/download/pingtunnel_linux_amd64.zip",
-    "amd":    "https://github.com/esrrhs/pingtunnel/releases/latest/download/pingtunnel_linux_arm.zip",
+    "armv7l": "https://github.com/esrrhs/pingtunnel/releases/latest/download/pingtunnel_linux_arm.zip",
     "aarch64":"https://github.com/esrrhs/pingtunnel/releases/latest/download/pingtunnel_linux_arm64.zip",
     "arm64":  "https://github.com/esrrhs/pingtunnel/releases/latest/download/pingtunnel_linux_arm64.zip",
+    "armv6l": "https://github.com/esrrhs/pingtunnel/releases/latest/download/pingtunnel_linux_arm.zip",
     "i386":   "https://github.com/esrrhs/pingtunnel/releases/latest/download/pingtunnel_linux_386.zip",
     "i686":   "https://github.com/esrrhs/pingtunnel/releases/latest/download/pingtunnel_linux_386.zip",
 }
@@ -36,9 +37,7 @@ def detect_download_url():
     m = platform.machine().lower()
     if m in URLS:
         return URLS[m]
-    if "arm" in m:
-        return URLS.get("arm64")
-    return URLS.get("x86_64")
+    return None
 
 def ensure_dirs():
     BIN_DIR.mkdir(parents=True, exist_ok=True)
@@ -65,10 +64,13 @@ def download_file(url, dest, tries=4):
 
 def safe_extract(zip_path, target_dir):
     with zipfile.ZipFile(zip_path, "r") as z:
+        root = target_dir.resolve()
         for member in z.namelist():
-            resolved = (target_dir / member).resolve()
-            if not str(resolved).startswith(str(target_dir.resolve())):
-                raise Exception("zip contains unsafe path: " + member)
+            resolved = (root / member).resolve()
+            try:
+                resolved.relative_to(root)
+            except ValueError:
+                raise ValueError("zip contains unsafe path: " + member)
         z.extractall(target_dir)
 
 def find_pingtunnel_binary():
@@ -170,6 +172,13 @@ def apply_systemd_mem(conf):
             except:
                 pass
 
+def safe_command_display(args):
+    display = list(args)
+    for index in range(len(display) - 1):
+        if display[index] in ("-key", "-encrypt-key"):
+            display[index + 1] = "[redacted]"
+    return " ".join(display)
+
 def monitor_loop():
     print("🔄 Running monitor loop... (Press Ctrl+C to exit)")
     conf = load_conf()
@@ -178,7 +187,7 @@ def monitor_loop():
     args = build_args(conf, binpath)
     log("monitor loop starting")
     while True:
-        log("starting: " + " ".join(args))
+        log("starting: " + safe_command_display(args))
         try:
             with open(LOG_FILE, "ab") as out:
                 p = subprocess.Popen(args, stdout=out, stderr=out)
@@ -196,7 +205,7 @@ def run_once():
     conf = load_conf()
     binpath = find_bin(conf)
     args = build_args(conf, binpath)
-    log("running: " + " ".join(args))
+    log("running: " + safe_command_display(args))
     with open(LOG_FILE, "ab") as out:
         p = subprocess.Popen(args, stdout=out, stderr=out)
         try:
@@ -250,9 +259,13 @@ def stop():
         subprocess.run(["pkill","-f","pingtunnel"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         log("pkill fallback used")
 
-def restart(): 
+def restart():
     print("🔄 Restarting the Tunnel")
-    subprocess.run(["systemctl","restart",UNIT])
+    if is_systemd_available():
+        subprocess.run(["systemctl", "restart", UNIT], check=True)
+    else:
+        stop()
+        start()
     print("▶ Tunnel has been restarted.")
     
 def status():
@@ -271,7 +284,7 @@ def status():
     subprocess.run(["pgrep","-fl","pingtunnel"])
 
 def logs(n=200):
-    print("🧾 Showing last {lines} log lines...")
+    print(f"🧾 Showing last {n} log lines...")
     if LOG_FILE.exists():
         subprocess.run(["tail","-n", str(n), str(LOG_FILE)])
     else:
@@ -283,7 +296,18 @@ def edit():
 
 def update():
     print("⬆️  Updating Pingtunnel to latest version...")
-    os.system('curl -Ls https://raw.githubusercontent.com/hoseinlolready/Pingtunnel_manager/refs/heads/main/Source/update.sh | bash')
+    if os.geteuid() != 0:
+        raise SystemExit("Run update as root (sudo pingtunnel update)")
+    url = "https://raw.githubusercontent.com/meysamrn/Pingtunnel_manager/main/Source/update.sh"
+    with tempfile.NamedTemporaryFile(suffix=".sh", delete=False) as tf:
+        path = Path(tf.name)
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": "Pingtunnel-Manager"})
+        with urllib.request.urlopen(request, timeout=30) as response, path.open("wb") as out:
+            shutil.copyfileobj(response, out)
+        subprocess.run(["bash", str(path)], check=True)
+    finally:
+        path.unlink(missing_ok=True)
     
 def uninstall():
     print("💣 Uninstalling Pingtunnel...")
@@ -329,10 +353,13 @@ def uninstall():
 
 def safe_extract(zipfile_path, target_dir):
     with zipfile.ZipFile(zipfile_path, "r") as z:
+        root = target_dir.resolve()
         for name in z.namelist():
-            resolved = (target_dir / name).resolve()
-            if not str(resolved).startswith(str(target_dir.resolve())):
-                raise Exception("unsafe zip")
+            resolved = (root / name).resolve()
+            try:
+                resolved.relative_to(root)
+            except ValueError:
+                raise ValueError("unsafe zip")
         z.extractall(target_dir)
 
 def clear():
@@ -466,6 +493,7 @@ def interactive_config():
     cfg["autostart"] = aut == "y"
     cfg["installed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
     CONFIG_PATH.write_text(json.dumps(cfg, indent=2))
+    CONFIG_PATH.chmod(0o600)
     print("Saved config to", CONFIG_PATH)
 
 def apply_memory_dropin(mem_mb):
@@ -490,15 +518,15 @@ def install_flow():
     url = detect_download_url()
     if not url:
         die("unsupported arch")
-    tmp = tempfile.mktemp(suffix=".zip")
-    print("Downloading pingtunnel:", url)
-    download_file(url, tmp)
-    print("Extracting...")
-    safe_extract(tmp, BIN_DIR)
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tf:
+        tmp = tf.name
     try:
-        os.remove(tmp)
-    except:
-        pass
+        print("Downloading pingtunnel:", url)
+        download_file(url, tmp)
+        print("Extracting...")
+        safe_extract(tmp, BIN_DIR)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
     binp = find_pingtunnel_binary()
     if not binp:
         die("could not find pingtunnel binary after extract")
@@ -515,9 +543,11 @@ def install_flow():
     write_systemd_unit()
     try:
         cfg = json.loads(CONFIG_PATH.read_text())
-        apply_memory_dropin(cfg.get("memory_mb", 0))
-    except:
-        pass
+        if not isinstance(cfg, dict):
+            raise ValueError("configuration must be a JSON object")
+    except (OSError, ValueError) as exc:
+        die("Invalid config at %s: %s" % (CONFIG_PATH, exc))
+    apply_memory_dropin(cfg.get("memory_mb", 0))
     if cfg.get("autostart"):
         if shutil.which("systemctl"):
             subprocess.run(["systemctl", "enable", SYSTEMD_UNIT], check=False)
