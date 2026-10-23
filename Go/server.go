@@ -114,6 +114,7 @@ func (p *Server) Run() error {
 			p.checkTimeoutConn()
 			p.showNet()
 			p.updateConnError()
+            if p.cryptoConfig!=nil {p.cryptoConfig.WriteSecureStatus("/run/pingtunnel-security.json")}
 			time.Sleep(time.Second)
 		}
 	}()
