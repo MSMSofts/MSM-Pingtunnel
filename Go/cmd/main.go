@@ -164,6 +164,7 @@ func main() {
 	conntt := flag.Int("conntt", 1000, "the connect call's timeout")
 	forward := flag.String("forward", "", "forward TCP traffic through proxy (socks5://host:port or http://host:port)")
 	congestion := flag.String("congestion", "bb", "congestion control algorithm: bb or empty")
+	region := ""
 	peerIP := ""
 	fixedTarget := ""
 	forwardProtocol := 0
@@ -195,6 +196,7 @@ func main() {
 			return
 		}
 
+		region = cfg.Region
 		peerIP = cfg.PeerIP
 		fixedTarget = cfg.FixedTarget
 		forwardProtocol = cfg.ForwardProtocol
@@ -327,6 +329,15 @@ func main() {
 			return
 		}
 	}
+
+    if encryptionMode==pingtunnel.AUTO {
+        // Always domain-separate the AES/XChaCha encryption and decryption
+        // keys by physical region, independent of future ICMP role reversal.
+        if err=cryptoConfig.BindRegion(region);err!=nil {
+            fmt.Fprintf(os.Stderr,"Invalid v3 pairing region: %v\n",err)
+            os.Exit(1)
+        }
+    }
 
 	level := loggo.LEVEL_INFO
 	if loggo.NameToLevel(*loglevel) >= 0 {
