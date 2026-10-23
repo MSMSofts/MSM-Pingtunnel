@@ -159,6 +159,11 @@ fn parse(cfg: &Value) -> Result<Settings> {
         });
     }
     let probe_enabled = ha.get("probe_enabled").and_then(Value::as_bool).unwrap_or(true);
+    // UDP data listeners cannot be probed by connecting a TCP socket.
+    // The separate end-to-end TCP/HTTPS probe is required to select UDP paths.
+    if protocol == 0 && !probe_enabled {
+        return Err(failure("UDP HA requires ha.probe_enabled=true (TCP/HTTPS ICMP health check)."));
+    }
     let probe_target = ha.get("probe_target").and_then(Value::as_str).unwrap_or("1.1.1.1:443").to_owned();
     let probe_domain = ha.get("probe_domain").and_then(Value::as_str).unwrap_or("one.one.one.one").to_owned();
     if !valid_target(&probe_target) || !valid_host(&probe_domain) {
