@@ -17,6 +17,8 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tokio::time::{interval, sleep, timeout, MissedTickBehavior};
 
+mod udp;
+
 const RUNTIME: &str = "/run/pingtunnel-ha";
 const STATUS: &str = "/run/pingtunnel-ha/status.json";
 const MIN_ROUTES: usize = 2;
@@ -35,6 +37,8 @@ struct Settings {
     listen: SocketAddr,
     target: String,
     key: i64,
+    tcp: bool,
+    udp_idle_seconds: u64,
     routes: Vec<Route>,
     probe_target: String,
     probe_domain: String,
@@ -91,8 +95,12 @@ fn parse(cfg: &Value) -> Result<Settings> {
     if !is_enabled(cfg) {
         return Err(failure("ha.enabled must be true."));
     }
-    if get_string(cfg, "type") != Some("client") || get_number(cfg, "tcp", 1)? != 1 {
-        return Err(failure("HA mode supports client TCP forwarding only (type=client, tcp=1)."));
+    if get_string(cfg, "type") != Some("client") {
+        return Err(failure("HA mode supports client role only."));
+    }
+    let protocol = get_number(cfg, "tcp", 1)?;
+    if protocol > 1 {
+        return Err(failure("HA tcp must be 1 (TCP) or 0 (UDP)."));
     }
     let listen_port = get_number(cfg, "l_port", 0)?;
     if listen_port == 0 || listen_port > 65535 {
@@ -166,13 +174,15 @@ fn parse(cfg: &Value) -> Result<Settings> {
     let switch_streak = ha.get("switch_streak").and_then(Value::as_u64).unwrap_or(3);
     let cooldown_seconds = ha.get("cooldown_seconds").and_then(Value::as_u64).unwrap_or(120);
     let max_connections = ha.get("max_connections").and_then(Value::as_u64).unwrap_or(256);
+    let udp_idle_seconds = ha.get("udp_idle_seconds").and_then(Value::as_u64).unwrap_or(90);
     if !(5..=300).contains(&check_seconds) || !(1..=10).contains(&failure_threshold)
         || !(1..=10).contains(&success_threshold) || !(1..=20).contains(&switch_streak)
-        || !(15..=3600).contains(&cooldown_seconds) || !(1..=10000).contains(&max_connections) {
+        || !(15..=3600).contains(&cooldown_seconds) || !(1..=10000).contains(&max_connections)
+        || !(5..=3600).contains(&udp_idle_seconds) {
         return Err(failure("HA checks/thresholds/limits outside supported bounds."));
     }
     Ok(Settings {
-        listen, target, key, routes, probe_target, probe_domain, probe_enabled,
+        listen, target, key, tcp: protocol == 1, udp_idle_seconds, routes, probe_target, probe_domain, probe_enabled,
         check_seconds, failure_threshold: failure_threshold as u32,
         success_threshold: success_threshold as u32, switch_streak: switch_streak as u32,
         cooldown_seconds, max_connections: max_connections as usize,
@@ -188,14 +198,14 @@ pub(crate) fn validate(cfg: &Value) -> Result<()> {
 
 pub(crate) fn setup(cfg: &mut Value) -> Result<()> {
     root_required()?;
-    if get_string(cfg, "type") != Some("client") || get_number(cfg, "tcp", 1)? != 1 {
-        return Err(failure("Set the existing config to client TCP before running ha-setup."));
+    if get_string(cfg, "type") != Some("client") || get_number(cfg, "tcp", 1)? > 1 {
+        return Err(failure("Configure a client with tcp=1 (TCP) or tcp=0 (UDP) before ha-setup."));
     }
     let primary = get_string(cfg, "server")
         .ok_or_else(|| failure("Set client server first with: sudo pingtunnel configure"))?
         .to_string();
     let mut line = String::new();
-    println!("HA warm-standby setup: direct ICMP with two foreign server endpoints.");
+    println!("HA warm-standby setup: TCP or UDP via direct ICMP with two foreign endpoints.");
     println!("Both foreign endpoints MUST be running the Go Pingtunnel server with the same numeric key.");
     println!("Original destination and config are preserved. An HA controller adds RAM overhead.");
     println!("WARNING: the HA listener uses 0.0.0.0 (same as the previous :port binding).");
@@ -226,7 +236,8 @@ pub(crate) fn setup(cfg: &mut Value) -> Result<()> {
         "success_threshold":2,
         "switch_streak":3,
         "cooldown_seconds":120,
-        "max_connections":256
+        "max_connections":256,
+        "udp_idle_seconds":90
     });
     validate(cfg)?;
     crate::store_config(cfg)?;
@@ -241,7 +252,7 @@ fn core_json(settings: &Settings, route: &Route, is_probe: bool) -> Value {
         "listen": format!("127.0.0.1:{}", if is_probe {route.probe_port} else {route.data_port}),
         "server":route.server,
         "target": if is_probe {settings.probe_target.as_str()} else {settings.target.as_str()},
-        "tcp":1,
+        "tcp": if is_probe || settings.tcp {1} else {0},
         "key": settings.key,
         "nolog":1,
         "noprint":1
@@ -366,16 +377,25 @@ fn change_route(state: &mut RouterState, index: usize, now: Instant) {
         for health in &mut state.health {
             health.better_streak = 0;
         }
-        eprintln!("HA: switched new TCP sessions to backend #{}", index + 1);
+        eprintln!("HA: switched new flows to backend #{}", index + 1);
     }
 }
 
 fn status_json(settings: &Settings, state: &RouterState) -> Value {
     json!({
         "active":state.active.map(|i| settings.routes[i].name.clone()),
+        "protocol":if settings.tcp {"tcp"} else {"udp"},
         "switches":state.switches,
-        "existing_sessions":"pinned to their original endpoint until closed",
-        "loss_of_existing_route":"existing TCP sessions cannot be migrated by Pingtunnel",
+        "existing_sessions":if settings.tcp {
+            "TCP streams stay pinned until close"
+        } else {
+            "UDP flows stay pinned until idle or their route fails"
+        },
+        "loss_of_existing_route":if settings.tcp {
+            "Established TCP sessions cannot migrate on failed ICMP route"
+        } else {
+            "UDP datagrams may be lost during health detection and failover"
+        },
         "routes":settings.routes.iter().enumerate().map(|(i,r)| json!({
             "name":r.name, "server":r.server, "healthy":state.health[i].good,
             "last_probe_ms":state.health[i].last_ms,
@@ -482,9 +502,13 @@ pub(crate) fn run(cfg: Value) -> Result<()> {
                 paths.push((route.name.clone(), write_core_config(&settings, route, true)?, true));
             }
         }
-        // Bind the stable public listener BEFORE starting backends, so the
-        // client-facing endpoint never changes when the internal active core does.
-        let listener = TcpListener::bind(settings.listen).await?;
+        // Bind the stable public TCP listener before starting the backends.
+        // UDP binds its own listening socket inside udp::serve.
+        let listener = if settings.tcp {
+            Some(TcpListener::bind(settings.listen).await?)
+        } else {
+            None
+        };
         let state = Arc::new(Mutex::new(RouterState {
             active: None,
             switches: 0,
@@ -497,8 +521,12 @@ pub(crate) fn run(cfg: Value) -> Result<()> {
             tokio::spawn(supervise(bin, file, label));
         }
         tokio::spawn(monitor(settings.clone(), state.clone()));
+        if !settings.tcp {
+            return udp::serve(settings, state).await;
+        }
+        let listener = listener.ok_or_else(|| failure("TCP listener missing"))?;
         let semaphore = Arc::new(Semaphore::new(settings.max_connections));
-        eprintln!("HA: listening at {} with {} warm Go endpoints; data streams are TCP only",
+        eprintln!("HA TCP: listening at {} with {} warm Go endpoints",
                   settings.listen, settings.routes.len());
         loop {
             let (client, _) = listener.accept().await?;
