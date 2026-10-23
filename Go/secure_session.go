@@ -89,6 +89,9 @@ type secureSession struct{
  pending *secureSession
  recent map[[16]byte]time.Time
  lastCandidate time.Time
+ queued []pendingICMP
+ queueBytes int
+ queueDrops uint64
 }
 func newSecureSession(root []byte, region string, preferred byte)*secureSession{
  s:=&secureSession{region:region,preferred:preferred}
@@ -410,12 +413,64 @@ func (s *secureSession) recoverIfStale(now time.Time,hasPendingTraffic bool)bool
  s.recoveries++
  return true
 }
+// Bounded 2 MiB / 256 frame / 12s queue for app packets generated while a
+// fresh X25519 session is negotiated. Oldest items are dropped explicitly and
+// counted rather than allocating unbounded memory or losing all UDP startup
+// datagrams. TCP reliability is still owned by its protocol's FrameMgr.
+type pendingICMP struct{
+ raw []byte
+ peer *net.IPAddr
+ id,seq,proto int
+ arrival time.Time
+}
+const (
+ pendingMaxFrames = 256
+ pendingMaxBytes = 2 * 1024 * 1024
+ pendingLifetime = 12 * time.Second
+)
+func (s *secureSession) queuePacket(msg pendingICMP) {
+ s.mu.Lock()
+ defer s.mu.Unlock()
+ if len(msg.raw)==0 || len(msg.raw)>10240 {s.queueDrops++;return}
+ msg.raw=append([]byte(nil),msg.raw...)
+ if msg.peer!=nil {
+  ip:=append(net.IP(nil),msg.peer.IP...)
+  msg.peer=&net.IPAddr{IP:ip,Zone:msg.peer.Zone}
+ }
+ msg.arrival=time.Now()
+ for len(s.queued)>0 && (len(s.queued)>=pendingMaxFrames || s.queueBytes+len(msg.raw)>pendingMaxBytes) {
+  s.queueBytes-=len(s.queued[0].raw)
+  s.queued[0]=pendingICMP{}
+  s.queued=s.queued[1:]
+  s.queueDrops++
+ }
+ s.queueBytes+=len(msg.raw)
+ s.queued=append(s.queued,msg)
+}
+func (s *secureSession) drainPending(now time.Time)[]pendingICMP{
+ s.mu.Lock()
+ defer s.mu.Unlock()
+ if s.state!=4{return nil}
+ pending:=s.queued
+ s.queued=nil
+ s.queueBytes=0
+ out:=pending[:0]
+ for _,p:=range pending {
+  if now.Sub(p.arrival)>pendingLifetime{s.queueDrops++;continue}
+  out=append(out,p)
+ }
+ return out
+}
+func (s *secureSession) pushBack(p pendingICMP) {
+ s.queuePacket(p)
+}
+
 type sessionStats struct{
  Secure bool
- ReplayDrops,AuthenticationFailures,Recoveries uint64
+ ReplayDrops,AuthenticationFailures,Recoveries,QueuedPackets,QueuedDrops uint64
 }
 func (s *secureSession) stats()sessionStats{
  s.mu.Lock();defer s.mu.Unlock()
  return sessionStats{Secure:s.state==4,ReplayDrops:s.replays,
-  AuthenticationFailures:s.errors,Recoveries:s.recoveries}
+  AuthenticationFailures:s.errors,Recoveries:s.recoveries,QueuedPackets:uint64(len(s.queued)),QueuedDrops:s.queueDrops}
 }
