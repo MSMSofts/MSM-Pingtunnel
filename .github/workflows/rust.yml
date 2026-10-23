@@ -22,6 +22,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Verify Bash installer syntax
+        run: bash -n Source/*.sh
       - run: cargo test --manifest-path Rust/Cargo.toml
   build:
     needs: test
