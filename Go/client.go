@@ -431,6 +431,25 @@ func (p *Client) AcceptTcpConn(conn *net.TCPConn, targetAddr string) {
 		return
 	}
 
+    // Wait for authenticated ephemeral X25519 before starting the reliable
+    // TCP stream handshake. Network recovery never silently falls back.
+    if p.cryptoConfig!=nil && p.cryptoConfig.sec!=nil {
+      timeout:=time.NewTimer(45*time.Second)
+      ticker:=time.NewTicker(100*time.Millisecond)
+      defer timeout.Stop()
+      defer ticker.Stop()
+      for !p.cryptoConfig.SecureReady() {
+        if p.exit.Load() {_=conn.Close();return}
+        select{
+        case <-timeout.C:
+          loggo.Error("TCP peer security handshake unavailable after 45s: %s",tcpsrcaddr)
+          _=conn.Close()
+          return
+        case <-ticker.C:
+        }
+      }
+    }
+
 	uuid := common.UniqueId()
 
     // One-time snapshot at accept: never mutate the live reliable frame
@@ -472,7 +491,7 @@ func (p *Client) AcceptTcpConn(conn *net.TCPConn, targetAddr string) {
 		}
 		now := common.GetNowUpdateInSecond()
 		diffclose := now.Sub(startConnectTime)
-		if diffclose > time.Second*5 {
+		if diffclose > time.Second*15 {
 			loggo.Info("can not connect remote tcp %s %s", uuid, tcpsrcaddr.String())
 			p.close(clientConn)
 			return
