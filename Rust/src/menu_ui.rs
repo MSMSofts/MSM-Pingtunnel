@@ -6,7 +6,7 @@ use std::env;
 use std::io::Write as _;
 use std::time::{Duration, Instant};
 use crossterm::{cursor, event::{self, Event, KeyCode, KeyEventKind, KeyModifiers}, execute, terminal::{self, ClearType, EnterAlternateScreen, LeaveAlternateScreen}};
-use crate::resource_monitor::Resources;
+use crate::resource_monitor::{Resources,ResourceMonitor};
 
 const INNER_WIDTH: usize = 66;
 
@@ -183,8 +183,8 @@ impl Drop for TerminalGuard {
 /// Keyboard polling keeps the input buffer intact while the 10s view refreshes.
 /// Actions run AFTER leaving raw mode, so the setup wizard and its hidden
 /// pairing-key prompt still have normal terminal behavior.
-pub(crate) fn choose<F>(mut draw:F, mut refresh:impl FnMut(), default:&str)->io::Result<String>
-where F:FnMut()->String
+pub(crate) fn choose<F>(monitor:&mut ResourceMonitor, mut draw:F, default:&str)->io::Result<String>
+where F:FnMut(Resources)->String
 {
     terminal::enable_raw_mode()?;
     let mut out=io::stdout();
@@ -197,7 +197,7 @@ where F:FnMut()->String
     let mut last=Instant::now();
 
     loop{
-        let display=draw();
+        let display=draw(monitor.current());
         execute!(out,cursor::MoveTo(0,0),terminal::Clear(ClearType::All))?;
         out.write_all(display.as_bytes())?;
         writeln!(out,"  {}",colored("  [1-14] Choose an action  ·  [Enter] Confirm  ·  [Esc] Exit","2",supports_color()))?;
@@ -222,7 +222,7 @@ where F:FnMut()->String
             }
         }
         if last.elapsed()>=Duration::from_secs(10){
-            refresh();
+            monitor.refresh();
             last=Instant::now();
         }
     }
