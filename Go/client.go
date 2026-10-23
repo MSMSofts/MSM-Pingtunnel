@@ -308,17 +308,27 @@ func (p *Client) Run() error {
 	}
 
 	if p.tcpmode > 0 {
-		go p.AcceptTcp()
-	} else {
-		go p.Accept()
-	}
+        go func(){
+          defer failOnUnexpectedWorkerExit("TCP listener",&p.exit)
+          if err:=p.AcceptTcp();err!=nil{loggo.Error("TCP listener error: %s",err)}
+        }()
+    } else {
+        go func(){
+          defer failOnUnexpectedWorkerExit("UDP listener",&p.exit)
+          if err:=p.Accept();err!=nil{loggo.Error("UDP listener error: %s",err)}
+        }()
+    }
 
 	recv := make(chan *Packet, 10000)
 	p.recvcontrol = make(chan int, 1)
-	go recvICMP(&p.workResultLock, &p.exit, *p.conn, recv, p.cryptoConfig)
+	go func(){
+  defer failOnUnexpectedWorkerExit("ICMP receiver",&p.exit)
+  recvICMP(&p.workResultLock,&p.exit,*p.conn,recv,p.cryptoConfig)
+ }()
 
 	go func() {
-		defer common.CrashLog()
+        defer common.CrashLog()
+        defer failOnUnexpectedWorkerExit("health ticker",&p.exit)
 
 		p.workResultLock.Add(1)
 		defer p.workResultLock.Done()
@@ -354,7 +364,8 @@ func (p *Client) Run() error {
 	}()
 
 	go func() {
-		defer common.CrashLog()
+        defer common.CrashLog()
+        defer failOnUnexpectedWorkerExit("ICMP dispatcher",&p.exit)
 
 		p.workResultLock.Add(1)
 		defer p.workResultLock.Done()
