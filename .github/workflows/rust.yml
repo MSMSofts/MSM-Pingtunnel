@@ -82,9 +82,12 @@ jobs:
           cp Go/*.go upstream/
           cp Go/cmd/main.go upstream/cmd/main.go
           cd upstream
-          gofmt -w crypto.go auto_crypto.go auto_crypto_test.go adaptive_performance.go adaptive_performance_test.go client.go server.go server_policy.go config.go pairing_v3_test.go cmd/main.go
+          gofmt -w crypto.go auto_crypto.go auto_crypto_test.go adaptive_performance.go adaptive_performance_test.go client.go server.go server_policy.go config.go pairing_v3_test.go secure_session.go secure_session_test.go pingtunnel.go cmd/main.go
       - name: Run upstream and auto crypto tests
-        run: cd upstream && go test ./...
+        run: |
+          cd upstream
+          go test ./...
+          go test -race -count=1 ./...
       - name: Build static modified Go core
         run: |
           mkdir -p dist
