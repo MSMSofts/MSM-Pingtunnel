@@ -8,6 +8,8 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command, Stdio};
 
+mod ha;
+
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 const CONFIG: &str = "/opt/pingtunnel/conf/config.json";
@@ -99,6 +101,7 @@ fn validate(cfg: &Value) -> Result<()> {
             }
         }
     }
+    ha::validate(cfg)?;
     Ok(())
 }
 
@@ -187,6 +190,9 @@ fn core_args(cfg: &Value) -> Result<Vec<String>> {
 
 fn run_core(dry_run: bool) -> Result<()> {
     let cfg = load_config()?;
+    if ha::is_enabled(&cfg) && !dry_run {
+        return Err(failure("HA mode requires 'pingtunnel ha-run' (systemd service)."));
+    }
     let bin = core_binary(&cfg);
     if !bin.is_file() {
         return Err(failure(format!("Core binary is missing: {}", bin.display())));
@@ -327,7 +333,10 @@ SyslogIdentifier=pingtunnel
 [Install]
 WantedBy=multi-user.target
 "#;
-    atomic_save(Path::new(UNIT), service.as_bytes(), 0o644)?;
+    let run_command = if ha::is_enabled(&cfg) { "ha-run" } else { "run" };
+    let unit = service.replace("ExecStart=/usr/local/bin/pingtunnel run",
+        &format!("ExecStart=/usr/local/bin/pingtunnel {run_command}"));
+    atomic_save(Path::new(UNIT), unit.as_bytes(), 0o644)?;
     let memory = get_number(&cfg, "memory_mb", 0)?;
     if memory > 0 {
         let contents = format!("[Service]\nMemoryMax={memory}M\n");
@@ -342,7 +351,11 @@ WantedBy=multi-user.target
         // Preserve explicit start/stop choice. Do not auto-start a disabled service.
         run_systemctl(&["disable", "pingtunnel.service"])?;
     }
-    println!("Native systemd unit installed; no resident manager process.");
+    if ha::is_enabled(&cfg) {
+        println!("HA systemd unit installed; Rust stays resident to proxy active TCP sessions.");
+    } else {
+        println!("Native systemd unit installed; no resident manager process.");
+    }
     Ok(())
 }
 
@@ -429,6 +442,8 @@ fn help() {
     println!("  pingtunnel                   Interactive menu");
     println!("  pingtunnel configure         Configure server/client (preserves legacy JSON)");
     println!("  pingtunnel service-install   Write a native systemd unit");
+    println!("  pingtunnel ha-setup          Configure warm-standby client TCP endpoints");
+    println!("  pingtunnel ha-status         Show real end-to-end route health and selection");
     println!("  pingtunnel validate          Validate configuration");
     println!("  pingtunnel dry-run           Show the generated core command with key redacted");
     println!("  pingtunnel start|stop|restart|status");
@@ -444,6 +459,7 @@ fn menu() -> Result<()> {
         println!("\n=== Pingtunnel Manager (Rust) ===");
         println!("1) Status   2) Start   3) Stop   4) Restart");
         println!("5) Logs     6) Configure   7) Update   8) Exit");
+        println!("9) HA Setup   10) HA Status");
         let choice = prompt("Choose", "1")?;
         match choice.as_str() {
             "1" => run_systemctl(&["status", "pingtunnel.service", "--no-pager"]),
@@ -454,6 +470,8 @@ fn menu() -> Result<()> {
             "6" => configure(),
             "7" => update(),
             "8" => return Ok(()),
+            "9" => { let mut cfg = load_config()?; ha::setup(&mut cfg) },
+            "10" => ha::show_status(),
             _ => {
                 println!("Unknown option.");
                 continue;
@@ -483,6 +501,12 @@ fn main_inner() -> Result<()> {
     match sub {
         "menu" => menu(),
         "configure" | "config" => configure(),
+        "ha-setup" => {
+            let mut cfg = load_config()?;
+            ha::setup(&mut cfg)
+        }
+        "ha-status" => ha::show_status(),
+        "ha-run" => ha::run(load_config()?),
         "service-install" => service_install(),
         "validate" => {
             load_config()?;
