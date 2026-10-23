@@ -132,14 +132,15 @@ pub(crate) fn render(view: &MenuView<'_>, color: bool, unicode: bool) -> String 
         );
     }
 
+    let unavailable=if unicode{"—"}else{"-"};
     let current_cpu=view.resources.cpu_percent
-        .map(|v|format!("{v:.1}%")).unwrap_or_else(||"—".into());
+        .map(|v|format!("{v:.1}%")).unwrap_or_else(||unavailable.into());
     let mean_cpu=view.resources.cpu_average
-        .map(|v|format!("{v:.1}%")).unwrap_or_else(||"—".into());
+        .map(|v|format!("{v:.1}%")).unwrap_or_else(||unavailable.into());
     let current_ram=view.resources.ram_mib
-        .map(|v|format!("{v:.1} MiB")).unwrap_or_else(||"—".into());
+        .map(|v|format!("{v:.1} MiB")).unwrap_or_else(||unavailable.into());
     let mean_ram=view.resources.ram_average
-        .map(|v|format!("{v:.1} MiB")).unwrap_or_else(||"—".into());
+        .map(|v|format!("{v:.1} MiB")).unwrap_or_else(||unavailable.into());
     let _=writeln!(out,"  {:<18}: {:<20} {}", "CPU (10s)",colored(&format!("{current_cpu:<20}"),"1;33",color),format!("Avg 60s: {mean_cpu}"));
     let _=writeln!(out,"  {:<18}: {:<20} {}", "RAM (RSS)",colored(&format!("{current_ram:<20}"),"1;35",color),format!("Avg 60s: {mean_ram}"));
     let _=writeln!(out,"  {}",colored("  LIVE  /  Refresh every 10s  /  CPU 100% = 1 vCPU", "2",color));
@@ -200,7 +201,7 @@ where F:FnMut(Resources)->String
         let display=draw(monitor.current());
         execute!(out,cursor::MoveTo(0,0),terminal::Clear(ClearType::All))?;
         out.write_all(display.as_bytes())?;
-        writeln!(out,"  {}",colored("  [1-14] Choose an action  ·  [Enter] Confirm  ·  [Esc] Exit","2",supports_color()))?;
+        writeln!(out,"  {}",colored("  [1-14] Choose an action  /  [Enter] Confirm  /  [Esc] Exit","2",supports_color()))?;
         write!(out,"  {} {}",colored(">","1;36",supports_color()),
             if entered.is_empty(){format!("[{default}]")}else{entered.clone()})?;
         out.flush()?;
@@ -304,7 +305,8 @@ mod tests {
         }
         v.resources=Resources::default();
         let inactive=render(&v,false,false);
-        assert!(inactive.contains("—"));
+        assert!(inactive.contains("-"));
+        assert!(!inactive.contains("—"));
     }
 
 }
