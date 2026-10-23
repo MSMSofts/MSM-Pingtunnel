@@ -2,15 +2,15 @@
 
 **یک تونل ICMP رمزنگاری‌شده، دو سرور، راه‌اندازی ساده و مدیریت سبک.**
 
-[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.2.2](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.2)
+[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.2.3](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.3)
 
-![Version](https://img.shields.io/badge/version-3.2.2-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.2.3-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml)
 
 **Pingtunnel Manager** ابزاری برای نصب، جفت‌سازی، مدیریت و پایش یک تونل مبتنی بر **ICMP** میان **یک VPS ایران و یک VPS خارج** است. ترافیک برنامه‌های TCP یا UDP ابتدا وارد سرور ایران می‌شود، از طریق ICMP رمزنگاری‌شده به سرور خارج می‌رسد و در نهایت به سرویس محلی موردنظر تحویل داده می‌شود.
 
 این پروژه **به‌تنهایی سرویس VPN یا جایگزین Hysteria 2، Xray و s-ui نیست**؛ بلکه لایهٔ انتقال میان دو سرور را فراهم می‌کند.
 
-> **نسخه فعلی: 3.2.2** — مدیریت با Rust، هستهٔ انتقال با Go، تنظیمات نسخه 3 و پروتکل رمزنگاری Wire v4. قابلیت تونل معکوس و تغییر خودکار جهت هنوز پیاده‌سازی نشده است.
+> **نسخه فعلی: 3.2.3** — مدیریت با Rust، هستهٔ انتقال با Go، تنظیمات نسخه 3 و پروتکل رمزنگاری Wire v4. قابلیت تونل معکوس و تغییر خودکار جهت هنوز پیاده‌سازی نشده است.
 
 ## چرا Pingtunnel Manager؟
 
@@ -82,7 +82,7 @@ curl -fsSL https://raw.githubusercontent.com/MSMSofts/Pingtunnel_manager/main/So
 sudo bash /tmp/pingtunnel-install.sh
 ~~~
 
-پیشنهاد می‌شود پیش از اجرای هر اسکریپت نصب اینترنتی، محتوای فایل دانلودشده را بررسی کنی. نصب‌کننده باینری‌های منتشرشدهٔ [v3.2.2](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.2) را همراه با SHA256 و Manifest بررسی می‌کند و قبل از جایگزینی فایل‌های موجود، تطابق نسخهٔ Manager، هسته Go و Wire Protocol را کنترل می‌کند.
+پیشنهاد می‌شود پیش از اجرای هر اسکریپت نصب اینترنتی، محتوای فایل دانلودشده را بررسی کنی. نصب‌کننده باینری‌های منتشرشدهٔ [v3.2.3](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.3) را همراه با SHA256 و Manifest بررسی می‌کند و قبل از جایگزینی فایل‌های موجود، تطابق نسخهٔ Manager، هسته Go و Wire Protocol را کنترل می‌کند.
 
 ### راه‌اندازی: ابتدا خارج، سپس ایران
 
@@ -120,12 +120,12 @@ sudo pingtunnel logs 100
 
 ## راهنمای منوی تعاملی جدید
 
-منوی اصلی با اجرای `sudo pingtunnel` باز می‌شود و در نسخه **3.2.2** به چهار بخش تقسیم شده است. بالای منو، موقعیت فیزیکی VPS، IP سرور مقابل، نوع ترافیک و **پورت همین سرور**، و وضعیت جاری سرویس systemd را می‌بینی. این خلاصه کلید رمزنگاری یا سایر اسرار را نمایش نمی‌دهد.
+منوی اصلی با اجرای `sudo pingtunnel` باز می‌شود و در نسخه **3.2.3** به چهار بخش تقسیم شده است. بالای منو، موقعیت فیزیکی VPS، IP سرور مقابل، نوع ترافیک و **پورت همین سرور**، و وضعیت جاری سرویس systemd را می‌بینی. این خلاصه کلید رمزنگاری یا سایر اسرار را نمایش نمی‌دهد.
 
 ~~~text
 +--------------------------------------------------------------------+
 |   PINGTUNNEL MANAGER                                               |
-|   SECURE ICMP TUNNEL  |  v3.2.2  |  Wire v4                        |
+|   SECURE ICMP TUNNEL  |  v3.2.3  |  Wire v4                        |
 +--------------------------------------------------------------------+
 
   TUNNEL OVERVIEW
@@ -193,6 +193,33 @@ sudo pingtunnel logs 100
 
 برای بررسی نتیجه از منو گزینه‌های **1، 13، 14 و 8** را ببین؛ یا `sudo pingtunnel status`، `sudo pingtunnel security`، `sudo pingtunnel health` و `sudo pingtunnel performance` را اجرا کن.
 
+### پایش زنده CPU و حافظه در منوی نسخه 3.2.3
+
+در بخش **LIVE TUNNEL OVERVIEW**، دقیقاً زیر `Service status` دو ردیف جدید دیده می‌شود:
+
+~~~text
+  Service status      : active
+  CPU (10s)           :  6.2%           Avg 60s:  5.1%
+  RAM (RSS)           : 31.8 MiB        Avg 60s: 30.4 MiB
+  LIVE / Refresh every 10s / CPU 100% = 1 vCPU
+~~~
+
+**اعداد بالا فقط نمونه نمایشی‌اند.** داده‌ها از فرایند واقعی **Go Core** که systemd به‌عنوان `MainPID` اجرا کرده، خوانده می‌شوند:
+
+- **CPU:** میزان زمان پردازش مصرف‌شده در فاصله دو نمونه ۱۰ ثانیه‌ای؛ **۱۰۰٪ معادل اشغال کامل یک vCPU** است. فرایندی که چند هسته استفاده کند می‌تواند بیش از ۱۰۰٪ نشان دهد.
+- **RAM:** حافظه `VmRSS` فرایند Go بر حسب MiB؛ نه مجموع مصرف کل VPS و نه حافظه مجازی رزروشده.
+- **Avg 60s:** میانگین غلتان حداکثر **شش نمونه آخر**. پس از بازکردن منو، میانگین تا تکمیل نمونه‌ها بر اساس نمونه‌های موجود است.
+- **سرویس خاموش / خطای خواندن:** به‌جای صفر غیرواقعی، نشانگر `—` نمایش داده می‌شود. با تغییر PID یا Restart، تاریخچه مربوط به فرایند قبلی کنار گذاشته می‌شود.
+- **رابط تعاملی:** در ترمینال واقعی، صفحه هر ۱۰ ثانیه بازترسیم می‌شود ولی متن گزینه‌ای که تایپ می‌کنی پاک نمی‌شود؛ `Enter` برای تأیید، `Backspace` برای اصلاح و `Esc` یا `q` برای خروج است. پیش از اجرای هر فرمان، حالت عادی ترمینال بازیابی می‌شود.
+- **حالت غیرتعاملی:** وقتی ورودی/خروجی پایپ باشد یا `TERM=dumb` تنظیم شده باشد، منو به ورودی خطی معمولی برمی‌گردد و بازترسیم خودکار انجام نمی‌شود.
+- **سربار:** فقط هنگام بازبودن منو، فایل‌های `/proc` خوانده می‌شوند؛ سرویس یا Agent پایش دائمی جدیدی ایجاد نشده است.
+
+### Restart خودکار بعد از Update
+
+گزینه **10 — Update** و اجرای `sudo pingtunnel update` از نصب‌کننده نسخه‌دار استفاده می‌کنند. از نسخه **3.2.3**، پس از نصب سالم Manager و Go Core روی VPS **دارای تنظیمات معتبر**، تونل **حتماً یک‌بار Restart می‌شود**؛ حتی اگر سرویس قبل از ارتقا متوقف یا غیرفعال بوده باشد. سپس وضعیت `MainPID` و Heartbeat ارزیابی می‌شود و در صورت خطای راه‌اندازی، نصب‌کننده به فایل‌های قبلی Rollback می‌کند.
+
+**توجه:** این کار اتصال‌های فعال VPN را موقتاً قطع می‌کند. سروری که هنوز Setup نشده، پس از نصب اولیه Start نمی‌شود. اگر سرویس را عمداً متوقف نگه داشته‌ای، پس از Update دیگر متوقف نخواهد ماند.
+
 ## فرمان‌های مدیریتی
 
 | فرمان | کاربرد |
@@ -238,9 +265,10 @@ sudo pingtunnel logs 100
 
 | نسخه | تنظیمات | پروتکل بین VPSها | سازگاری |
 | --- | --- | --- | --- |
-| **3.2.2** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | نسخه فعلی؛ بدون تغییر کلید و پروتکل |
-| **3.2.1** | `schema_version=3` | Wire v4 | نسخه قبلی؛ هم‌ساز با 3.2.2 |
-| **3.2.0** | `schema_version=3` | Wire v4 | با 3.2.2 سازگار در سطح پروتکل |
+| **3.2.3** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | نسخه فعلی؛ پایش زنده و Restart پس از Update |
+| **3.2.2** | `schema_version=3` | Wire v4 | نسخه قبلی؛ سازگار با 3.2.3 |
+| **3.2.1** | `schema_version=3` | Wire v4 | نسخه قبلی؛ هم‌ساز با 3.2.3 |
+| **3.2.0** | `schema_version=3` | Wire v4 | با 3.2.3 سازگار در سطح پروتکل |
 | **3.1.0** | `schema_version=3` | Wire v4 | پایه Forward Secrecy و Anti-Replay |
 | **3.0.0** | `schema_version=3` | قالب قدیمی `PTA1` | از نظر قالب تنظیمات قابل ارتقاست، اما با Wire v4 هم‌زمان متصل نمی‌شود |
 | **قبل از 3.0** | قالب قدیمی | قدیمی | مهاجرت خودکار پشتیبانی نمی‌شود |
@@ -249,7 +277,7 @@ sudo pingtunnel logs 100
 
 > **نکته پس از انتقال مخزن:** برای به‌روزرسانی، فعلاً از دستور نصب با نشانی جدید `MSMSofts/Pingtunnel_manager` در بخش «نصب سریع» استفاده کن. برخی باینری‌های منتشرشده پیش از انتقال، ممکن است در فرمان داخلی `pingtunnel update` هنوز به نشانی قدیمی مراجعه کنند.
 
-[جزئیات تغییرات](CHANGELOG.md) · [نسخه ثابت 3.2.2](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.2) · [نسخه rolling](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/rust-latest)
+[جزئیات تغییرات](CHANGELOG.md) · [نسخه ثابت 3.2.3](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.3) · [نسخه rolling](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/rust-latest)
 
 ## مسیر فایل‌ها
 
@@ -272,7 +300,7 @@ sudo pingtunnel logs 100
 
 ## محدودیت‌های فعلی و برنامه توسعه
 
-**در نسخه 3.2.2 وجود ندارند:** تونل معکوس واقعی (Reverse Forwarding)، انتخاب خودکار Direct/Reverse، HA، چند VPS، انتقال هم‌زمان TCP و UDP در یک نمونه تونل، تضمین مقابله با DoS حجمی، و Forward Secrecy فراتر از فرضیات امنیتی نشست‌های X25519.
+**در نسخه 3.2.3 وجود ندارند:** تونل معکوس واقعی (Reverse Forwarding)، انتخاب خودکار Direct/Reverse، HA، چند VPS، انتقال هم‌زمان TCP و UDP در یک نمونه تونل، تضمین مقابله با DoS حجمی، و Forward Secrecy فراتر از فرضیات امنیتی نشست‌های X25519.
 
 **بررسی‌های ضروری پیش از استفاده گسترده:** آزمایش ICMP روی دو VPS واقعی، تست عملی Hysteria 2، تزریق Packet Loss/Jitter، آزمون Restart و ارتقای دوطرفه، و ممیزی مستقل پروتکل رمزنگاری.
 
