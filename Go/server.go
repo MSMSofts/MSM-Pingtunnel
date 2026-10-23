@@ -58,10 +58,10 @@ type Server struct {
 	localConnMap sync.Map
 	connErrorMap sync.Map
 
-	sendPacket       uint64
-	recvPacket       uint64
-	sendPacketSize   uint64
-	recvPacketSize   uint64
+	sendPacket       atomic.Uint64
+	recvPacket       atomic.Uint64
+	sendPacketSize   atomic.Uint64
+	recvPacketSize   atomic.Uint64
 	localConnMapSize int
 
 	processtp   *thread.ThreadPool
@@ -378,8 +378,8 @@ func (p *Server) processDataPacket(packet *Packet) {
 			}
 		}
 
-		p.recvPacket++
-		p.recvPacketSize += (uint64)(len(packet.my.Data))
+		p.recvPacket.Add(1)
+		p.recvPacketSize.Add(uint64(len(packet.my.Data)))
 	}
 }
 
@@ -409,8 +409,8 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
 				conn.rproto, -1, p.key, 0,
 				0, 0, 0, 0, 0,
 				0, p.cryptoConfig)
-			p.sendPacket++
-			p.sendPacketSize += (uint64)(len(mb))
+			p.sendPacket.Add(1)
+			p.sendPacketSize.Add(uint64(len(mb)))
 		}
 		now := common.GetNowUpdateInSecond()
 		diffclose := now.Sub(startConnectTime)
@@ -511,8 +511,8 @@ mainLoop:
 					conn.rproto, -1, p.key, 0,
 					0, 0, 0, 0, 0,
 					0, p.cryptoConfig)
-				p.sendPacket++
-				p.sendPacketSize += (uint64)(len(mb))
+				p.sendPacket.Add(1)
+				p.sendPacketSize.Add(uint64(len(mb)))
 			}
 		}
 
@@ -597,8 +597,8 @@ mainLoop:
 				conn.rproto, -1, p.key, 0,
 				0, 0, 0, 0, 0,
 				0, p.cryptoConfig)
-			p.sendPacket++
-			p.sendPacketSize += (uint64)(len(mb))
+			p.sendPacket.Add(1)
+			p.sendPacketSize.Add(uint64(len(mb)))
 		}
 
 		nodatarecv := true
@@ -684,8 +684,8 @@ func (p *Server) Recv(conn *ServerConn, id string, src *net.IPAddr) {
 			0, 0, 0, 0, 0,
 			0, p.cryptoConfig)
 
-		p.sendPacket++
-		p.sendPacketSize += (uint64)(len(payload))
+		p.sendPacket.Add(1)
+		p.sendPacketSize.Add(uint64(len(payload)))
 	}
 }
 
@@ -768,11 +768,11 @@ func (p *Server) showNet() {
 		return true
 	})
 	loggo.Info("send %dPacket/s %dKB/s recv %dPacket/s %dKB/s %dConnections",
-		p.sendPacket, p.sendPacketSize/1024, p.recvPacket, p.recvPacketSize/1024, p.localConnMapSize)
-	p.sendPacket = 0
-	p.recvPacket = 0
-	p.sendPacketSize = 0
-	p.recvPacketSize = 0
+		p.sendPacket.Load(), p.sendPacketSize.Load()/1024, p.recvPacket.Load(), p.recvPacketSize.Load()/1024, p.localConnMapSize)
+	p.sendPacket.Store(0)
+	p.recvPacket.Store(0)
+	p.sendPacketSize.Store(0)
+	p.recvPacketSize.Store(0)
 }
 
 func (p *Server) addServerConn(uuid string, serverConn *ServerConn) {
