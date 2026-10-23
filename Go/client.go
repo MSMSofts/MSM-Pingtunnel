@@ -471,7 +471,6 @@ func (p *Client) AcceptTcpConn(conn *net.TCPConn, targetAddr string) {
 		fm.SetCongestion(&network.BBCongestion{})
 	}
 
-	now := time.Now()
 	clientConn := &ClientConn{tcpaddr: tcpsrcaddr, id: uuid, tcpmode: p.tcpmode, activity: make(chan struct{}, 1),
 		fm:       fm}
 	p.addClientConn(uuid, tcpsrcaddr.String(), clientConn)
@@ -757,7 +756,7 @@ func (p *Client) Accept() error {
 				continue
 			}
 			uuid := common.UniqueId()
-			clientConn = &ClientConn{ipaddr: srcaddr, id: uuid, tcpmode: 0, close: false}
+			clientConn = &ClientConn{ipaddr: srcaddr, id: uuid, tcpmode: 0}
 			p.addClientConn(uuid, srcaddr.String(), clientConn)
 			loggo.Info("client accept new local udp %s %s", uuid, srcaddr.String())
 		}
