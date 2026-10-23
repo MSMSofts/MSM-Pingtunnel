@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::{self, Command, Stdio};
 
 mod setup;
+mod menu_ui;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -346,20 +347,45 @@ fn display_pair_key()->Result<()>{
     Ok(())
 }
 
+fn current_service_state() -> String {
+    // Status reporting must not require a functional tunnel or leak secrets.
+    match Command::new("systemctl")
+        .args(["is-active", "pingtunnel.service"])
+        .output()
+    {
+        Ok(result) => {
+            let state=String::from_utf8_lossy(&result.stdout);
+            match state.trim() {
+                "active" => "active".into(),
+                "inactive" => "inactive".into(),
+                "activating" => "activating".into(),
+                "deactivating" => "deactivating".into(),
+                "failed" => "failed".into(),
+                _ => "unavailable".into(),
+            }
+        }
+        Err(_) => "unavailable".into(),
+    }
+}
+
 fn menu()->Result<()>{
     root_required()?;
     loop{
         let cfg=load_config().ok();
-        println!("\nPingtunnel Manager v3 — single Iran/Foreign ICMP tunnel");
-        if let Some(c)=&cfg{
-            println!("Region: {} | Peer: {} | Forward: {}:{}",
-                get_string(c,"region").unwrap(),get_string(c,"peer_ip").unwrap(),
-                get_string(c,"transport").unwrap(),get_number(c,"port",0).unwrap_or(0));
-        }else{println!("Not configured for v3 — choose Setup.");}
-        println!("1) Status    2) Start     3) Stop      4) Restart");
-        println!("5) Logs      6) Setup     7) Pair key  8) Performance");
-        println!("9) Validate 10) Update   11) Uninstall 12) Exit  13) Security 14) Health");
-        let choice=prompt("Choose",if cfg.is_some(){"1"}else{"6"})?;
+        let view=menu_ui::MenuView {
+            version: env!("CARGO_PKG_VERSION"),
+            region:cfg.as_ref().and_then(|v|get_string(v,"region")).unwrap_or("unknown"),
+            peer:cfg.as_ref().and_then(|v|get_string(v,"peer_ip")).unwrap_or("-"),
+            transport:cfg.as_ref().and_then(|v|get_string(v,"transport")).unwrap_or("-"),
+            port:cfg.as_ref().and_then(|v|v.get("port")).and_then(Value::as_u64).and_then(|n|u16::try_from(n).ok()),
+            service:&current_service_state(),
+            configured:cfg.is_some(),
+        };
+        // No terminal control codes for pipes, logs, dumb terminals, or NO_COLOR.
+        print!("{}",menu_ui::render(
+            &view,menu_ui::supports_color(),menu_ui::supports_unicode()
+        ));
+        let choice=prompt("Choose option (1-14)",if cfg.is_some(){"1"}else{"6"})?;
         let action=match choice.as_str(){
             "1"=>run_systemctl(&["status","pingtunnel.service","--no-pager"]),
             "2"=>run_systemctl(&["start","pingtunnel.service"]),
@@ -372,10 +398,10 @@ fn menu()->Result<()>{
             "9"=>{load_config()?;println!("Version-3 config valid");Ok(())},
             "10"=>update(),
             "11"=>uninstall(false),
+            "12"|"q"|"Q"=>return Ok(()),
             "13"=>show_security_status(),
             "14"=>show_health(),
-            "12"|"q"|"Q"=>return Ok(()),
-            _=>{println!("Select 1..12");continue}
+            _=>{println!("Invalid choice. Select a number from 1 to 14.");continue}
         };
         if let Err(e)=action{eprintln!("Operation failed: {e}");}
     }
