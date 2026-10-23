@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - "Rust/**"
+      - "Go/**"
       - "Source/install.sh"
       - "Source/update.sh"
       - ".github/workflows/rust.yml"
@@ -10,6 +11,7 @@ on:
     branches: [main]
     paths:
       - "Rust/**"
+      - "Go/**"
       - "Source/install.sh"
       - "Source/update.sh"
       - ".github/workflows/rust.yml"
@@ -58,9 +60,48 @@ jobs:
           name: rust-linux-${{ matrix.arch }}
           path: dist/
           if-no-files-found: error
+  go-core:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.0'
+      - name: Clone pinned upstream Go core
+        run: |
+          git clone https://github.com/esrrhs/pingtunnel.git upstream
+          cd upstream
+          git checkout --detach df16e52771ee67f1f9770ec68763b425672a36fc
+          test "$(git rev-parse HEAD)" = "df16e52771ee67f1f9770ec68763b425672a36fc"
+      - name: Overlay Go crypto source and tests
+        run: |
+          cp Go/crypto.go upstream/crypto.go
+          cp Go/auto_crypto.go Go/auto_crypto_test.go upstream/
+          cd upstream
+          gofmt -w crypto.go auto_crypto.go auto_crypto_test.go
+      - name: Run upstream and auto crypto tests
+        run: cd upstream && go test ./...
+      - name: Build static modified Go core
+        run: |
+          mkdir -p dist
+          cd upstream
+          GOOS=linux GOARCH=${{ matrix.arch }} CGO_ENABLED=0 go build \
+            -trimpath -ldflags="-s -w" \
+            -o "../dist/pingtunnel-core-linux-${{ matrix.arch }}" ./cmd
+          cd ../dist
+          sha256sum "pingtunnel-core-linux-${{ matrix.arch }}" > "pingtunnel-core-linux-${{ matrix.arch }}.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: go-core-${{ matrix.arch }}
+          path: dist/
+          if-no-files-found: error
   release:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: build
+    needs: [build, go-core]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -70,10 +111,15 @@ jobs:
           pattern: rust-linux-*
           path: dist
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: go-core-*
+          path: dist
+          merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: rust-latest
-          name: Rust Manager (rolling release)
+          name: Pingtunnel Manager and Go core (rolling release)
           prerelease: false
           make_latest: false
           files: dist/*
