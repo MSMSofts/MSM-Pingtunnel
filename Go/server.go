@@ -197,8 +197,6 @@ func (p *Server) processPacket(packet *Packet) {
 
 func (p *Server) processDataPacketNewConn(id string, packet *Packet) *ServerConn {
 
-	now := common.GetNowUpdateInSecond()
-
 	loggo.Info("start add new connect  %s %s", id, packet.my.Target)
 
 	if p.maxconn > 0 && p.localConnMapSize.Load() >= int64(p.maxconn) {
