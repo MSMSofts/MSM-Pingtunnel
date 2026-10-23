@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use std::env;
 use std::error::Error;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{self, Command, Stdio};
 
 mod ha;
+mod setup;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -297,8 +298,9 @@ fn configure() -> Result<()> {
     let auto = prompt("Start on boot (y/n)", if enabled { "y" } else { "n" })?;
     cfg["autostart"] = json!(matches!(auto.to_lowercase().as_str(), "y" | "yes"));
     store_config(&cfg)?;
-    println!("Saved {CONFIG} (mode 0600). Apply changes: sudo pingtunnel service-install && sudo pingtunnel restart");
-    Ok(())
+    println!("Saved {CONFIG} (mode 0600). Applying changes automatically...");
+    apply_config()
+
 }
 
 fn service_install() -> Result<()> {
@@ -352,10 +354,18 @@ WantedBy=multi-user.target
         run_systemctl(&["disable", "pingtunnel.service"])?;
     }
     if ha::is_enabled(&cfg) {
-        println!("HA systemd unit installed; Rust stays resident to proxy active TCP sessions.");
+        println!("HA systemd unit installed; Rust controls TCP/UDP forwarding and health checks.");
     } else {
         println!("Native systemd unit installed; no resident manager process.");
     }
+    Ok(())
+}
+
+// All changes entered in a menu are applied immediately: systemd unit,
+// autostart and the active Go core are kept in sync with the saved settings.
+fn apply_config() -> Result<()> {
+    service_install()?;
+    run_systemctl(&["restart", "pingtunnel.service"])?;
     Ok(())
 }
 
@@ -376,8 +386,8 @@ fn edit_config() -> Result<()> {
         return Err(failure(format!("Edited config invalid ({error}); original restored.")));
     }
     fs::set_permissions(CONFIG, fs::Permissions::from_mode(0o600))?;
-    println!("Config valid. Apply with sudo pingtunnel service-install && sudo pingtunnel restart.");
-    Ok(())
+    println!("Config validated; applying new settings automatically.");
+    apply_config()
 }
 
 fn update() -> Result<()> {
@@ -440,9 +450,12 @@ fn uninstall(purge: bool) -> Result<()> {
 fn help() {
     println!("Pingtunnel Manager v{} (Rust)", env!("CARGO_PKG_VERSION"));
     println!("  pingtunnel                   Interactive menu");
-    println!("  pingtunnel configure         Configure server/client (preserves legacy JSON)");
+    println!("  pingtunnel setup             First-run automatic wizard (minimum peer details)");
+    println!("  pingtunnel configure         Advanced config in menu; applies immediately");
+    println!("  pingtunnel protocol          Choose TCP/UDP in menu; applies immediately");
+    println!("  pingtunnel ha-off            Disable HA and apply immediately");
     println!("  pingtunnel service-install   Write a native systemd unit");
-    println!("  pingtunnel ha-setup          Configure warm-standby client TCP endpoints");
+    println!("  pingtunnel ha-setup          Add foreign backup endpoint (TCP or UDP)");
     println!("  pingtunnel ha-status         Show real end-to-end route health and selection");
     println!("  pingtunnel validate          Validate configuration");
     println!("  pingtunnel dry-run           Show the generated core command with key redacted");
@@ -454,29 +467,62 @@ fn help() {
     println!("  pingtunnel run               Internal: exec() the Go tunnel core");
 }
 
+fn ha_setup_apply() -> Result<()> {
+    let mut cfg = load_config()?;
+    ha::setup(&mut cfg)?;
+    apply_config()
+}
+
 fn menu() -> Result<()> {
+    root_required()?;
     loop {
-        println!("\n=== Pingtunnel Manager (Rust) ===");
-        println!("1) Status   2) Start   3) Stop   4) Restart");
-        println!("5) Logs     6) Configure   7) Update   8) Exit");
-        println!("9) HA Setup   10) HA Status");
-        let choice = prompt("Choose", "1")?;
-        match choice.as_str() {
+        let installed = config_path().exists();
+        println!("\n╔══════════════════════════════════════════════╗");
+        println!("║       Pingtunnel Manager {}              ║", env!("CARGO_PKG_VERSION"));
+        println!("╚══════════════════════════════════════════════╝");
+        if !installed {
+            println!("No tunnel configuration yet. Choose 6 to connect your servers.");
+        } else {
+            match load_config() {
+                Ok(cfg) => {
+                    let role = get_string(&cfg, "type").unwrap_or("server");
+                    let mode = if get_number(&cfg, "tcp", 1).unwrap_or(1) == 1 { "TCP" } else { "UDP" };
+                    let ha_mode = if ha::is_enabled(&cfg) { "Auto HA" } else { "Single-path" };
+                    println!("  Role: {role}   Traffic: {mode}   Routing: {ha_mode}");
+                }
+                Err(e) => eprintln!("Configuration needs attention: {e}"),
+            }
+        }
+        println!("1) Status       2) Start          3) Stop          4) Restart");
+        println!("5) Logs         6) Easy setup     7) Advanced config");
+        println!("8) TCP / UDP    9) Add HA backup 10) HA status    11) Disable HA");
+        println!("12) Validate    13) Update       14) Uninstall    15) Exit");
+        let choice = prompt("Choose option", if installed { "1" } else { "6" })?;
+        let action = match choice.as_str() {
             "1" => run_systemctl(&["status", "pingtunnel.service", "--no-pager"]),
             "2" => run_systemctl(&["start", "pingtunnel.service"]),
             "3" => run_systemctl(&["stop", "pingtunnel.service"]),
             "4" => run_systemctl(&["restart", "pingtunnel.service"]),
             "5" => logs("100"),
-            "6" => configure(),
-            "7" => update(),
-            "8" => return Ok(()),
-            "9" => { let mut cfg = load_config()?; ha::setup(&mut cfg) },
+            "6" => setup::wizard(),
+            "7" => configure(),
+            "8" => setup::protocol_menu(),
+            "9" => ha_setup_apply(),
             "10" => ha::show_status(),
+            "11" => setup::ha_disable(),
+            "12" => { load_config()?; println!("Configuration OK."); Ok(()) },
+            "13" => update(),
+            "14" => return uninstall(false),
+            "15" | "q" | "Q" => return Ok(()),
             _ => {
-                println!("Unknown option.");
+                println!("Unknown option. Use 1..15.");
                 continue;
             }
-        }?;
+        };
+        if let Err(error) = action {
+            eprintln!("Operation failed: {error}");
+            // One invalid setting should never exit the interactive menu.
+        }
     }
 }
 
@@ -497,14 +543,29 @@ fn logs(lines: &str) -> Result<()> {
 
 fn main_inner() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
+    // Bare "pingtunnel" always opens the interactive menu, even when invoked
+    // as a regular Linux user; sudo handles only the privileged operations.
+    if args.is_empty() || args[0] == "menu" {
+        let output = Command::new("id").arg("-u").output()?;
+        if String::from_utf8_lossy(&output.stdout).trim() != "0" {
+            let status = Command::new("sudo")
+                .arg(env::current_exe()?)
+                .arg("menu")
+                .status()?;
+            if !status.success() {
+                return Err(failure("Unable to elevate permissions for Pingtunnel menu."));
+            }
+            return Ok(());
+        }
+    }
     let sub = args.first().map(String::as_str).unwrap_or("menu");
     match sub {
         "menu" => menu(),
+        "setup" | "quick-setup" => setup::wizard(),
         "configure" | "config" => configure(),
-        "ha-setup" => {
-            let mut cfg = load_config()?;
-            ha::setup(&mut cfg)
-        }
+        "protocol" => setup::protocol_menu(),
+        "ha-off" | "ha-disable" => setup::ha_disable(),
+        "ha-setup" => ha_setup_apply(),
         "ha-status" => ha::show_status(),
         "ha-run" => ha::run(load_config()?),
         "service-install" => service_install(),
