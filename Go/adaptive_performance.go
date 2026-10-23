@@ -17,7 +17,7 @@ type AdaptiveFrameSettings struct {
 }
 type AdaptivePerformance struct {
  mu sync.Mutex
- pending time.Time
+ outstanding []time.Time
  samples uint64
  srttMs, jitterMs, baseMs float64
  lossScore float64
@@ -28,14 +28,24 @@ func NewAdaptivePerformance() *AdaptivePerformance { return &AdaptivePerformance
 func (a *AdaptivePerformance) OnPing(sent time.Time) {
  a.mu.Lock()
  defer a.mu.Unlock()
- if !a.pending.IsZero() && sent.Sub(a.pending)>=a.timeoutLocked() { a.noteLossLocked() }
- a.pending=sent
+ a.expireProbesLocked(sent)
+ // Each probe is tracked independently: a one-second cadence must not
+ // erase older unanswered probes before their 5-15 second deadline.
+ a.outstanding=append(a.outstanding,sent)
+ if len(a.outstanding)>64 {
+  a.noteLossLocked()
+  a.outstanding=a.outstanding[1:]
+ }
 }
 func (a *AdaptivePerformance) OnPong(sent, received time.Time) {
  a.mu.Lock()
  defer a.mu.Unlock()
- if a.pending.IsZero() || !a.pending.Equal(sent) {return}
- a.pending=time.Time{}
+ index:=-1
+ for i,probe:=range a.outstanding {
+  if probe.Equal(sent){index=i;break}
+ }
+ if index<0{return}
+ a.outstanding=append(a.outstanding[:index],a.outstanding[index+1:]...)
  rtt:=float64(received.Sub(sent))/float64(time.Millisecond)
  if rtt<=0 || rtt>60000{return}
  if a.samples==0 {
@@ -61,9 +71,20 @@ func (a *AdaptivePerformance) OnPong(sent, received time.Time) {
 func (a *AdaptivePerformance) OnTick(now time.Time) {
  a.mu.Lock()
  defer a.mu.Unlock()
- if !a.pending.IsZero() && now.Sub(a.pending)>=a.timeoutLocked(){
-  a.noteLossLocked(); a.pending=time.Time{}
+ a.expireProbesLocked(now)
+}
+func (a *AdaptivePerformance) expireProbesLocked(now time.Time) {
+ if len(a.outstanding)==0{return}
+ cutoff:=a.timeoutLocked()
+ survivors:=a.outstanding[:0]
+ for _,sent:=range a.outstanding{
+  if !now.Before(sent) && now.Sub(sent)>=cutoff {
+   a.noteLossLocked()
+  }else{
+   survivors=append(survivors,sent)
+  }
  }
+ a.outstanding=survivors
 }
 func (a *AdaptivePerformance) timeoutLocked() time.Duration {
  ms:=5000.0
@@ -81,7 +102,15 @@ func clampAdaptive(v,lo,hi int) int {
 }
 func (a *AdaptivePerformance) parametersLocked(bufferBytes,maxWindow,rto int) AdaptiveFrameSettings {
  p:=AdaptiveFrameSettings{BufferBytes:bufferBytes,Window:maxWindow,ResendMs:rto}
- if a.samples==0{return p}
+ if a.samples==0 {
+  // A completely silent ICMP path provides no RTT sample, but repeated
+  // timed-out probes still mean we must slow new TCP handshakes.
+  if a.degraded {
+   p.Window=clampAdaptive(maxWindow/2,256,10000)
+   p.ResendMs=clampAdaptive(rto*2,800,2400)
+  }
+  return p
+ }
  p.ResendMs=clampAdaptive(int(math.Round(a.srttMs+4*a.jitterMs+80)),300,2000)
  if a.degraded {
   p.Window=clampAdaptive(maxWindow/2,256,10000)
@@ -107,9 +136,7 @@ func (a *AdaptivePerformance) Status(bufferBytes,maxWindow,rto int) adaptiveStat
  a.mu.Lock();defer a.mu.Unlock()
  p:=a.parametersLocked(bufferBytes,maxWindow,rto)
  profile:="learning"
- if a.samples>0 {
-  if a.degraded{profile="degraded"}else{profile="stable"}
- }
+ if a.degraded {profile="degraded"} else if a.samples>0 {profile="stable"}
  return adaptiveStatus{
   Profile:profile, Samples:a.samples,
   RTTMs:math.Round(a.srttMs*10)/10,

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Rust Pingtunnel Manager: release-first installer with failure rollback.
 set -Eeuo pipefail
-RELEASE="https://github.com/meysamrn/Pingtunnel_manager/releases/download/v3.2.0"
+RELEASE="https://github.com/MSMSofts/Pingtunnel_manager/releases/download/v3.2.1"
 CORE_RELEASE="$RELEASE"
 MANAGER="/usr/local/bin/pingtunnel"
 CORE="/opt/pingtunnel/bin/pingtunnel"
@@ -23,47 +23,26 @@ case "$(uname -m)" in
 esac
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y --no-install-recommends curl ca-certificates unzip tar nano
+apt-get install -y --no-install-recommends curl ca-certificates
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 mkdir -p /opt/pingtunnel/bin /opt/pingtunnel/conf
 chmod 700 /opt/pingtunnel/conf
 
 echo "[1/4] Obtain Rust manager..."
-prebuilt=0
-if [[ -n "$release_arch" ]] &&
-  curl -fsSL --retry 2 "$RELEASE/pingtunnel-manager-linux-$release_arch" -o "$work/manager" &&
-  curl -fsSL --retry 2 "$RELEASE/pingtunnel-manager-linux-$release_arch.sha256" -o "$work/sha"; then
-  digest="$(awk '{print $1; exit}' "$work/sha")"
-  if printf '%s  %s\n' "$digest" "$work/manager" | sha256sum --check --status; then
-    prebuilt=1
-  else
-    echo "Manager SHA256 mismatch; installation aborted." >&2
-    exit 1
-  fi
+# Fail closed: matched release assets are mandatory. Do not silently
+# compile mutable main from source or install an unreviewed Go/Rust pair.
+curl -fsSL --retry 3 "$RELEASE/pingtunnel-manager-linux-$release_arch" -o "$work/manager"
+curl -fsSL --retry 3 "$RELEASE/pingtunnel-manager-linux-$release_arch.sha256" -o "$work/sha"
+digest="$(awk '{print $1; exit}' "$work/sha")"
+if ! printf '%s  %s\n' "$digest" "$work/manager" | sha256sum --check --status; then
+  echo "Manager SHA256 mismatch; installation aborted." >&2
+  exit 1
 fi
-if (( ! prebuilt )); then
-  echo "No published Rust binary yet; compiling from source (requires RAM)."
-  if [[ "${PINGTUNNEL_NO_COMPILE:-0}" == "1" ]]; then
-    echo "Compilation disabled. Check GitHub Releases for binary assets." >&2
-    exit 1
-  fi
-  if ! command -v cargo >/dev/null; then
-    apt-get install -y --no-install-recommends cargo rustc
-  fi
-  curl -fsSL --retry 3 \
-    https://github.com/meysamrn/Pingtunnel_manager/archive/refs/heads/main.tar.gz \
-    -o "$work/repository.tar.gz"
-  mkdir -p "$work/source"
-  tar -xzf "$work/repository.tar.gz" -C "$work/source"
-  cargo build --release --manifest-path "$work/source/Pingtunnel_manager-main/Rust/Cargo.toml"
-  cp "$work/source/Pingtunnel_manager-main/Rust/target/release/pingtunnel" "$work/manager"
-fi
-# Do not install stale rolling assets when removing legacy HA.
 chmod 755 "$work/manager"
 manager_version="$("$work/manager" --version)"
-if [[ "$manager_version" != "3.2.0" ]]; then
-  echo "Expected Pingtunnel Manager 3.2.0 (wire 4, config schema 3, security fixes), got: $manager_version" >&2
+if [[ "$manager_version" != "3.2.1" ]]; then
+  echo "Expected Pingtunnel Manager 3.2.1 (wire 4, config schema 3, security fixes), got: $manager_version" >&2
   echo "Check the current rust-latest release assets before retrying." >&2
   exit 1
 fi
@@ -82,7 +61,7 @@ fi
 chmod 755 "$work/core"
 # The release manifest binds the manager and core to the same tagged build.
 curl -fsSL --retry 3 "$RELEASE/release-manifest.txt" -o "$work/manifest"
-for invariant in "release=v3.2.0" "config_schema=3" "wire=4"; do
+for invariant in "release=v3.2.1" "config_schema=3" "wire=4"; do
   if ! grep -Fxq "$invariant" "$work/manifest"; then
     echo "Release manifest is missing $invariant; aborting." >&2
     exit 1
@@ -97,8 +76,8 @@ for file in "pingtunnel-manager-linux-$release_arch" "pingtunnel-core-linux-$rel
     exit 1
   fi
 done
-if [[ "$("$work/core" -security-protocol)" != "pingtunnel-go-core=3.2.0 config-schema=3 wire=4" ]]; then
-  echo "Downloaded Go core is not the matching v3.2.0 secure wire-4 build." >&2
+if [[ "$("$work/core" -security-protocol)" != "pingtunnel-go-core=3.2.1 config-schema=3 wire=4" ]]; then
+  echo "Downloaded Go core is not the matching v3.2.1 secure wire-4 build." >&2
   exit 1
 fi
 
@@ -164,6 +143,22 @@ if (( configured )); then
   "$MANAGER" service-install
   if (( previously_active )) || systemctl is-enabled --quiet pingtunnel.service; then
     systemctl restart pingtunnel.service
+    # systemctl restart can return success before ExecStart crashes. Verify
+    # both a live MainPID and that Go published a fresh process heartbeat.
+    sleep 3
+    if ! systemctl is-active --quiet pingtunnel.service; then
+      echo "New Go core did not remain active; restoring previous installation." >&2
+      false
+    fi
+    running_pid="$(systemctl show -p MainPID --value pingtunnel.service)"
+    if [[ ! "$running_pid" =~ ^[1-9][0-9]*$ ]] || ! kill -0 "$running_pid" 2>/dev/null; then
+      echo "Go core has no live systemd MainPID; rolling back." >&2
+      false
+    fi
+    if ! "$MANAGER" health; then
+      echo "New Go core failed runtime heartbeat validation; rolling back." >&2
+      false
+    fi
   fi
 else
   # A fresh install must not start an unconfigured service.

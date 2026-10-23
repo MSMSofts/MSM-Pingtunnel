@@ -2,7 +2,7 @@
 
 [README فارسی](../README.md) · [English README](../README.en.md) · [Security policy](../SECURITY.md)
 
-**Version:** Manager 3.2.0 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
+**Version:** Manager 3.2.1 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
 
 **خلاصه:** Pingtunnel Manager فقط دو VPS دارد. کاربر به پورت TCP/UDP سرور ایران وصل می‌شود؛ هسته Go ترافیک را در ICMP رمزنگاری‌شده به VPS خارج می‌رساند و سرور خارج آن را به پورت سرویس محلی خودش تحویل می‌دهد. Rust تنها کارهای راه‌اندازی، ذخیره تنظیمات و کنترل systemd را انجام می‌دهد.
 
@@ -114,7 +114,7 @@ Rust CLI presents these through `pingtunnel security` and `pingtunnel performanc
 
 ~~~text
 Rust/
-  Cargo.toml             Rust manager package (3.2.0)
+  Cargo.toml             Rust manager package (3.2.1)
   src/main.rs            CLI, systemd and config generation
   src/setup.rs           Unified pairing wizard
 
@@ -157,13 +157,13 @@ cargo test --manifest-path Rust/Cargo.toml
 cargo build --release --manifest-path Rust/Cargo.toml
 ~~~
 
-Release builds are verified with SHA256 and a release manifest specifying **manager 3.2.0 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.2.0](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.0); rolling assets may also exist for compatibility.
+Release builds are verified with SHA256 and a release manifest specifying **manager 3.2.1 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.2.1](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.1); rolling assets may also exist for compatibility.
 
 ## 8. Compatibility contract and limitations
 
 | Version | Schema | Wire | Can connect directly to 3.2? |
 | --- | --- | --- | --- |
-| **3.2.0** | 3 | 4 | Yes |
+| **3.2.1** | 3 | 4 | Yes |
 | **3.1.0** | 3 | 4 | Wire-compatible; mixed-version field testing still advised |
 | **3.0.0** | 3 | Earlier frame format | No, without upgrading the peer |
 | **Earlier** | Legacy | Legacy | No supported automatic migration |

@@ -48,13 +48,10 @@ func NewClient(addr string, server string, target string, timeout int, key int, 
 
 	now := time.Now()
 	c := &Client{
-		exit:                  false,
-		rtt:                   0,
 		id:                    rand.Intn(math.MaxInt16),
 		ipaddr:                ipaddr,
 		tcpaddr:               tcpaddr,
 		addr:                  addr,
-		ipaddrServer:          ipaddrServer,
 		addrServer:            server,
 		targetAddr:            target,
 		icmpAddr:              icmpAddr,
@@ -68,7 +65,6 @@ func NewClient(addr string, server string, target string, timeout int, key int, 
 		tcpmode_stat:          tcpmode_stat,
 		open_sock5:            open_sock5,
 		maxconn:               maxconn,
-		pongTime:              now,
 		sock5_user:            sock5_user,
 		sock5_pass:            sock5_pass,
 		cryptoConfig:          cryptoConfig,
@@ -78,17 +74,19 @@ func NewClient(addr string, server string, target string, timeout int, key int, 
 		resolveRetryBackoff:   2 * time.Second,
 	}
 	c.lastActivityUnixNano.Store(now.UnixNano())
+ c.serverIP.Store(ipaddrServer)
+ c.lastPongUnixNano.Store(now.UnixNano())
 	return c, nil
 }
 
 type Client struct {
-	exit           bool
-	rtt            time.Duration
+	exit           atomic.Bool
+	rttNanos       atomic.Int64
 	workResultLock sync.WaitGroup
 	maxconn        int
 
 	id       int
-	sequence int
+	sequence atomic.Uint32
 
 	timeout               int
 	sproto                int
@@ -112,7 +110,7 @@ type Client struct {
 	tcpaddr *net.TCPAddr
 	addr    string
 
-	ipaddrServer *net.IPAddr
+	serverIP atomic.Pointer[net.IPAddr]
 	addrServer   string
 
 	targetAddr string
@@ -126,36 +124,40 @@ type Client struct {
 	localAddrToConnMap sync.Map
 	localIdToConnMap   sync.Map
 
-	sendPacket             uint64
-	recvPacket             uint64
-	sendPacketSize         uint64
-	recvPacketSize         uint64
-	localAddrToConnMapSize int
-	localIdToConnMapSize   int
+	sendPacket             atomic.Uint64
+	recvPacket             atomic.Uint64
+	sendPacketSize         atomic.Uint64
+	recvPacketSize         atomic.Uint64
+	localAddrToConnMapSize atomic.Int64
+	localIdToConnMapSize   atomic.Int64
 
 	recvcontrol chan int
 
-	pongTime             time.Time
+	lastPongUnixNano     atomic.Int64
 	lastActivityUnixNano atomic.Int64
 	nextResolveAt        time.Time
 	resolveRetryBackoff  time.Duration
 }
 
 type ClientConn struct {
-	exit           bool
+	exit atomic.Bool
 	ipaddr         *net.UDPAddr
 	tcpaddr        *net.TCPAddr
 	id             string
 	addrKey        string
 	tcpmode        int
-	activeRecvTime time.Time
-	activeSendTime time.Time
-	close          bool
+	activeRecvUnixNano atomic.Int64
+	activeSendUnixNano atomic.Int64
+	close atomic.Bool
 	udpRelayConn   *net.UDPConn
 	udpTargetAddr  string
 	activity       chan struct{}
 
 	fm *network.FrameMgr
+}
+
+func (p *Client) nextSequence() int {
+ return int(p.sequence.Add(1)&0xffff)
 }
 
 func (p *Client) Addr() string {
@@ -175,7 +177,7 @@ func (p *Client) ICMPAddr() string {
 }
 
 func (p *Client) ServerIPAddr() *net.IPAddr {
-	return p.ipaddrServer
+	return p.serverIP.Load()
 }
 
 func (p *Client) ServerAddr() string {
@@ -183,31 +185,31 @@ func (p *Client) ServerAddr() string {
 }
 
 func (p *Client) RTT() time.Duration {
-	return p.rtt
+	return time.Duration(p.rttNanos.Load())
 }
 
 func (p *Client) RecvPacketSize() uint64 {
-	return p.recvPacketSize
+	return p.recvPacketSize.Load()
 }
 
 func (p *Client) SendPacketSize() uint64 {
-	return p.sendPacketSize
+	return p.sendPacketSize.Load()
 }
 
 func (p *Client) RecvPacket() uint64 {
-	return p.recvPacket
+	return p.recvPacket.Load()
 }
 
 func (p *Client) SendPacket() uint64 {
-	return p.sendPacket
+	return p.sendPacket.Load()
 }
 
 func (p *Client) LocalIdToConnMapSize() int {
-	return p.localIdToConnMapSize
+	return int(p.localIdToConnMapSize.Load())
 }
 
 func (p *Client) LocalAddrToConnMapSize() int {
-	return p.localAddrToConnMapSize
+	return int(p.localAddrToConnMapSize.Load())
 }
 
 func (p *Client) touchActivity() {
@@ -267,13 +269,13 @@ func (p *Client) maybeRefreshServerAddr(now time.Time) {
 		return
 	}
 
-	if p.ipaddrServer == nil || p.ipaddrServer.String() != ipaddrServer.String() {
-		loggo.Info("server ip refreshed %v -> %v", p.ipaddrServer, ipaddrServer)
-		p.ipaddrServer = ipaddrServer
+	if p.serverIP.Load() == nil || p.serverIP.Load().String() != ipaddrServer.String() {
+		loggo.Info("server ip refreshed %v -> %v", p.serverIP.Load(), ipaddrServer)
+		p.serverIP.Store(ipaddrServer)
 	}
 
 	p.resolveRetryBackoff = 2 * time.Second
-	if now.Sub(p.pongTime) > 3*time.Second {
+	if now.Sub(time.Unix(0,p.lastPongUnixNano.Load())) > 3*time.Second {
 		p.nextResolveAt = now.Add(5 * time.Second)
 		return
 	}
@@ -306,17 +308,27 @@ func (p *Client) Run() error {
 	}
 
 	if p.tcpmode > 0 {
-		go p.AcceptTcp()
-	} else {
-		go p.Accept()
-	}
+        go func(){
+          defer failOnUnexpectedWorkerExit("TCP listener",&p.exit)
+          if err:=p.AcceptTcp();err!=nil{loggo.Error("TCP listener error: %s",err)}
+        }()
+    } else {
+        go func(){
+          defer failOnUnexpectedWorkerExit("UDP listener",&p.exit)
+          if err:=p.Accept();err!=nil{loggo.Error("UDP listener error: %s",err)}
+        }()
+    }
 
 	recv := make(chan *Packet, 10000)
 	p.recvcontrol = make(chan int, 1)
-	go recvICMP(&p.workResultLock, &p.exit, *p.conn, recv, p.cryptoConfig)
+	go func(){
+  defer failOnUnexpectedWorkerExit("ICMP receiver",&p.exit)
+  recvICMP(&p.workResultLock,&p.exit,*p.conn,recv,p.cryptoConfig)
+ }()
 
 	go func() {
-		defer common.CrashLog()
+        defer common.CrashLog()
+        defer failOnUnexpectedWorkerExit("health ticker",&p.exit)
 
 		p.workResultLock.Add(1)
 		defer p.workResultLock.Done()
@@ -326,7 +338,7 @@ func (p *Client) Run() error {
 
 		nextPingAt := time.Now()
 		lastAdaptiveStatus := time.Time{}
-		for !p.exit {
+		for !p.exit.Load() {
 			p.checkTimeoutConn()
 			p.showNet()
 
@@ -352,12 +364,13 @@ func (p *Client) Run() error {
 	}()
 
 	go func() {
-		defer common.CrashLog()
+        defer common.CrashLog()
+        defer failOnUnexpectedWorkerExit("ICMP dispatcher",&p.exit)
 
 		p.workResultLock.Add(1)
 		defer p.workResultLock.Done()
 
-		for !p.exit {
+		for !p.exit.Load() {
 			select {
 			case <-p.recvcontrol:
 				return
@@ -371,7 +384,7 @@ func (p *Client) Run() error {
 }
 
 func (p *Client) Stop() {
-	p.exit = true
+	p.exit.Store(true)
 	p.recvcontrol <- 1
 	p.workResultLock.Wait()
 	p.conn.Close()
@@ -392,7 +405,7 @@ func (p *Client) AcceptTcp() error {
 
 	loggo.Info("client waiting local accept tcp")
 
-	for !p.exit {
+	for !p.exit.Load() {
 		p.tcplistenConn.SetDeadline(time.Now().Add(time.Millisecond * 1000))
 
 		conn, err := p.tcplistenConn.AcceptTCP()
@@ -424,10 +437,29 @@ func (p *Client) AcceptTcpConn(conn *net.TCPConn, targetAddr string) {
 
 	tcpsrcaddr := conn.RemoteAddr().(*net.TCPAddr)
 
-	if p.maxconn > 0 && p.localIdToConnMapSize >= p.maxconn {
-		loggo.Info("too many connections %d, client accept new local tcp fail %s", p.localIdToConnMapSize, tcpsrcaddr.String())
+	if p.maxconn > 0 && p.localIdToConnMapSize.Load() >= int64(p.maxconn) {
+		loggo.Info("too many connections %d, client accept new local tcp fail %s", p.localIdToConnMapSize.Load(), tcpsrcaddr.String())
 		return
 	}
+
+    // Wait for authenticated ephemeral X25519 before starting the reliable
+    // TCP stream handshake. Network recovery never silently falls back.
+    if p.cryptoConfig!=nil && p.cryptoConfig.sec!=nil {
+      timeout:=time.NewTimer(45*time.Second)
+      ticker:=time.NewTicker(100*time.Millisecond)
+      defer timeout.Stop()
+      defer ticker.Stop()
+      for !p.cryptoConfig.SecureReady() {
+        if p.exit.Load() {_=conn.Close();return}
+        select{
+        case <-timeout.C:
+          loggo.Error("TCP peer security handshake unavailable after 45s: %s",tcpsrcaddr)
+          _=conn.Close()
+          return
+        case <-ticker.C:
+        }
+      }
+    }
 
 	uuid := common.UniqueId()
 
@@ -439,9 +471,7 @@ func (p *Client) AcceptTcpConn(conn *net.TCPConn, targetAddr string) {
 		fm.SetCongestion(&network.BBCongestion{})
 	}
 
-	now := time.Now()
-	clientConn := &ClientConn{exit: false, tcpaddr: tcpsrcaddr, id: uuid, tcpmode: p.tcpmode, activeRecvTime: now, activeSendTime: now, close: false,
-		activity: make(chan struct{}, 1),
+	clientConn := &ClientConn{tcpaddr: tcpsrcaddr, id: uuid, tcpmode: p.tcpmode, activity: make(chan struct{}, 1),
 		fm:       fm}
 	p.addClientConn(uuid, tcpsrcaddr.String(), clientConn)
 	loggo.Info("client accept new local tcp %s %s", uuid, tcpsrcaddr.String())
@@ -451,7 +481,7 @@ func (p *Client) AcceptTcpConn(conn *net.TCPConn, targetAddr string) {
 	clientConn.fm.Connect()
 	startConnectTime := common.GetNowUpdateInSecond()
 	connectWait := newAdaptiveLoopWait(2*time.Millisecond, 80*time.Millisecond)
-	for !p.exit && !clientConn.exit {
+	for !p.exit.Load() && !clientConn.exit.Load() {
 		if clientConn.fm.IsConnected() {
 			break
 		}
@@ -461,17 +491,17 @@ func (p *Client) AcceptTcpConn(conn *net.TCPConn, targetAddr string) {
 		for e := sendlist.Front(); e != nil; e = e.Next() {
 			f := e.Value.(*network.Frame)
 			mb, _ := clientConn.fm.MarshalFrame(f)
-			p.sequence++
-			sendICMP(p.id, p.sequence, *p.conn, p.ipaddrServer, targetAddr, clientConn.id, (uint32)(MyMsg_DATA), mb,
+			
+			sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), targetAddr, clientConn.id, (uint32)(MyMsg_DATA), mb,
 				SEND_PROTO, RECV_PROTO, p.key,
 				p.tcpmode, perf.BufferBytes, perf.Window, perf.ResendMs, p.tcpmode_compress, p.tcpmode_stat,
 				p.timeout, p.cryptoConfig)
-			p.sendPacket++
-			p.sendPacketSize += (uint64)(len(mb))
+			p.sendPacket.Add(1)
+			p.sendPacketSize.Add(uint64(len(mb)))
 		}
 		now := common.GetNowUpdateInSecond()
 		diffclose := now.Sub(startConnectTime)
-		if diffclose > time.Second*5 {
+		if diffclose > time.Second*15 {
 			loggo.Info("can not connect remote tcp %s %s", uuid, tcpsrcaddr.String())
 			p.close(clientConn)
 			return
@@ -488,7 +518,7 @@ func (p *Client) AcceptTcpConn(conn *net.TCPConn, targetAddr string) {
 		}
 	}
 
-	if !clientConn.exit {
+	if !clientConn.exit.Load() {
 		loggo.Info("connected remote tcp %s %s", uuid, tcpsrcaddr.String())
 	}
 
@@ -504,7 +534,7 @@ func (p *Client) AcceptTcpConn(conn *net.TCPConn, targetAddr string) {
 		defer common.CrashLog()
 
 		readWait := newAdaptiveLoopWait(2*time.Millisecond, 80*time.Millisecond)
-		for !p.exit && !clientConn.exit {
+		for !p.exit.Load() && !clientConn.exit.Load() {
 			left := common.MinOfInt(clientConn.fm.GetSendBufferLeft(), len(bytes))
 			if left <= 0 {
 				wait := readWait.miss()
@@ -547,7 +577,7 @@ func (p *Client) AcceptTcpConn(conn *net.TCPConn, targetAddr string) {
 	loopWait := newAdaptiveLoopWait(2*time.Millisecond, 250*time.Millisecond)
 
 mainLoop:
-	for !p.exit && !clientConn.exit {
+	for !p.exit.Load() && !clientConn.exit.Load() {
 		now := common.GetNowUpdateInSecond()
 		hadWork := false
 
@@ -556,7 +586,7 @@ mainLoop:
 		sendlist := clientConn.fm.GetSendList()
 		if sendlist.Len() > 0 {
 			hadWork = true
-			clientConn.activeSendTime = now
+			clientConn.activeSendUnixNano.Store(now.UnixNano())
 			for e := sendlist.Front(); e != nil; e = e.Next() {
 				f := e.Value.(*network.Frame)
 				mb, err := clientConn.fm.MarshalFrame(f)
@@ -564,13 +594,13 @@ mainLoop:
 					loggo.Error("Error tcp Marshal %s %s %s", uuid, tcpsrcaddr.String(), err)
 					continue
 				}
-				p.sequence++
-				sendICMP(p.id, p.sequence, *p.conn, p.ipaddrServer, targetAddr, clientConn.id, (uint32)(MyMsg_DATA), mb,
+				
+				sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), targetAddr, clientConn.id, (uint32)(MyMsg_DATA), mb,
 					SEND_PROTO, RECV_PROTO, p.key,
 					p.tcpmode, 0, 0, 0, 0, 0,
 					0, p.cryptoConfig)
-				p.sendPacket++
-				p.sendPacketSize += (uint64)(len(mb))
+				p.sendPacket.Add(1)
+				p.sendPacketSize.Add(uint64(len(mb)))
 			}
 			p.touchActivity()
 		}
@@ -605,8 +635,8 @@ mainLoop:
 		default:
 		}
 
-		diffrecv := now.Sub(clientConn.activeRecvTime)
-		diffsend := now.Sub(clientConn.activeSendTime)
+		diffrecv := now.Sub(time.Unix(0,clientConn.activeRecvUnixNano.Load()))
+		diffsend := now.Sub(time.Unix(0,clientConn.activeSendUnixNano.Load()))
 		tcpdiffrecv := now.Sub(time.Unix(0, tcpActiveRecvUnix.Load()))
 		tcpdiffsend := now.Sub(tcpActiveSendTime)
 		if (diffrecv > time.Second*(time.Duration(p.timeout)) && diffsend > time.Second*(time.Duration(p.timeout))) ||
@@ -644,7 +674,7 @@ mainLoop:
 	clientConn.fm.Close()
 
 	startCloseTime := common.GetNowUpdateInSecond()
-	for !p.exit && !clientConn.exit {
+	for !p.exit.Load() && !clientConn.exit.Load() {
 		now := common.GetNowUpdateInSecond()
 
 		clientConn.fm.Update()
@@ -653,13 +683,13 @@ mainLoop:
 		for e := sendlist.Front(); e != nil; e = e.Next() {
 			f := e.Value.(*network.Frame)
 			mb, _ := clientConn.fm.MarshalFrame(f)
-			p.sequence++
-			sendICMP(p.id, p.sequence, *p.conn, p.ipaddrServer, targetAddr, clientConn.id, (uint32)(MyMsg_DATA), mb,
+			
+			sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), targetAddr, clientConn.id, (uint32)(MyMsg_DATA), mb,
 				SEND_PROTO, RECV_PROTO, p.key,
 				p.tcpmode, 0, 0, 0, 0, 0,
 				0, p.cryptoConfig)
-			p.sendPacket++
-			p.sendPacketSize += (uint64)(len(mb))
+			p.sendPacket.Add(1)
+			p.sendPacketSize.Add(uint64(len(mb)))
 		}
 
 		nodatarecv := true
@@ -704,7 +734,7 @@ func (p *Client) Accept() error {
 
 	bytes := make([]byte, 10240)
 
-	for !p.exit {
+	for !p.exit.Load() {
 		p.listenConn.SetReadDeadline(time.Now().Add(time.Millisecond * 100))
 		n, srcaddr, err := p.listenConn.ReadFromUDP(bytes)
 		if err != nil {
@@ -721,26 +751,26 @@ func (p *Client) Accept() error {
 		now := common.GetNowUpdateInSecond()
 		clientConn := p.getClientConnByAddr(srcaddr.String())
 		if clientConn == nil {
-			if p.maxconn > 0 && p.localIdToConnMapSize >= p.maxconn {
-				loggo.Info("too many connections %d, client accept new local udp fail %s", p.localIdToConnMapSize, srcaddr.String())
+			if p.maxconn > 0 && p.localIdToConnMapSize.Load() >= int64(p.maxconn) {
+				loggo.Info("too many connections %d, client accept new local udp fail %s", p.localIdToConnMapSize.Load(), srcaddr.String())
 				continue
 			}
 			uuid := common.UniqueId()
-			clientConn = &ClientConn{exit: false, ipaddr: srcaddr, id: uuid, tcpmode: 0, activeRecvTime: now, activeSendTime: now, close: false}
+			clientConn = &ClientConn{ipaddr: srcaddr, id: uuid, tcpmode: 0}
 			p.addClientConn(uuid, srcaddr.String(), clientConn)
 			loggo.Info("client accept new local udp %s %s", uuid, srcaddr.String())
 		}
 
-		clientConn.activeSendTime = now
-		sendICMP(p.id, p.sequence, *p.conn, p.ipaddrServer, p.targetAddr, clientConn.id, (uint32)(MyMsg_DATA), bytes[:n],
+		clientConn.activeSendUnixNano.Store(now.UnixNano())
+		sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), p.targetAddr, clientConn.id, (uint32)(MyMsg_DATA), bytes[:n],
 			SEND_PROTO, RECV_PROTO, p.key,
 			clientConn.tcpmode, 0, 0, 0, 0, 0,
 			p.timeout, p.cryptoConfig)
 
-		p.sequence++
+		
 
-		p.sendPacket++
-		p.sendPacketSize += (uint64)(n)
+		p.sendPacket.Add(1)
+		p.sendPacketSize.Add(uint64(n))
 		p.touchActivity()
 	}
 	return nil
@@ -766,9 +796,9 @@ func (p *Client) processPacket(packet *Packet) {
 		now := time.Now()
 		d := now.Sub(t)
 		loggo.Info("pong from %s %s", packet.src.String(), d.String())
-		p.rtt = d
+		p.rttNanos.Store(int64(d))
 		p.adaptive.OnPong(t,now)
-		p.pongTime = now
+		p.lastPongUnixNano.Store(now.UnixNano())
 		return
 	}
 
@@ -791,7 +821,7 @@ func (p *Client) processPacket(packet *Packet) {
 	}
 
 	now := common.GetNowUpdateInSecond()
-	clientConn.activeRecvTime = now
+	clientConn.activeRecvUnixNano.Store(now.UnixNano())
 
 	if clientConn.tcpmode > 0 {
 		f := &network.Frame{}
@@ -817,7 +847,7 @@ func (p *Client) processPacket(packet *Packet) {
 			udpPacket, packetErr := buildSocks5UDPDatagram(udpTargetAddr, packet.my.Data)
 			if packetErr != nil {
 				loggo.Info("build socks5 udp datagram error %s", packetErr)
-				clientConn.close = true
+				clientConn.close.Store(true)
 				return
 			}
 			_, err = clientConn.udpRelayConn.WriteToUDP(udpPacket, addr)
@@ -826,23 +856,23 @@ func (p *Client) processPacket(packet *Packet) {
 		}
 		if err != nil {
 			loggo.Info("WriteToUDP Error read udp %s", err)
-			clientConn.close = true
+			clientConn.close.Store(true)
 			return
 		}
 	}
 
-	p.recvPacket++
-	p.recvPacketSize += (uint64)(len(packet.my.Data))
+	p.recvPacket.Add(1)
+	p.recvPacketSize.Add(uint64(len(packet.my.Data)))
 	if packet.my.Type == (int32)(MyMsg_DATA) && len(packet.my.Data) > 0 {
 		p.touchActivity()
 	}
 }
 
 func (p *Client) close(clientConn *ClientConn) {
-	if clientConn == nil || clientConn.exit {
+	if clientConn == nil || clientConn.exit.Load() {
 		return
 	}
-	clientConn.exit = true
+	clientConn.exit.Store(true)
 	if clientConn.id != "" {
 		p.localIdToConnMap.Delete(clientConn.id)
 	}
@@ -866,10 +896,10 @@ func (p *Client) checkTimeoutConn() {
 		if conn.tcpmode > 0 {
 			continue
 		}
-		diffrecv := now.Sub(conn.activeRecvTime)
-		diffsend := now.Sub(conn.activeSendTime)
+		diffrecv := now.Sub(time.Unix(0,conn.activeRecvUnixNano.Load()))
+		diffsend := now.Sub(time.Unix(0,conn.activeSendUnixNano.Load()))
 		if diffrecv > time.Second*(time.Duration(p.timeout)) && diffsend > time.Second*(time.Duration(p.timeout)) {
-			conn.close = true
+			conn.close.Store(true)
 		}
 	}
 
@@ -877,7 +907,7 @@ func (p *Client) checkTimeoutConn() {
 		if conn.tcpmode > 0 {
 			continue
 		}
-		if conn.close {
+		if conn.close.Load() {
 			addr := conn.addrKey
 			if conn.ipaddr != nil {
 				addr = conn.ipaddr.String()
@@ -892,34 +922,34 @@ func (p *Client) ping() {
 	now := time.Now()
 	p.adaptive.OnPing(now)
 	b, _ := now.MarshalBinary()
-	sendICMP(p.id, p.sequence, *p.conn, p.ipaddrServer, "", "", (uint32)(MyMsg_PING), b,
+	sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), "", "", (uint32)(MyMsg_PING), b,
 		SEND_PROTO, RECV_PROTO, p.key,
 		0, 0, 0, 0, 0, 0,
 		0, p.cryptoConfig)
-	loggo.Info("ping %s %s %d %d %d %d", p.addrServer, now.String(), p.sproto, p.rproto, p.id, p.sequence)
-	p.sequence++
-	if now.Sub(p.pongTime) > time.Second*3 {
-		p.rtt = 0
+	loggo.Info("ping %s %s %d %d %d %d", p.addrServer, now.String(), p.sproto, p.rproto, p.id, int(p.sequence.Load()))
+	
+	if now.Sub(time.Unix(0,p.lastPongUnixNano.Load())) > time.Second*3 {
+		p.rttNanos.Store(0)
 	}
 }
 
 func (p *Client) showNet() {
-	p.localAddrToConnMapSize = 0
+	p.localAddrToConnMapSize.Store(0)
 	p.localIdToConnMap.Range(func(key, value interface{}) bool {
-		p.localAddrToConnMapSize++
+		p.localAddrToConnMapSize.Add(1)
 		return true
 	})
-	p.localIdToConnMapSize = 0
+	p.localIdToConnMapSize.Store(0)
 	p.localIdToConnMap.Range(func(key, value interface{}) bool {
-		p.localIdToConnMapSize++
+		p.localIdToConnMapSize.Add(1)
 		return true
 	})
 	loggo.Info("send %dPacket/s %dKB/s recv %dPacket/s %dKB/s %d/%dConnections",
-		p.sendPacket, p.sendPacketSize/1024, p.recvPacket, p.recvPacketSize/1024, p.localAddrToConnMapSize, p.localIdToConnMapSize)
-	p.sendPacket = 0
-	p.recvPacket = 0
-	p.sendPacketSize = 0
-	p.recvPacketSize = 0
+		p.sendPacket.Load(), p.sendPacketSize.Load()/1024, p.recvPacket.Load(), p.recvPacketSize.Load()/1024, p.localAddrToConnMapSize.Load(), p.localIdToConnMapSize.Load())
+	p.sendPacket.Store(0)
+	p.recvPacket.Store(0)
+	p.sendPacketSize.Store(0)
+	p.recvPacketSize.Store(0)
 }
 
 func (p *Client) AcceptSock5Conn(conn *net.TCPConn) {
@@ -1010,7 +1040,7 @@ func (p *Client) AcceptSock5UDPConn(conn *net.TCPConn, associateAddr string) {
 	}()
 
 	ctrlBuf := make([]byte, 1)
-	for !p.exit {
+	for !p.exit.Load() {
 		conn.SetReadDeadline(time.Now().Add(time.Millisecond * 200))
 		_, err := conn.Read(ctrlBuf)
 		if err != nil {
@@ -1040,7 +1070,7 @@ func (p *Client) recvSock5UDP(relayConn *net.UDPConn, expectedIP net.IP, expecte
 	bytes := make([]byte, 65535)
 	var sourceAddr *net.UDPAddr
 
-	for !p.exit {
+	for !p.exit.Load() {
 		relayConn.SetReadDeadline(time.Now().Add(time.Millisecond * 100))
 		n, srcaddr, err := relayConn.ReadFromUDP(bytes)
 		if err != nil {
@@ -1048,7 +1078,7 @@ func (p *Client) recvSock5UDP(relayConn *net.UDPConn, expectedIP net.IP, expecte
 			if ok && nerr.Timeout() {
 				continue
 			}
-			if !p.exit {
+			if !p.exit.Load() {
 				loggo.Info("Error read sock5 udp %s", err)
 			}
 			return
@@ -1072,19 +1102,15 @@ func (p *Client) recvSock5UDP(relayConn *net.UDPConn, expectedIP net.IP, expecte
 		connKey := p.sock5UDPConnKey(relayConn, srcaddr, targetAddr)
 		clientConn := p.getClientConnByAddr(connKey)
 		if clientConn == nil {
-			if p.maxconn > 0 && p.localIdToConnMapSize >= p.maxconn {
-				loggo.Info("too many connections %d, client accept new sock5 udp fail %s", p.localIdToConnMapSize, srcaddr.String())
+			if p.maxconn > 0 && p.localIdToConnMapSize.Load() >= int64(p.maxconn) {
+				loggo.Info("too many connections %d, client accept new sock5 udp fail %s", p.localIdToConnMapSize.Load(), srcaddr.String())
 				continue
 			}
 			uuid := common.UniqueId()
 			clientConn = &ClientConn{
-				exit:           false,
 				ipaddr:         copyUDPAddr(srcaddr),
 				id:             uuid,
 				tcpmode:        0,
-				activeRecvTime: now,
-				activeSendTime: now,
-				close:          false,
 				udpRelayConn:   relayConn,
 				udpTargetAddr:  targetAddr,
 			}
@@ -1092,16 +1118,16 @@ func (p *Client) recvSock5UDP(relayConn *net.UDPConn, expectedIP net.IP, expecte
 			loggo.Info("client accept new sock5 udp %s %s -> %s", uuid, srcaddr.String(), targetAddr)
 		}
 
-		clientConn.activeSendTime = now
+		clientConn.activeSendUnixNano.Store(now.UnixNano())
 
-		sendICMP(p.id, p.sequence, *p.conn, p.ipaddrServer, targetAddr, clientConn.id, (uint32)(MyMsg_DATA), payload,
+		sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), targetAddr, clientConn.id, (uint32)(MyMsg_DATA), payload,
 			SEND_PROTO, RECV_PROTO, p.key,
 			0, 0, 0, 0, 0, 0,
 			p.timeout, p.cryptoConfig)
 
-		p.sequence++
-		p.sendPacket++
-		p.sendPacketSize += (uint64)(len(payload))
+		
+		p.sendPacket.Add(1)
+		p.sendPacketSize.Add(uint64(len(payload)))
 		p.touchActivity()
 	}
 }
@@ -1171,6 +1197,9 @@ func parseSock5UDPAssociateHint(addr string) (net.IP, int) {
 }
 
 func (p *Client) addClientConn(uuid string, addr string, clientConn *ClientConn) {
+ now:=time.Now().UnixNano()
+ clientConn.activeRecvUnixNano.Store(now)
+ clientConn.activeSendUnixNano.Store(now)
 
 	clientConn.addrKey = addr
 	p.localAddrToConnMap.Store(addr, clientConn)
@@ -1194,7 +1223,7 @@ func (p *Client) getClientConnById(uuid string) *ClientConn {
 }
 
 func (p *Client) remoteError(uuid string) {
-	sendICMP(p.id, p.sequence, *p.conn, p.ipaddrServer, "", uuid, (uint32)(MyMsg_KICK), []byte{},
+	sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), "", uuid, (uint32)(MyMsg_KICK), []byte{},
 		SEND_PROTO, RECV_PROTO, p.key,
 		0, 0, 0, 0, 0, 0,
 		0, p.cryptoConfig)
