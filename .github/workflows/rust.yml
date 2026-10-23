@@ -80,8 +80,9 @@ jobs:
       - name: Overlay Go crypto and adaptive performance source
         run: |
           cp Go/*.go upstream/
+          cp Go/cmd/main.go upstream/cmd/main.go
           cd upstream
-          gofmt -w crypto.go auto_crypto.go auto_crypto_test.go adaptive_performance.go adaptive_performance_test.go client.go
+          gofmt -w crypto.go auto_crypto.go auto_crypto_test.go adaptive_performance.go adaptive_performance_test.go client.go server.go server_policy.go config.go pairing_v3_test.go cmd/main.go
       - name: Run upstream and auto crypto tests
         run: cd upstream && go test ./...
       - name: Build static modified Go core
