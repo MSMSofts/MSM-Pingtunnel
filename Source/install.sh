@@ -23,43 +23,22 @@ case "$(uname -m)" in
 esac
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y --no-install-recommends curl ca-certificates unzip tar nano
+apt-get install -y --no-install-recommends curl ca-certificates
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 mkdir -p /opt/pingtunnel/bin /opt/pingtunnel/conf
 chmod 700 /opt/pingtunnel/conf
 
 echo "[1/4] Obtain Rust manager..."
-prebuilt=0
-if [[ -n "$release_arch" ]] &&
-  curl -fsSL --retry 2 "$RELEASE/pingtunnel-manager-linux-$release_arch" -o "$work/manager" &&
-  curl -fsSL --retry 2 "$RELEASE/pingtunnel-manager-linux-$release_arch.sha256" -o "$work/sha"; then
-  digest="$(awk '{print $1; exit}' "$work/sha")"
-  if printf '%s  %s\n' "$digest" "$work/manager" | sha256sum --check --status; then
-    prebuilt=1
-  else
-    echo "Manager SHA256 mismatch; installation aborted." >&2
-    exit 1
-  fi
+# Fail closed: matched release assets are mandatory. Do not silently
+# compile mutable main from source or install an unreviewed Go/Rust pair.
+curl -fsSL --retry 3 "$RELEASE/pingtunnel-manager-linux-$release_arch" -o "$work/manager"
+curl -fsSL --retry 3 "$RELEASE/pingtunnel-manager-linux-$release_arch.sha256" -o "$work/sha"
+digest="$(awk '{print $1; exit}' "$work/sha")"
+if ! printf '%s  %s\n' "$digest" "$work/manager" | sha256sum --check --status; then
+  echo "Manager SHA256 mismatch; installation aborted." >&2
+  exit 1
 fi
-if (( ! prebuilt )); then
-  echo "No published Rust binary yet; compiling from source (requires RAM)."
-  if [[ "${PINGTUNNEL_NO_COMPILE:-0}" == "1" ]]; then
-    echo "Compilation disabled. Check GitHub Releases for binary assets." >&2
-    exit 1
-  fi
-  if ! command -v cargo >/dev/null; then
-    apt-get install -y --no-install-recommends cargo rustc
-  fi
-  curl -fsSL --retry 3 \
-    https://github.com/MSMSofts/Pingtunnel_manager/archive/refs/heads/main.tar.gz \
-    -o "$work/repository.tar.gz"
-  mkdir -p "$work/source"
-  tar -xzf "$work/repository.tar.gz" -C "$work/source"
-  cargo build --release --manifest-path "$work/source/Pingtunnel_manager-main/Rust/Cargo.toml"
-  cp "$work/source/Pingtunnel_manager-main/Rust/target/release/pingtunnel" "$work/manager"
-fi
-# Do not install stale rolling assets when removing legacy HA.
 chmod 755 "$work/manager"
 manager_version="$("$work/manager" --version)"
 if [[ "$manager_version" != "3.2.1" ]]; then
