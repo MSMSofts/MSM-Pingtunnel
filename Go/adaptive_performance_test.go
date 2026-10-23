@@ -101,6 +101,9 @@ func TestContinuousPingsWithoutPongsRegistersLoss(t *testing.T){
   a.OnTick(at)
  }
  st:=a.Status(1<<20,20000,400)
+ if settings:=a.Parameters(1<<20,20000,400);settings.Window>=20000||settings.ResendMs<800{
+  t.Fatalf("unsampled complete outage did not throttle new TCP setup: %+v",settings)
+ }
  if st.Profile!="degraded" || st.LossEstimate<=0 {
   t.Fatalf("continuous unanswered probes were incorrectly healthy: %+v",st)
  }
