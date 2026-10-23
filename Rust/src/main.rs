@@ -352,11 +352,16 @@ fn edit_config() -> Result<()> {
     if !editor.chars().all(|c| c.is_ascii_alphanumeric() || "/_.-".contains(c)) {
         return Err(failure("EDITOR must be a single executable path/name."));
     }
+    let original = fs::read(CONFIG)?;
     let status = Command::new(editor).arg(CONFIG).status()?;
     if !status.success() {
-        return Err(failure("Editor failed."));
+        atomic_save(&config_path(), &original, 0o600)?;
+        return Err(failure("Editor failed; original config restored."));
     }
-    load_config()?;
+    if let Err(error) = load_config() {
+        atomic_save(&config_path(), &original, 0o600)?;
+        return Err(failure(format!("Edited config invalid ({error}); original restored.")));
+    }
     fs::set_permissions(CONFIG, fs::Permissions::from_mode(0o600))?;
     println!("Config valid. Apply with sudo pingtunnel service-install && sudo pingtunnel restart.");
     Ok(())
@@ -364,12 +369,18 @@ fn edit_config() -> Result<()> {
 
 fn update() -> Result<()> {
     root_required()?;
-    let temp = env::temp_dir().join(format!("pingtunnel-update-{}.sh", process::id()));
+    // mktemp creates a unique, root-owned file (avoids predictable /tmp names).
+    let created = Command::new("mktemp").output()?;
+    if !created.status.success() {
+        return Err(failure("mktemp failed."));
+    }
+    let temp = PathBuf::from(String::from_utf8(created.stdout)?.trim());
     let status = Command::new("curl")
         .args(["--fail", "--location", "--silent", "--show-error", "--retry", "3", UPDATE_URL, "-o"])
         .arg(&temp)
         .status()?;
     if !status.success() {
+        let _ = fs::remove_file(&temp);
         return Err(failure("Failed to download update installer."));
     }
     let result = Command::new("bash").arg(&temp).status();
