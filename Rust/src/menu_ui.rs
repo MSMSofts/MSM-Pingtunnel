@@ -1,14 +1,17 @@
-//! Terminal-only presentation of Pingtunnel Manager.
-//! No schema, service, port, protocol, or secret-handling changes live here.
-use std::fmt::Write as _;
-use std::io::{self, IsTerminal};
+//! Pingtunnel terminal UI.
+//! Use CRLF while crossterm has disabled terminal output processing in raw mode.
+//! Fixed-width, vertically ordered actions; no arbitrary terminal-width wraps.
+use crate::resource_monitor::{ResourceMonitor, Resources};
+use crossterm::{
+    cursor,
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    execute,
+    terminal::{self, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
+};
 use std::env;
-use std::io::Write as _;
+use std::fmt::Write as _;
+use std::io::{self, IsTerminal, Write as _};
 use std::time::{Duration, Instant};
-use crossterm::{cursor, event::{self, Event, KeyCode, KeyEventKind, KeyModifiers}, execute, terminal::{self, ClearType, EnterAlternateScreen, LeaveAlternateScreen}};
-use crate::resource_monitor::{Resources,ResourceMonitor};
-
-const INNER_WIDTH: usize = 66;
 
 pub(crate) struct MenuView<'a> {
     pub version: &'a str,
@@ -24,7 +27,7 @@ pub(crate) struct MenuView<'a> {
 pub(crate) fn supports_color() -> bool {
     io::stdout().is_terminal()
         && env::var_os("NO_COLOR").is_none()
-        && env::var("TERM").map(|term| term != "dumb" && !term.is_empty()).unwrap_or(false)
+        && env::var("TERM").map(|v| v != "dumb" && !v.is_empty()).unwrap_or(false)
 }
 
 pub(crate) fn supports_unicode() -> bool {
@@ -39,192 +42,195 @@ pub(crate) fn supports_unicode() -> bool {
         .unwrap_or(false)
 }
 
-fn colored(value: &str, style: &str, enabled: bool) -> String {
-    if enabled {
-        format!("\x1b[{style}m{value}\x1b[0m")
-    } else {
-        value.to_string()
+fn paint(value: &str, color: &str, enabled: bool) -> String {
+    if enabled { format!("\x1b[{color}m{value}\x1b[0m") } else { value.into() }
+}
+
+/// Limit visible ASCII text to a terminal-safe width before adding ANSI styles.
+fn short(value: &str, limit: usize) -> String {
+    value.chars().take(limit).collect()
+}
+
+fn rule(out: &mut String, width: usize, unicode: bool, color: bool) {
+    let line = if unicode { "─" } else { "-" };
+    let _ = writeln!(out, "{}", paint(&line.repeat(width), "2;36", color));
+}
+
+fn heading(out: &mut String, caption: &str, width: usize, unicode: bool, color: bool) {
+    let symbol = if unicode { "◆" } else { ">" };
+    let _ = writeln!(out, "{}", paint(&format!("{symbol}  {caption}"), "1;36", color));
+    let line = if unicode { "─" } else { "-" };
+    let _ = writeln!(out, "{}", paint(&line.repeat(width), "2", color));
+}
+
+const SERVICE: [(u8, &str, &str); 5] = [
+    (1, "Status", "View service details"),
+    (2, "Start", "Start the tunnel"),
+    (3, "Stop", "Stop the tunnel"),
+    (4, "Restart", "Restart the tunnel"),
+    (5, "Logs", "Last 100 journal entries"),
+];
+const CONFIG: [(u8, &str, &str); 2] = [
+    (6, "Setup Wizard", "Configure this VPS"),
+    (7, "Pairing key", "Show secret (root only)"),
+];
+const DIAGNOSTIC: [(u8, &str, &str); 2] = [
+    (8, "Performance", "RTT, jitter and loss"),
+    (9, "Validate", "Check configuration"),
+];
+const MAINTENANCE: [(u8, &str, &str); 3] = [
+    (10, "Update", "Upgrade + restart tunnel"),
+    (11, "Uninstall", "Remove program"),
+    (12, "Exit", "Close menu"),
+];
+const SECURITY: [(u8, &str, &str); 2] = [
+    (13, "Security", "Replay and recovery"),
+    (14, "Health", "Core heartbeat"),
+];
+
+fn options(out: &mut String, section: &str, entries: &[(u8, &str, &str)],
+           width: usize, unicode: bool, color: bool, compact: bool) {
+    if !compact { heading(out, section, width, unicode, color); }
+    for (number, label, explanation) in entries {
+        let left = format!("  {number:>2}) {label:<19}");
+        if compact || width < 56 {
+            let _ = writeln!(out, "{}", paint(&format!("  {number:>2}) {label}"), "1;37", color));
+        } else {
+            let desc_width = width.saturating_sub(left.len()+3);
+            let _ = writeln!(out, "{}{}", paint(&left, "1;37", color),
+                paint(&short(explanation,desc_width), "2", color));
+        }
     }
 }
 
-fn frame_line(out: &mut String, text: &str, unicode: bool, color: bool) {
-    let length = text.chars().count();
-    let padded = format!("{text}{}", " ".repeat(INNER_WIDTH.saturating_sub(length)));
-    let (edge, closing) = if unicode { ("│", "│") } else { ("|", "|") };
-    let _ = writeln!(out, "{} {} {}", colored(edge, "2;36", color), padded, colored(closing, "2;36", color));
-}
-
-fn section(out: &mut String, heading: &str, color: bool, unicode: bool) {
-    let rule = if unicode { "─" } else { "-" };
-    let _ = writeln!(out);
-    let _ = writeln!(out, "  {}", colored(heading, "1;36", color));
-    let _ = writeln!(out, "  {}", colored(&rule.repeat(INNER_WIDTH), "2", color));
-}
-
-fn option_line(out: &mut String, first: (u8, &str), second: Option<(u8, &str)>, ansi: bool) {
-    let format_option = |(number, caption): (u8, &str)| {
-        let n = format!("{number:>2})");
-        format!("{} {caption}", colored(&n, "1;36", ansi))
-    };
-    let left_text = format!("{:>2}) {}", first.0, first.1);
-    let gap = " ".repeat(33usize.saturating_sub(left_text.len()));
-    let first_styled = format_option(first);
-    match second {
-        Some(item) => {
-            let _ = writeln!(out, "  {first_styled}{gap}{}", format_option(item));
-        }
-        None => {
-            let _ = writeln!(out, "  {first_styled}");
-        }
-    }
-}
-
-pub(crate) fn render(view: &MenuView<'_>, color: bool, unicode: bool) -> String {
+/// View is deliberately single-column. Menu choices are 1..14 from TOP to
+/// BOTTOM, so visual scanning and terminal keyboard input agree.
+pub(crate) fn render_sized(view: &MenuView<'_>, color: bool, unicode: bool,
+                           columns: u16, rows: u16) -> String {
     let mut out = String::new();
-    let (top_left, top_right, bottom_left, bottom_right, horizontal) =
-        if unicode { ("┌", "┐", "└", "┘", "─") } else { ("+", "+", "+", "+", "-") };
-    let border = horizontal.repeat(INNER_WIDTH + 2);
-    let _ = writeln!(
-        out,
-        "\n{}{}{}",
-        colored(top_left, "36", color),
-        colored(&border, "36", color),
-        colored(top_right, "36", color)
-    );
-    frame_line(&mut out, "  PINGTUNNEL  /  NETWORK CONTROL CENTER", unicode, color);
-    frame_line(
-        &mut out,
-        &format!("  ENCRYPTED ICMP  /  v{}  /  WIRE 4  /  IRAN <> FOREIGN", view.version),
-        unicode, color,
-    );
-    let _ = writeln!(
-        out,
-        "{}{}{}",
-        colored(bottom_left, "36", color),
-        colored(&border, "36", color),
-        colored(bottom_right, "36", color)
-    );
+    // Keep a margin for terminals that auto-wrap at their last column.
+    let width = usize::from(columns).saturating_sub(3).min(65).max(16);
+    let compact = rows < 36;
+    let line = if unicode { "━" } else { "=" };
+    let _ = writeln!(out, "{}", paint(&line.repeat(width), "1;36", color));
+    let _ = writeln!(out, "{}", paint("  PINGTUNNEL  /  CONTROL CENTER", "1;36", color));
+    let version = format!("  v{}   |   Encrypted ICMP   |   Wire v4", view.version);
+    let _ = writeln!(out, "{}", paint(&short(&version, width), "2", color));
+    rule(&mut out,width,unicode,color);
 
-    section(&mut out, "01  LIVE TUNNEL OVERVIEW", color, unicode);
+    if !compact {
+        heading(&mut out,"LIVE TUNNEL STATUS",width,unicode,color);
+    }
     let location = match view.region {
-        "iran" => "Iran (ingress)",
-        "foreign" => "Foreign (service)",
-        _ => "Not configured",
+        "iran"=>"Iran (ingress)",
+        "foreign"=>"Foreign (service)",
+        _=>"Not configured",
     };
-    let port = view.port.map(|p| p.to_string()).unwrap_or_else(|| "-".into());
-    let transport = if view.configured { view.transport.to_ascii_uppercase() } else { "-".into() };
-    let status_style = if view.service == "active" { "1;32" }
-        else if view.service == "failed" { "1;31" }
-        else { "1;33" };
-    let _ = writeln!(out, "  {:<18}: {}", "Location", location);
-    let _ = writeln!(out, "  {:<18}: {}", "Peer IPv4", if view.configured { view.peer } else { "-" });
-    let _ = writeln!(out, "  {:<18}: {transport} / {port}", "Local transport");
-    let _ = writeln!(
-        out,
-        "  {:<18}: {}",
-        "Service status",
-        colored(view.service, status_style, color)
-    );
+    let transport = if view.configured {view.transport.to_ascii_uppercase()} else {"-".into()};
+    let port = view.port.map(|v|v.to_string()).unwrap_or_else(||"-".into());
+    let _ = writeln!(out,"  {:<12} {}", "Location",location);
+    let _ = writeln!(out,"  {:<12} {}", "Peer IPv4",short(if view.configured{view.peer}else{"-"},width.saturating_sub(16)));
+    let _ = writeln!(out,"  {:<12} {} / {}", "Transport",transport,port);
+    let state_color=if view.service=="active"{"1;32"} else if view.service=="failed"{"1;31"}else{"1;33"};
+    let _ = writeln!(out,"  {:<12} {}", "Service",paint(view.service,state_color,color));
+
+    let missing=if unicode{"—"}else{"-"};
+    let cpu=view.resources.cpu_percent.map(|v|format!("{v:.1}%")).unwrap_or_else(||missing.into());
+    let avg_cpu=view.resources.cpu_average.map(|v|format!("{v:.1}%")).unwrap_or_else(||missing.into());
+    let ram=view.resources.ram_mib.map(|v|format!("{v:.1} MiB")).unwrap_or_else(||missing.into());
+    let avg_ram=view.resources.ram_average.map(|v|format!("{v:.1} MiB")).unwrap_or_else(||missing.into());
+    // No duplicated layout padding inside ANSI escapes: all metrics aligned.
+    let _ = writeln!(out,"  {:<12} {}",
+        "CPU (10s)",paint(&format!("{cpu:<13} avg 60s {avg_cpu}"),"1;33",color));
+    let _ = writeln!(out,"  {:<12} {}",
+        "RAM (RSS)",paint(&format!("{ram:<13} avg 60s {avg_ram}"),"1;35",color));
     if !view.configured {
-        let _ = writeln!(
-            out, "  {}",
-            colored("No valid configuration: run Setup Wizard (option 6).", "1;33", color)
-        );
+        let _=writeln!(out,"{}",paint("  Not configured: choose 6) Setup Wizard", "1;33",color));
+    }
+    if !compact {
+        let _ = writeln!(out,"{}",paint("  Auto refresh: 10s  |  CPU 100% = one vCPU","2",color));
     }
 
-    let unavailable=if unicode{"—"}else{"-"};
-    let current_cpu=view.resources.cpu_percent
-        .map(|v|format!("{v:.1}%")).unwrap_or_else(||unavailable.into());
-    let mean_cpu=view.resources.cpu_average
-        .map(|v|format!("{v:.1}%")).unwrap_or_else(||unavailable.into());
-    let current_ram=view.resources.ram_mib
-        .map(|v|format!("{v:.1} MiB")).unwrap_or_else(||unavailable.into());
-    let mean_ram=view.resources.ram_average
-        .map(|v|format!("{v:.1} MiB")).unwrap_or_else(||unavailable.into());
-    let _=writeln!(out,"  {:<18}: {:<20} {}", "CPU (10s)",colored(&format!("{current_cpu:<20}"),"1;33",color),format!("Avg 60s: {mean_cpu}"));
-    let _=writeln!(out,"  {:<18}: {:<20} {}", "RAM (RSS)",colored(&format!("{current_ram:<20}"),"1;35",color),format!("Avg 60s: {mean_ram}"));
-    let _=writeln!(out,"  {}",colored("  LIVE  /  Refresh every 10s  /  CPU 100% = 1 vCPU", "2",color));
-
-    section(&mut out, "02  SERVICE CONTROLS", color, unicode);
-    option_line(&mut out, (1, "Status"), Some((2, "Start")), color);
-    option_line(&mut out, (3, "Stop"), Some((4, "Restart")), color);
-    option_line(&mut out, (5, "View logs"), None, color);
-
-    section(&mut out, "03  SETUP & CONFIGURATION", color, unicode);
-    option_line(&mut out, (6, "Setup Wizard"), Some((7, "Show pairing key")), color);
-
-    section(&mut out, "04  DIAGNOSTICS", color, unicode);
-    option_line(&mut out, (8, "Adaptive Performance"), Some((9, "Validate config")), color);
-    option_line(&mut out, (13, "Security status"), Some((14, "Health check")), color);
-
-    section(&mut out, "05  MAINTENANCE", color, unicode);
-    option_line(&mut out, (10, "Update"), Some((11, "Uninstall")), color);
-    option_line(&mut out, (12, "Exit"), None, color);
-    let _ = writeln!(out);
+    options(&mut out,"SERVICE CONTROLS",&SERVICE,width,unicode,color,compact);
+    options(&mut out,"SETUP & CONFIGURATION",&CONFIG,width,unicode,color,compact);
+    options(&mut out,"DIAGNOSTICS",&DIAGNOSTIC,width,unicode,color,compact);
+    options(&mut out,"MAINTENANCE",&MAINTENANCE,width,unicode,color,compact);
+    options(&mut out,"SECURITY & HEALTH",&SECURITY,width,unicode,color,compact);
     out
 }
 
+pub(crate) fn render(view:&MenuView<'_>,color:bool,unicode:bool)->String {
+    render_sized(view,color,unicode,80,40)
+}
 
-/// Only an attached interactive terminal is redrawn. Pipe/CI operation keeps
-/// traditional line-oriented input, with no unexpected control sequences.
-pub(crate) fn interactive_available() -> bool {
+pub(crate) fn interactive_available()->bool{
     io::stdin().is_terminal() && io::stdout().is_terminal()
-        && env::var("TERM").map(|term|term!="dumb"&&!term.is_empty()).unwrap_or(false)
+        && env::var("TERM").map(|v|v!="dumb"&&!v.is_empty()).unwrap_or(false)
+        && terminal::size().map(|(cols,rows)|cols>=47 && rows>=27).unwrap_or(false)
+}
+
+/// Raw mode disables ONLCR on Linux. Newlines MUST be CRLF or the cursor will
+/// keep its previous column and create the diagonal "staircase" shown in the
+/// issue screenshot. Applies to the whole frame including prompt/help.
+fn raw_frame(view: &str, hint: &str, typed: &str) -> String {
+    let mut screen = String::with_capacity(view.len()+hint.len()+typed.len()+32);
+    screen.push_str(view);
+    screen.push_str(hint);
+    screen.push_str(typed);
+    screen.replace('\n',"\r\n")
 }
 
 struct TerminalGuard;
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let _=terminal::disable_raw_mode();
-        let mut out=io::stdout();
-        let _=execute!(out,LeaveAlternateScreen,cursor::Show);
+        let mut output=io::stdout();
+        let _=execute!(output,LeaveAlternateScreen,cursor::Show);
     }
 }
 
-/// Keyboard polling keeps the input buffer intact while the 10s view refreshes.
-/// Actions run AFTER leaving raw mode, so the setup wizard and its hidden
-/// pairing-key prompt still have normal terminal behavior.
+/// Poll input without consuming partially typed numbers during 10s redraw.
+/// Alternate screen and raw mode are restored before any shell/setup command.
 pub(crate) fn choose<F>(monitor:&mut ResourceMonitor, mut draw:F, default:&str)->io::Result<String>
-where F:FnMut(Resources)->String
-{
+where F:FnMut(Resources,u16,u16)->String {
     terminal::enable_raw_mode()?;
-    let mut out=io::stdout();
-    if let Err(err)=execute!(out,EnterAlternateScreen,cursor::Hide) {
+    let mut output=io::stdout();
+    if let Err(e)=execute!(output,EnterAlternateScreen,cursor::Hide){
         let _=terminal::disable_raw_mode();
-        return Err(err);
+        return Err(e);
     }
     let _guard=TerminalGuard;
     let mut entered=String::new();
-    let mut last=Instant::now();
+    let mut refreshed=Instant::now();
+    loop {
+        let (cols,rows)=terminal::size().unwrap_or((80,40));
+        let display=draw(monitor.current(),cols,rows);
+        let compact=rows<36;
+        let hint=if compact{"  Enter: select  |  Esc: exit\n"}
+            else{"\n  Enter: confirm   Backspace: edit   Esc/q: exit\n"};
+        let prompt=format!("  > {}\n",if entered.is_empty(){format!("[{default}]")}else{entered.clone()});
+        let screen=raw_frame(&display,hint,&prompt);
+        execute!(output,cursor::MoveTo(0,0),terminal::Clear(ClearType::All))?;
+        output.write_all(screen.as_bytes())?;
+        output.flush()?;
 
-    loop{
-        let display=draw(monitor.current());
-        execute!(out,cursor::MoveTo(0,0),terminal::Clear(ClearType::All))?;
-        out.write_all(display.as_bytes())?;
-        writeln!(out,"  {}",colored("  [1-14] Choose an action  /  [Enter] Confirm  /  [Esc] Exit","2",supports_color()))?;
-        write!(out,"  {} {}",colored(">","1;36",supports_color()),
-            if entered.is_empty(){format!("[{default}]")}else{entered.clone()})?;
-        out.flush()?;
-
-        let remaining=Duration::from_secs(10).saturating_sub(last.elapsed());
+        let remaining=Duration::from_secs(10).saturating_sub(refreshed.elapsed());
         if event::poll(remaining)? {
-            if let Event::Key(key)=event::read()? {
+            if let Event::Key(key)=event::read()?{
                 if key.kind!=KeyEventKind::Press{continue;}
-                match key.code{
+                match key.code {
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL)=>return Ok("12".into()),
                     KeyCode::Char('q'|'Q')|KeyCode::Esc=>return Ok("12".into()),
-                    KeyCode::Char(ch) if ch.is_ascii_digit() && entered.len()<2=>entered.push(ch),
+                    KeyCode::Char(c) if c.is_ascii_digit()&&entered.len()<2=>entered.push(c),
                     KeyCode::Backspace=>{entered.pop();},
-                    KeyCode::Enter=>{
-                        return Ok(if entered.is_empty(){default.to_string()}else{entered});
-                    }
+                    KeyCode::Enter=>return Ok(if entered.is_empty(){default.into()}else{entered}),
                     _=>{},
                 }
             }
         }
-        if last.elapsed()>=Duration::from_secs(10){
+        if refreshed.elapsed()>=Duration::from_secs(10) {
             monitor.refresh();
-            last=Instant::now();
+            refreshed=Instant::now();
         }
     }
 }
@@ -233,80 +239,57 @@ where F:FnMut(Resources)->String
 mod tests {
     use super::*;
 
-    fn view() -> MenuView<'static> {
-        MenuView {
-            version: "3.2.2",
-            region: "iran",
-            peer: "203.0.113.10",
-            transport: "udp",
-            port: Some(444),
-            service: "active",
-            configured: true,
-            resources: Resources::default(),
+    fn fixture()->MenuView<'static> {
+        MenuView{version:"3.2.4",region:"foreign",peer:"203.0.113.10",
+            transport:"udp",port:Some(444),service:"active",
+            configured:true,resources:Resources{cpu_percent:Some(0.3),cpu_average:Some(0.3),
+                ram_mib:Some(13.9),ram_average:Some(13.9),samples:6}}
+    }
+
+    #[test]
+    fn choices_are_strictly_top_to_bottom_1_to_14() {
+        for (cols,rows) in [(80,40),(52,30),(47,27)]{
+            let s=render_sized(&fixture(),false,false,cols,rows);
+            let choices:Vec<u8>=s.lines().filter_map(|line|{
+                let text=line.trim_start();
+                let (prefix,_) = text.split_once(')')?;
+                prefix.trim().parse::<u8>().ok()
+            }).collect();
+            assert_eq!(choices,(1..=14).collect::<Vec<u8>>());
+            assert!(s.contains("0.3%"));
+            assert!(s.contains("13.9 MiB"));
+            assert!(!s.contains("\x1b["));
+            // The terminal must never wrap a produced line on its last column.
+            assert!(s.lines().all(|line|line.chars().count()<usize::from(cols)), "{cols} cols");
         }
     }
 
     #[test]
-    fn all_options_keep_original_numbers_and_labels() {
-        let text = render(&view(), false, false);
-        for i in 1..=14 {
-            assert_eq!(text.matches(&format!("{i:>2})")).count(), 1, "menu option {i}");
-        }
-        for heading in ["LIVE TUNNEL OVERVIEW", "SERVICE CONTROLS", "SETUP & CONFIGURATION", "DIAGNOSTICS", "MAINTENANCE"] {
-            assert!(text.contains(heading));
-        }
-        assert!(text.contains("UDP / 444"));
-        assert!(text.contains("203.0.113.10"));
-        assert!(!text.contains("\x1b["));
+    fn raw_mode_entire_frame_uses_crlf_not_bare_lf() {
+        let raw=raw_frame("HEADER\nStatus\n","  Enter\n","  > [1]\n");
+        assert_eq!(raw,"HEADER\r\nStatus\r\n  Enter\r\n  > [1]\r\n");
+        assert!(!raw.replace("\r\n","").contains('\n'));
     }
 
     #[test]
-    fn unicode_and_color_only_when_selected() {
-        let fancy = render(&view(), true, true);
-        assert!(fancy.contains("┌") && fancy.contains("│"));
-        assert!(fancy.contains("\x1b["));
-        let basic = render(&view(), false, false);
-        assert!(basic.contains("+--"));
-        assert!(!basic.contains('┌') && !basic.contains("\x1b["));
+    fn unicode_and_ascii_are_both_readable() {
+        let fancy=render_sized(&fixture(),true,true,80,40);
+        assert!(fancy.contains("\x1b[") && fancy.contains("◆"));
+        let ascii=render_sized(&fixture(),false,false,80,40);
+        assert!(!ascii.contains("◆") && !ascii.contains('—'));
     }
 
     #[test]
-    fn unconfigured_has_safe_display_without_secrets() {
-        let mut data = view();
-        data.configured = false;
-        data.region = "unknown";
-        data.peer = "-";
-        data.port = None;
-        data.service = "inactive";
-        let text = render(&data, false, false);
-        assert!(text.contains("option 6"));
-        assert!(text.contains("Not configured"));
-        assert!(text.contains("inactive"));
-        assert!(!text.contains("pair_key"));
+    fn inactive_and_not_configured_do_not_forge_metrics() {
+        let mut view=fixture();
+        view.configured=false;
+        view.region="unknown";
+        view.service="inactive";
+        view.resources=Resources::default();
+        let result=render(&view,false,false);
+        assert!(result.contains("Not configured: choose 6)"));
+        assert!(result.contains("Service      inactive"));
+        assert!(result.contains("avg 60s -"));
+        assert!(!result.contains("pair_key"));
     }
-
-    #[test]
-    fn service_states_do_not_change_actions() {
-        let mut data = view();
-        data.service = "failed";
-        let text = render(&data, false, false);
-        assert!(text.contains("failed"));
-        assert!(text.contains("14) Health check"));
-        assert!(text.contains(" 6) Setup Wizard"));
-    }
-    #[test]
-    fn resource_summary_carries_sample_and_rolling_means() {
-        let mut v=view();
-        v.resources=Resources{cpu_percent:Some(12.5),cpu_average:Some(8.2),
-            ram_mib:Some(24.4),ram_average:Some(22.1),samples:6};
-        let text=render(&v,false,false);
-        for value in ["CPU (10s)","12.5%","8.2%","RAM (RSS)","24.4 MiB","22.1 MiB","10s"]{
-            assert!(text.contains(value),"missing {value}");
-        }
-        v.resources=Resources::default();
-        let inactive=render(&v,false,false);
-        assert!(inactive.contains("-"));
-        assert!(!inactive.contains("—"));
-    }
-
 }
