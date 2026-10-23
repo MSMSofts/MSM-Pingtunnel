@@ -5,6 +5,7 @@ import (
 	stdbytes "bytes"
 	"errors"
 	"net"
+	"sync/atomic"
 	"sync"
 	"time"
 
@@ -102,7 +103,7 @@ func FlushPendingICMP(conn icmp.PacketConn, crypto *CryptoConfig) {
  }
 }
 
-func recvICMP(workResultLock *sync.WaitGroup, exit *bool, conn icmp.PacketConn, recv chan<- *Packet, cryptoConfig *CryptoConfig) {
+func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.PacketConn, recv chan<- *Packet, cryptoConfig *CryptoConfig) {
 
 	defer common.CrashLog()
 
@@ -110,7 +111,7 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *bool, conn icmp.PacketConn, 
 	defer (*workResultLock).Done()
 
 	bytes := make([]byte, 10240)
-	for !*exit {
+	for !exit.Load() {
 		conn.SetReadDeadline(time.Now().Add(time.Millisecond * 100))
 		n, srcaddr, err := conn.ReadFrom(bytes)
 
