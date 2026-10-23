@@ -60,6 +60,11 @@ if (( ! prebuilt )); then
   cargo build --release --manifest-path "$work/source/Pingtunnel_manager-main/Rust/Cargo.toml"
   cp "$work/source/Pingtunnel_manager-main/Rust/target/release/pingtunnel" "$work/manager"
 fi
+# Refuse stale rolling-release assets that predate HA manager 2.1.
+if ! "$work/manager" --help 2>/dev/null | grep -q 'ha-setup'; then
+  echo "Downloaded manager is older than HA 2.1; cannot safely install this version." >&2
+  exit 1
+fi
 chmod 755 "$work/manager"
 echo "[2/4] Check config and Go tunnel core..."
 if [[ "${PINGTUNNEL_REFRESH_GO:-0}" == "1" || ! -f "$CORE" ]]; then
