@@ -510,7 +510,10 @@ fn menu() -> Result<()> {
             "9" => ha_setup_apply(),
             "10" => ha::show_status(),
             "11" => setup::ha_disable(),
-            "12" => { load_config()?; println!("Configuration OK."); Ok(()) },
+            "12" => match load_config() {
+                Ok(_) => { println!("Configuration OK."); Ok(()) },
+                Err(e) => Err(e)
+            },
             "13" => update(),
             "14" => return uninstall(false),
             "15" | "q" | "Q" => return Ok(()),
