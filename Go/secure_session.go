@@ -257,6 +257,7 @@ func (s *secureSession) handle(frame []byte,now time.Time)([]byte,error){
  if s.region=="foreign" && s.state==4 {
   if typ==helloClient {
    if len(body)!=5+16+32 || !verifyMAC(s.authenticationKey(),body,tag) {
+    s.errors++
     return nil,errors.New("unauthenticated reconnect hello")
    }
    var cid [16]byte
@@ -279,7 +280,7 @@ func (s *secureSession) handle(frame []byte,now time.Time)([]byte,error){
   }
   if typ==helloFinish && s.pending!=nil {
    result,err:=s.pending.handle(frame,now)
-   if err!=nil{return nil,err}
+   if err!=nil{s.errors++;return nil,err}
    if s.pending.state==4 {
     // Keep only a bounded recent-ID memory; old HMACed hellos are rejected
     // without allocating a candidate or disturbing the active data path.
@@ -311,7 +312,7 @@ func (s *secureSession) handle(frame []byte,now time.Time)([]byte,error){
  if typ==helloClient{
   if s.region!="foreign"||len(body)!=5+16+32{return nil,errors.New("invalid client hello")}
   var cid [16]byte;copy(cid[:],body[5:21])
-  if !verifyMAC(s.authenticationKey(),body,tag){return nil,errors.New("unauthenticated client hello")}
+  if !verifyMAC(s.authenticationKey(),body,tag){s.errors++;return nil,errors.New("unauthenticated client hello")}
   if s.state==4 && now.Sub(s.lastValid)<20*time.Second{return nil,nil}
   if s.state==3 && cid==s.clientID {
    reply:=controlBody(helloServer,s.clientID,s.serverID,s.serverPublic)
@@ -334,6 +335,7 @@ func (s *secureSession) handle(frame []byte,now time.Time)([]byte,error){
  if typ==helloServer{
   if s.region!="iran"||s.state!=1||len(body)!=5+16+16+32{return nil,errors.New("unexpected server hello")}
   if !bytes.Equal(body[5:21],s.clientID[:]) || !verifyMAC(s.authenticationKey(),body,tag){
+   s.errors++
    return nil,errors.New("untrusted server hello")
   }
   copy(s.serverID[:],body[21:37])
@@ -346,6 +348,7 @@ func (s *secureSession) handle(frame []byte,now time.Time)([]byte,error){
  if typ==helloFinish{
   if s.region!="foreign"||(s.state!=3&&s.state!=4)||len(body)!=5+16+16{return nil,errors.New("unexpected client finish")}
   if !bytes.Equal(body[5:21],s.clientID[:])||!bytes.Equal(body[21:37],s.serverID[:])||!verifyMAC(s.confirmKey,body,tag){
+   s.errors++
    return nil,errors.New("invalid client finish")
   }
   s.state=4;s.lastValid=now
@@ -355,6 +358,7 @@ func (s *secureSession) handle(frame []byte,now time.Time)([]byte,error){
  if typ==helloAck{
   if s.region!="iran"||s.state!=2||len(body)!=5+16+16{return nil,errors.New("unexpected server ack")}
   if !bytes.Equal(body[5:21],s.clientID[:])||!bytes.Equal(body[21:37],s.serverID[:])||!verifyMAC(s.confirmKey,body,tag){
+   s.errors++
    return nil,errors.New("untrusted server ack")
   }
   s.state=4;s.lastValid=now
