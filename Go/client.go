@@ -128,8 +128,8 @@ type Client struct {
 	recvPacket             atomic.Uint64
 	sendPacketSize         atomic.Uint64
 	recvPacketSize         atomic.Uint64
-	localAddrToConnMapSize int
-	localIdToConnMapSize   int
+	localAddrToConnMapSize atomic.Int64
+	localIdToConnMapSize   atomic.Int64
 
 	recvcontrol chan int
 
@@ -205,11 +205,11 @@ func (p *Client) SendPacket() uint64 {
 }
 
 func (p *Client) LocalIdToConnMapSize() int {
-	return p.localIdToConnMapSize
+	return int(p.localIdToConnMapSize.Load())
 }
 
 func (p *Client) LocalAddrToConnMapSize() int {
-	return p.localAddrToConnMapSize
+	return int(p.localAddrToConnMapSize.Load())
 }
 
 func (p *Client) touchActivity() {
@@ -426,8 +426,8 @@ func (p *Client) AcceptTcpConn(conn *net.TCPConn, targetAddr string) {
 
 	tcpsrcaddr := conn.RemoteAddr().(*net.TCPAddr)
 
-	if p.maxconn > 0 && p.localIdToConnMapSize >= p.maxconn {
-		loggo.Info("too many connections %d, client accept new local tcp fail %s", p.localIdToConnMapSize, tcpsrcaddr.String())
+	if p.maxconn > 0 && p.localIdToConnMapSize.Load() >= int64(p.maxconn) {
+		loggo.Info("too many connections %d, client accept new local tcp fail %s", p.localIdToConnMapSize.Load(), tcpsrcaddr.String())
 		return
 	}
 
@@ -722,8 +722,8 @@ func (p *Client) Accept() error {
 		now := common.GetNowUpdateInSecond()
 		clientConn := p.getClientConnByAddr(srcaddr.String())
 		if clientConn == nil {
-			if p.maxconn > 0 && p.localIdToConnMapSize >= p.maxconn {
-				loggo.Info("too many connections %d, client accept new local udp fail %s", p.localIdToConnMapSize, srcaddr.String())
+			if p.maxconn > 0 && p.localIdToConnMapSize.Load() >= int64(p.maxconn) {
+				loggo.Info("too many connections %d, client accept new local udp fail %s", p.localIdToConnMapSize.Load(), srcaddr.String())
 				continue
 			}
 			uuid := common.UniqueId()
@@ -905,18 +905,18 @@ func (p *Client) ping() {
 }
 
 func (p *Client) showNet() {
-	p.localAddrToConnMapSize = 0
+	p.localAddrToConnMapSize.Store(0)
 	p.localIdToConnMap.Range(func(key, value interface{}) bool {
-		p.localAddrToConnMapSize++
+		p.localAddrToConnMapSize.Add(1)
 		return true
 	})
-	p.localIdToConnMapSize = 0
+	p.localIdToConnMapSize.Store(0)
 	p.localIdToConnMap.Range(func(key, value interface{}) bool {
-		p.localIdToConnMapSize++
+		p.localIdToConnMapSize.Add(1)
 		return true
 	})
 	loggo.Info("send %dPacket/s %dKB/s recv %dPacket/s %dKB/s %d/%dConnections",
-		p.sendPacket.Load(), p.sendPacketSize.Load()/1024, p.recvPacket.Load(), p.recvPacketSize.Load()/1024, p.localAddrToConnMapSize, p.localIdToConnMapSize)
+		p.sendPacket.Load(), p.sendPacketSize.Load()/1024, p.recvPacket.Load(), p.recvPacketSize.Load()/1024, p.localAddrToConnMapSize.Load(), p.localIdToConnMapSize.Load())
 	p.sendPacket.Store(0)
 	p.recvPacket.Store(0)
 	p.sendPacketSize.Store(0)
@@ -1073,8 +1073,8 @@ func (p *Client) recvSock5UDP(relayConn *net.UDPConn, expectedIP net.IP, expecte
 		connKey := p.sock5UDPConnKey(relayConn, srcaddr, targetAddr)
 		clientConn := p.getClientConnByAddr(connKey)
 		if clientConn == nil {
-			if p.maxconn > 0 && p.localIdToConnMapSize >= p.maxconn {
-				loggo.Info("too many connections %d, client accept new sock5 udp fail %s", p.localIdToConnMapSize, srcaddr.String())
+			if p.maxconn > 0 && p.localIdToConnMapSize.Load() >= int64(p.maxconn) {
+				loggo.Info("too many connections %d, client accept new sock5 udp fail %s", p.localIdToConnMapSize.Load(), srcaddr.String())
 				continue
 			}
 			uuid := common.UniqueId()
