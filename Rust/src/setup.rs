@@ -61,7 +61,7 @@ pub(crate) fn wizard() -> Result<()> {
     let pair_key = match (region, saved_key) {
         ("foreign", Some(key)) => {
             println!("3) Existing shared pairing key retained; no regeneration.");
-            println!("Pairing key for your Iran setup (keep private): {key}");
+            println!("Run sudo pingtunnel key only when you need to transfer the secret again.");
             key
         }
         ("foreign", None) => {
