@@ -29,6 +29,7 @@ type CryptoConfig struct {
 	Key    []byte
 	Cipher cipher.AEAD
 	auto *autoCrypto
+	secure *secureSession
 }
 
 // NewCryptoConfig creates a new crypto configuration
@@ -114,7 +115,7 @@ func (c *CryptoConfig) Encrypt(data []byte) ([]byte, error) {
 		return data, nil
 	}
 
-	if c.Mode == AUTO { return c.auto.encrypt(data) }
+	if c.Mode == AUTO { if c.sec != nil { return c.sec.encrypt(data) }; return c.auto.encrypt(data) }
 	if c.Cipher == nil {
 		return nil, errors.New("cipher not initialized")
 	}
@@ -142,7 +143,7 @@ func (c *CryptoConfig) Decrypt(data []byte) ([]byte, error) {
 		return data, nil
 	}
 
-	if c.Mode == AUTO { return c.auto.decrypt(data) }
+	if c.Mode == AUTO { if c.sec != nil { return c.sec.decrypt(data) }; return c.auto.decrypt(data) }
 	if c.Cipher == nil {
 		return nil, errors.New("cipher not initialized")
 	}
