@@ -149,7 +149,7 @@ fn go_core_config(cfg:&Value)->Result<Value>{
     let mut config=json!({
         "type":if region=="iran"{"client"}else{"server"},
         "key":numeric_auth_code(key)?,
-        "encrypt":"auto", "encrypt_key":key,
+        "encrypt":"auto", "encrypt_key":key, "region":region,
         "tcp":protocol,"noprint":1,"nolog":1
     });
     if region=="iran"{
