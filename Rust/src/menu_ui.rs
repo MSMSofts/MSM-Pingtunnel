@@ -140,9 +140,9 @@ pub(crate) fn render(view: &MenuView<'_>, color: bool, unicode: bool) -> String 
         .map(|v|format!("{v:.1} MiB")).unwrap_or_else(||"—".into());
     let mean_ram=view.resources.ram_average
         .map(|v|format!("{v:.1} MiB")).unwrap_or_else(||"—".into());
-    let _=writeln!(out,"  {:<18}: {:<20} {}", "CPU (10s)",colored(&current_cpu,"1;33",color),format!("Avg 60s: {mean_cpu}"));
-    let _=writeln!(out,"  {:<18}: {:<20} {}", "RAM (RSS)",colored(&current_ram,"1;35",color),format!("Avg 60s: {mean_ram}"));
-    let _=writeln!(out,"  {}",colored("  Sample every 10s | CPU 100% = one vCPU | — = unavailable", "2",color));
+    let _=writeln!(out,"  {:<18}: {:<20} {}", "CPU (10s)",colored(&format!("{current_cpu:<20}"),"1;33",color),format!("Avg 60s: {mean_cpu}"));
+    let _=writeln!(out,"  {:<18}: {:<20} {}", "RAM (RSS)",colored(&format!("{current_ram:<20}"),"1;35",color),format!("Avg 60s: {mean_ram}"));
+    let _=writeln!(out,"  {}",colored("  LIVE  /  Refresh every 10s  /  CPU 100% = 1 vCPU", "2",color));
 
     section(&mut out, "02  SERVICE CONTROLS", color, unicode);
     option_line(&mut out, (1, "Status"), Some((2, "Start")), color);
