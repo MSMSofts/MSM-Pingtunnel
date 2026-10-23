@@ -128,9 +128,7 @@ func (a *AdaptivePerformance) Status(bufferBytes,maxWindow,rto int) adaptiveStat
  a.mu.Lock();defer a.mu.Unlock()
  p:=a.parametersLocked(bufferBytes,maxWindow,rto)
  profile:="learning"
- if a.samples>0 {
-  if a.degraded{profile="degraded"}else{profile="stable"}
- }
+ if a.degraded {profile="degraded"} else if a.samples>0 {profile="stable"}
  return adaptiveStatus{
   Profile:profile, Samples:a.samples,
   RTTMs:math.Round(a.srttMs*10)/10,
