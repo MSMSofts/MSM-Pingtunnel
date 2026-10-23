@@ -1,4 +1,5 @@
 use serde_json::{json, Value};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use std::env;
 use std::error::Error;
 use std::fs::{self, OpenOptions};
@@ -14,6 +15,7 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 const CONFIG: &str = "/opt/pingtunnel/conf/config.json";
 const CORE: &str = "/opt/pingtunnel/bin/pingtunnel";
+const CORE_CONFIG: &str = "/run/pingtunnel-core.json";
 const UNIT: &str = "/etc/systemd/system/pingtunnel.service";
 const DROPIN: &str = "/etc/systemd/system/pingtunnel.service.d/memory.conf";
 const UPDATE_URL: &str =
@@ -78,6 +80,13 @@ fn validate(cfg: &Value) -> Result<()> {
     let tcp = get_number(cfg, "tcp", 1)?;
     if tcp > 1 {
         return Err(failure("tcp must be 0 (UDP) or 1 (TCP)."));
+    }
+    if let Some(key) = cfg.get("crypto_key") {
+        let key = key.as_str().ok_or_else(|| failure("crypto_key must be base64 text."))?;
+        let bytes = STANDARD.decode(key).map_err(|_| failure("crypto_key must be base64."))?;
+        if bytes.len() != 32 || STANDARD.encode(&bytes) != key {
+            return Err(failure("crypto_key must be a canonical base64-encoded 32-byte random key."));
+        }
     }
     if get_number(cfg, "memory_mb", 0)? > 1_048_576 {
         return Err(failure("memory_mb exceeds the supported limit."));
@@ -227,32 +236,55 @@ fn core_args(cfg: &Value) -> Result<Vec<String>> {
     Ok(args)
 }
 
+// Translate the legacy manager config into the upstream Go core's JSON schema.
+// Never place authentication or encryption secrets in /proc/PID/cmdline.
+fn go_core_config(cfg: &Value) -> Result<Value> {
+    validate(cfg)?;
+    let role = get_string(cfg, "type").unwrap_or("server");
+    let key: i64 = cfg.get("key").and_then(as_string)
+        .ok_or_else(|| failure("Missing shared numeric authentication key"))?
+        .parse().map_err(|_| failure("Shared authentication key must be numeric"))?;
+    if !(0..=2147483647).contains(&key) {
+        return Err(failure("Shared authentication key outside Go core's valid range"));
+    }
+    let mut go = json!({
+        "type":role, "key":key, "tcp":get_number(cfg,"tcp",1)?,
+        "nolog":1, "noprint":1
+    });
+    if role == "client" {
+        let port = get_number(cfg,"l_port",0)?;
+        let host = get_string(cfg,"server").unwrap_or("");
+        let target = get_string(cfg,"target")
+            .map(str::to_owned).unwrap_or_else(|| format!("{host}:{port}"));
+        go["listen"] = json!(format!(":{port}"));
+        go["server"] = json!(host);
+        go["target"] = json!(target);
+    }
+    if let Some(secret) = get_string(cfg,"crypto_key") {
+        go["encrypt"] = json!("auto");
+        go["encrypt_key"] = json!(secret);
+    }
+    Ok(go)
+}
+
 fn run_core(dry_run: bool) -> Result<()> {
     let cfg = load_config()?;
     let bin = core_binary(&cfg);
     if !bin.is_file() {
-        return Err(failure(format!("Core binary is missing: {}", bin.display())));
+        return Err(failure(format!("Missing Go core at {}", bin.display())));
     }
-    let args = core_args(&cfg)?;
+    let go = go_core_config(&cfg)?;
     if dry_run {
-        let shown: Vec<String> = args
-            .iter()
-            .enumerate()
-            .map(|(i, arg)| {
-                if i > 0 && args[i - 1] == "-key" {
-                    "[REDACTED]".to_owned()
-                } else {
-                    arg.clone()
-                }
-            })
-            .collect();
-        println!("{} {}", bin.display(), shown.join(" "));
+        println!("{} -c {}  (key material stored in private 0600 JSON, not command line)",
+            bin.display(), CORE_CONFIG);
+        println!("Cipher: {}", if go.get("encrypt") == Some(&json!("auto")) {
+            "AUTO (CPU benchmark AES-256-GCM / XChaCha20-Poly1305)"
+        } else { "legacy unencrypted (run Easy setup on BOTH servers)" });
         return Ok(());
     }
-
-    // exec() replaces this Rust process with the Go core in the SAME PID.
-    // There is no resident Rust or Python monitor.
-    let error = Command::new(&bin).args(&args).exec();
+    let serialized = serde_json::to_vec(&go)?;
+    atomic_save(Path::new(CORE_CONFIG), &serialized, 0o600)?;
+    let error = Command::new(&bin).arg("-c").arg(CORE_CONFIG).exec();
     Err(Box::new(error))
 }
 
@@ -669,6 +701,28 @@ mod tests {
         assert!(validate(&cfg).is_ok());
         cfg["tcp"] = json!(0);
         assert!(validate(&cfg).is_ok());
+    }
+
+    #[test]
+    fn strong_encryption_mode_and_secret_redaction() {
+        let secret = STANDARD.encode([23u8;32]);
+        let cfg = json!({"type":"client","key":"12345","tcp":1,
+            "server":"foreign.example","l_port":4455,"crypto_key":secret});
+        let generated = go_core_config(&cfg).unwrap();
+        assert_eq!(generated["encrypt"],"auto");
+        assert_eq!(generated["encrypt_key"],secret);
+        assert_eq!(generated["key"],12345);
+        assert_eq!(generated["listen"],":4455");
+        let mut invalid = cfg.clone();
+        invalid["crypto_key"] = json!("12345");
+        assert!(validate(&invalid).is_err());
+    }
+
+    #[test]
+    fn legacy_configs_can_still_upgrade_without_silent_key_changes() {
+        let cfg=json!({"type":"server","key":"12345"});
+        let generated=go_core_config(&cfg).unwrap();
+        assert!(generated.get("encrypt").is_none());
     }
 
     #[test]
