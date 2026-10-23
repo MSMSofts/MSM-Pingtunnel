@@ -2,15 +2,15 @@
 
 **یک تونل ICMP رمزنگاری‌شده، دو سرور، راه‌اندازی ساده و مدیریت سبک.**
 
-[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.2.1](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.1)
+[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.2.2](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.2)
 
-![Version](https://img.shields.io/badge/version-3.2.1-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.2.2-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml)
 
 **Pingtunnel Manager** ابزاری برای نصب، جفت‌سازی، مدیریت و پایش یک تونل مبتنی بر **ICMP** میان **یک VPS ایران و یک VPS خارج** است. ترافیک برنامه‌های TCP یا UDP ابتدا وارد سرور ایران می‌شود، از طریق ICMP رمزنگاری‌شده به سرور خارج می‌رسد و در نهایت به سرویس محلی موردنظر تحویل داده می‌شود.
 
 این پروژه **به‌تنهایی سرویس VPN یا جایگزین Hysteria 2، Xray و s-ui نیست**؛ بلکه لایهٔ انتقال میان دو سرور را فراهم می‌کند.
 
-> **نسخه فعلی: 3.2.1** — مدیریت با Rust، هستهٔ انتقال با Go، تنظیمات نسخه 3 و پروتکل رمزنگاری Wire v4. قابلیت تونل معکوس و تغییر خودکار جهت هنوز پیاده‌سازی نشده است.
+> **نسخه فعلی: 3.2.2** — مدیریت با Rust، هستهٔ انتقال با Go، تنظیمات نسخه 3 و پروتکل رمزنگاری Wire v4. قابلیت تونل معکوس و تغییر خودکار جهت هنوز پیاده‌سازی نشده است.
 
 ## چرا Pingtunnel Manager؟
 
@@ -82,7 +82,7 @@ curl -fsSL https://raw.githubusercontent.com/MSMSofts/Pingtunnel_manager/main/So
 sudo bash /tmp/pingtunnel-install.sh
 ~~~
 
-پیشنهاد می‌شود پیش از اجرای هر اسکریپت نصب اینترنتی، محتوای فایل دانلودشده را بررسی کنی. نصب‌کننده باینری‌های منتشرشدهٔ [v3.2.1](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.1) را همراه با SHA256 و Manifest بررسی می‌کند و قبل از جایگزینی فایل‌های موجود، تطابق نسخهٔ Manager، هسته Go و Wire Protocol را کنترل می‌کند.
+پیشنهاد می‌شود پیش از اجرای هر اسکریپت نصب اینترنتی، محتوای فایل دانلودشده را بررسی کنی. نصب‌کننده باینری‌های منتشرشدهٔ [v3.2.2](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.2) را همراه با SHA256 و Manifest بررسی می‌کند و قبل از جایگزینی فایل‌های موجود، تطابق نسخهٔ Manager، هسته Go و Wire Protocol را کنترل می‌کند.
 
 ### راه‌اندازی: ابتدا خارج، سپس ایران
 
@@ -117,6 +117,81 @@ sudo pingtunnel logs 100
 ~~~
 
 همچنین اجرای `pingtunnel` منوی یکپارچه را باز می‌کند.
+
+## راهنمای منوی تعاملی جدید
+
+منوی اصلی با اجرای `sudo pingtunnel` باز می‌شود و در نسخه **3.2.2** به چهار بخش تقسیم شده است. بالای منو، موقعیت فیزیکی VPS، IP سرور مقابل، نوع ترافیک و **پورت همین سرور**، و وضعیت جاری سرویس systemd را می‌بینی. این خلاصه کلید رمزنگاری یا سایر اسرار را نمایش نمی‌دهد.
+
+~~~text
++--------------------------------------------------------------------+
+|   PINGTUNNEL MANAGER                                               |
+|   SECURE ICMP TUNNEL  |  v3.2.2  |  Wire v4                        |
++--------------------------------------------------------------------+
+
+  TUNNEL OVERVIEW
+  ------------------------------------------------------------------
+  Location          : Iran (ingress)
+  Peer IPv4         : 203.0.113.10
+  Local transport   : UDP / 444
+  Service status    : active
+
+  SERVICE CONTROLS
+  ------------------------------------------------------------------
+   1) Status                      2) Start
+   3) Stop                        4) Restart
+   5) View logs
+
+  SETUP & CONFIGURATION
+  ------------------------------------------------------------------
+   6) Setup Wizard                7) Show pairing key
+
+  DIAGNOSTICS
+  ------------------------------------------------------------------
+   8) Adaptive Performance        9) Validate config
+  13) Security status            14) Health check
+
+  MAINTENANCE
+  ------------------------------------------------------------------
+  10) Update                     11) Uninstall
+  12) Exit
+~~~
+
+نمای بالا **صرفاً مثال** است. در ترمینال UTF-8، کادرهای گرافیکی و رنگ‌های ملایم نمایش داده می‌شوند؛ اگر خروجی ترمینال نباشد، `TERM=dumb` باشد یا متغیر `NO_COLOR` تنظیم شده باشد، منو بدون کد رنگ نمایش داده می‌شود. نسخه برنامه به‌صورت خودکار خوانده می‌شود، نه اینکه ثابت داخل منو نوشته شده باشد.
+
+### تمام ۱۴ گزینه منو
+
+| شماره | گروه | کاربرد |
+| --- | --- | --- |
+| **1 — Status** | سرویس | نمایش جزئیات وضعیت systemd |
+| **2 — Start** | سرویس | اجرای سرویس تونل |
+| **3 — Stop** | سرویس | توقف سرویس تونل |
+| **4 — Restart** | سرویس | راه‌اندازی مجدد سرویس؛ اتصال‌های فعال ممکن است قطع شوند |
+| **5 — View logs** | سرویس | نمایش ۱۰۰ خط آخر لاگ |
+| **6 — Setup Wizard** | پیکربندی | راه‌اندازی پنج‌مرحله‌ای یا اصلاح تنظیمات همین VPS |
+| **7 — Show pairing key** | پیکربندی | نمایش **کلید محرمانه**؛ از ارسال آن در گزارش عمومی خودداری کن |
+| **8 — Adaptive Performance** | عیب‌یابی | RTT، Jitter، برآورد پاسخ‌های ازدست‌رفته و تنظیمات TCP بعدی |
+| **9 — Validate config** | عیب‌یابی | بررسی قالب و اعتبار تنظیمات ذخیره‌شده |
+| **10 — Update** | نگهداری | دریافت نسخه منتشرشده از مسیر نصب‌کننده و به‌روزرسانی |
+| **11 — Uninstall** | نگهداری | حذف برنامه با تأیید صریح؛ تنظیمات به‌صورت پیش‌فرض محفوظ می‌مانند |
+| **12 — Exit** | نگهداری | خروج از منوی مدیریتی بدون توقف تونل |
+| **13 — Security status** | عیب‌یابی | وضعیت مذاکره، Anti-Replay، خطاهای احراز اصالت و Smart Recovery |
+| **14 — Health check** | عیب‌یابی | بررسی فعال‌بودن سرویس و تازگی Heartbeat هسته Go |
+
+**نام و شماره همه گزینه‌ها ثابت مانده‌اند**؛ فقط نحوه نمایش بهتر شده است.
+
+### توضیح مرحله‌به‌مرحله Setup Wizard
+
+ابتدا روی **سرور خارج**، سپس روی **سرور ایران** گزینه **6 — Setup Wizard** را اجرا کن. همین مراحل با فرمان `sudo pingtunnel setup` نیز در دسترس‌اند:
+
+1. **Location / Region:** سرور فعلی را *Foreign* یا *Iran* تعیین کن؛ این هویت با جهت آیندهٔ تونل اشتباه گرفته نمی‌شود.
+2. **Opposite VPS IPv4:** فقط IPv4 سرور دیگر را وارد کن. برای خارج، IP ایران و برای ایران، IP خارج را بده.
+3. **Pairing Key:** سرور خارج در اولین راه‌اندازی یک کلید تصادفی ۲۵۶ بیتی تولید و یک‌بار نمایش می‌دهد؛ همان کلید را روی سرور ایران با ورودی مخفی وارد کن. اجرای مجدد Setup کلید ذخیره‌شده را تغییر نمی‌دهد.
+4. **Forwarded Transport:** *TCP* یا *UDP* را انتخاب کن؛ **هر دو سرور باید یک پروتکل انتخاب کنند**. حامل بین دو VPS همچنان ICMP است.
+5. **This VPS Port:** روی ایران پورت دریافت کاربران را تعیین کن؛ روی خارج پورت سرویس مقصد (مانند Hysteria 2 در s-ui) را. پورت‌های دو سرور **مستقل** هستند؛ مقادیر پیش‌فرض پیشنهادی TCP=443 و UDP=444 هستند.
+
+پس از تکمیل مراحل، فایل تنظیمات با دسترسی محدود ذخیره می‌شود، سرویس systemd تنظیم و راه‌اندازی می‌شود و سایر پارامترها خودکار باقی می‌مانند. برای مثال `Iran:444/UDP → ICMP → Foreign:8443/UDP` با پورت Hysteria 2 روی `127.0.0.1:8443`.
+
+برای بررسی نتیجه از منو گزینه‌های **1، 13، 14 و 8** را ببین؛ یا `sudo pingtunnel status`، `sudo pingtunnel security`، `sudo pingtunnel health` و `sudo pingtunnel performance` را اجرا کن.
 
 ## فرمان‌های مدیریتی
 
@@ -163,8 +238,9 @@ sudo pingtunnel logs 100
 
 | نسخه | تنظیمات | پروتکل بین VPSها | سازگاری |
 | --- | --- | --- | --- |
-| **3.2.1** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | نسخه فعلی؛ بدون تغییر کلید و پروتکل |
-| **3.2.0** | `schema_version=3` | Wire v4 | با 3.2.1 سازگار در سطح پروتکل |
+| **3.2.2** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | نسخه فعلی؛ بدون تغییر کلید و پروتکل |
+| **3.2.1** | `schema_version=3` | Wire v4 | نسخه قبلی؛ هم‌ساز با 3.2.2 |
+| **3.2.0** | `schema_version=3` | Wire v4 | با 3.2.2 سازگار در سطح پروتکل |
 | **3.1.0** | `schema_version=3` | Wire v4 | پایه Forward Secrecy و Anti-Replay |
 | **3.0.0** | `schema_version=3` | قالب قدیمی `PTA1` | از نظر قالب تنظیمات قابل ارتقاست، اما با Wire v4 هم‌زمان متصل نمی‌شود |
 | **قبل از 3.0** | قالب قدیمی | قدیمی | مهاجرت خودکار پشتیبانی نمی‌شود |
@@ -173,7 +249,7 @@ sudo pingtunnel logs 100
 
 > **نکته پس از انتقال مخزن:** برای به‌روزرسانی، فعلاً از دستور نصب با نشانی جدید `MSMSofts/Pingtunnel_manager` در بخش «نصب سریع» استفاده کن. برخی باینری‌های منتشرشده پیش از انتقال، ممکن است در فرمان داخلی `pingtunnel update` هنوز به نشانی قدیمی مراجعه کنند.
 
-[جزئیات تغییرات](CHANGELOG.md) · [نسخه ثابت 3.2.1](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.1) · [نسخه rolling](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/rust-latest)
+[جزئیات تغییرات](CHANGELOG.md) · [نسخه ثابت 3.2.2](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.2) · [نسخه rolling](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/rust-latest)
 
 ## مسیر فایل‌ها
 
@@ -196,7 +272,7 @@ sudo pingtunnel logs 100
 
 ## محدودیت‌های فعلی و برنامه توسعه
 
-**در نسخه 3.2.1 وجود ندارند:** تونل معکوس واقعی (Reverse Forwarding)، انتخاب خودکار Direct/Reverse، HA، چند VPS، انتقال هم‌زمان TCP و UDP در یک نمونه تونل، تضمین مقابله با DoS حجمی، و Forward Secrecy فراتر از فرضیات امنیتی نشست‌های X25519.
+**در نسخه 3.2.2 وجود ندارند:** تونل معکوس واقعی (Reverse Forwarding)، انتخاب خودکار Direct/Reverse، HA، چند VPS، انتقال هم‌زمان TCP و UDP در یک نمونه تونل، تضمین مقابله با DoS حجمی، و Forward Secrecy فراتر از فرضیات امنیتی نشست‌های X25519.
 
 **بررسی‌های ضروری پیش از استفاده گسترده:** آزمایش ICMP روی دو VPS واقعی، تست عملی Hysteria 2، تزریق Packet Loss/Jitter، آزمون Restart و ارتقای دوطرفه، و ممیزی مستقل پروتکل رمزنگاری.
 

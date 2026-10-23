@@ -4,13 +4,14 @@
 
 ## سیاست امنیتی
 
-**Pingtunnel Manager 3.2.1** یک پروتکل انتقال ICMP با رمزنگاری احرازشده و توافق کلید موقت دارد. این پیاده‌سازی **ممیزی رمزنگاری مستقل عمومی نشده است** و ادعای ناشناس‌بودن ICMP، عبور قطعی از فیلترینگ یا مقاومت کامل در برابر حملات حجمی ندارد.
+**Pingtunnel Manager 3.2.2** یک پروتکل انتقال ICMP با رمزنگاری احرازشده و توافق کلید موقت دارد. این پیاده‌سازی **ممیزی رمزنگاری مستقل عمومی نشده است** و ادعای ناشناس‌بودن ICMP، عبور قطعی از فیلترینگ یا مقاومت کامل در برابر حملات حجمی ندارد.
 
 ### نسخه‌های پشتیبانی‌شده
 
 | نسخه | وضعیت |
 | --- | --- |
-| **3.2.1** | جدیدترین نسخه؛ اصلاح Data Race و سلامت سرویس |
+| **3.2.2** | نسخه فعلی؛ بهبود نمایش منو، بدون تغییر پروتکل |
+| **3.2.1** | نسخه قبلی؛ اصلاح Data Race و سلامت سرویس |
 | **3.2.0** | نسخه قبلی Wire v4؛ ارتقا توصیه می‌شود |
 | **3.1.0** | پروتکل Wire v4؛ ارتقا به 3.2 توصیه می‌شود |
 | **3.0.0** | پروتکل قدیمی؛ ارتباط مستقیم با 3.1/3.2 برقرار نمی‌شود |
@@ -54,7 +55,7 @@
 
 ## English security notes
 
-Pingtunnel Manager uses a **custom authenticated ICMP transport**. Version **3.2.1** is the documented release. This project has **not been independently audited**, and encryption does **not** guarantee resistance to traffic analysis, ICMP blocking, denial of service, or endpoint compromise.
+Pingtunnel Manager uses a **custom authenticated ICMP transport**. Version **3.2.2** is the documented release. This project has **not been independently audited**, and encryption does **not** guarantee resistance to traffic analysis, ICMP blocking, denial of service, or endpoint compromise.
 
 **Supported security properties:** a random 256-bit pairing root, PSK-authenticated ephemeral X25519 agreement, HKDF-SHA256 directional session keys, auto-selected AES-256-GCM/XChaCha20-Poly1305, authenticated 64-bit sequence numbers, a 1,024-packet replay window, and an overseas server policy restricting ingress peer IPv4 and the forwarding target to local loopback.
 
