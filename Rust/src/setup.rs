@@ -27,6 +27,18 @@ fn new_crypto_key() -> Result<String> {
     Ok(STANDARD.encode(bytes))
 }
 
+pub(crate) fn default_listen_port(tcp: u64) -> u16 {
+    if tcp == 0 { 444 } else { 443 }
+}
+
+// Only update the listen port when it was a known protocol default.
+// Never overwrite an arbitrary user-configured port.
+pub(crate) fn switched_listen_port(current: u64, previous_tcp: u64, next_tcp: u64) -> u64 {
+    if previous_tcp != next_tcp && current == u64::from(default_listen_port(previous_tcp)) {
+        u64::from(default_listen_port(next_tcp))
+    } else { current }
+}
+
 fn valid_peer(s: &str) -> bool {
     !s.is_empty() && s.len() <= 253 &&
     !s.starts_with('-') &&
@@ -154,7 +166,7 @@ pub(crate) fn wizard() -> Result<()> {
         if !cfg.get("l_port").and_then(Value::as_u64)
             .map(|n| (1..=65535).contains(&n)).unwrap_or(false)
         {
-            cfg["l_port"] = json!(4455);
+            cfg["l_port"] = json!(default_listen_port(cfg.get("tcp").and_then(Value::as_u64).unwrap_or(1)));
         }
         // TCP is the default transport of the forwarded service; UDP can be
         // selected later from the main menu without editing JSON by hand.
@@ -185,7 +197,12 @@ pub(crate) fn protocol_menu() -> Result<()> {
     if choice != "0" && choice != "1" {
         return Err(failure("Choose 0 or 1."));
     }
-    cfg["tcp"] = json!(choice.parse::<u8>()?);
+    let next_tcp = choice.parse::<u8>()?;
+    let previous_tcp = cfg.get("tcp").and_then(Value::as_u64).unwrap_or(1);
+    let listen = cfg.get("l_port").and_then(Value::as_u64)
+        .unwrap_or(u64::from(default_listen_port(previous_tcp)));
+    cfg["l_port"] = json!(switched_listen_port(listen, previous_tcp, next_tcp as u64));
+    cfg["tcp"] = json!(next_tcp);
     store_config(&cfg)?;
     apply_config()
 }
@@ -198,6 +215,16 @@ mod tests {
         let secret=new_crypto_key().unwrap();
         let decoded=STANDARD.decode(secret).unwrap();
         assert_eq!(decoded.len(),32);
+    }
+
+    #[test]
+    fn default_ports_tcp_443_and_udp_444() {
+        assert_eq!(default_listen_port(1), 443);
+        assert_eq!(default_listen_port(0), 444);
+        assert_eq!(switched_listen_port(443, 1, 0), 444);
+        assert_eq!(switched_listen_port(444, 0, 1), 443);
+        assert_eq!(switched_listen_port(7070, 1, 0), 7070);
+        assert_eq!(switched_listen_port(4455, 1, 0), 4455);
     }
 
     #[test]

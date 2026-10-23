@@ -16,6 +16,7 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 const CONFIG: &str = "/opt/pingtunnel/conf/config.json";
 const CORE: &str = "/opt/pingtunnel/bin/pingtunnel";
 const CORE_CONFIG: &str = "/run/pingtunnel-core.json";
+const PERF_STATUS: &str = "/run/pingtunnel-performance.json";
 const UNIT: &str = "/etc/systemd/system/pingtunnel.service";
 const DROPIN: &str = "/etc/systemd/system/pingtunnel.service.d/memory.conf";
 const UPDATE_URL: &str =
@@ -329,9 +330,17 @@ fn configure() -> Result<()> {
         return Err(failure("Role must be server or client."));
     }
     cfg["type"] = json!(role);
+    let previous_tcp = get_number(&cfg, "tcp", 1)?;
+    let selected_tcp = prompt("Forwarded traffic TCP=1, UDP=0", &previous_tcp.to_string())?
+        .parse::<u8>()?;
+    if selected_tcp > 1 {
+        return Err(failure("Select 0 (UDP) or 1 (TCP)."));
+    }
+    cfg["tcp"] = json!(selected_tcp);
     if role == "client" {
-        let port = get_number(&cfg, "l_port", 4000)?.to_string();
-        let port = prompt("Local listening port", &port)?.parse::<u16>()?;
+        let saved_port = get_number(&cfg, "l_port", u64::from(setup::default_listen_port(previous_tcp)))?;
+        let suggested = setup::switched_listen_port(saved_port, previous_tcp, selected_tcp.into());
+        let port = prompt("Local listening port", &suggested.to_string())?.parse::<u16>()?;
         if port == 0 {
             return Err(failure("Port cannot be zero."));
         }
@@ -357,8 +366,6 @@ fn configure() -> Result<()> {
     } else if !has_key {
         return Err(failure("Key cannot be empty."));
     }
-    let proto = get_number(&cfg, "tcp", 1)?.to_string();
-    cfg["tcp"] = json!(prompt("TCP=1, UDP=0", &proto)?.parse::<u8>()?);
     let limit = get_number(&cfg, "memory_mb", 0)?.to_string();
     cfg["memory_mb"] = json!(prompt("Memory limit in MB (0=unlimited)", &limit)?.parse::<u64>()?);
     let enabled = cfg.get("autostart").and_then(Value::as_bool).unwrap_or(false);
@@ -515,6 +522,7 @@ fn help() {
     println!("  pingtunnel setup             First-run automatic wizard (minimum peer details)");
     println!("  pingtunnel configure         Advanced config in menu; applies immediately");
     println!("  pingtunnel protocol          Choose TCP/UDP in menu; applies immediately");
+    println!("  pingtunnel performance       Show automatic RTT, jitter and TCP tuning");
     println!("  pingtunnel service-install   Write a native systemd unit");
     println!("  pingtunnel validate          Validate configuration");
     println!("  pingtunnel dry-run           Show the generated core command with key redacted");
@@ -552,7 +560,7 @@ fn menu() -> Result<()> {
         println!("1) Status       2) Start        3) Stop         4) Restart");
         println!("5) Logs         6) Easy setup   7) Settings     8) TCP / UDP");
         println!("9) Validate    10) Update      11) Uninstall  12) Expert editor");
-        println!("13) Exit");
+        println!("13) Exit         14) Adaptive Performance status");
         let choice = prompt("Choose", if installed { "1" } else { "6" })?;
         let action = match choice.as_str() {
             "1" => run_systemctl(&["status", "pingtunnel.service", "--no-pager"]),
@@ -571,14 +579,38 @@ fn menu() -> Result<()> {
             "11" => uninstall(false),
             "12" => edit_config(),
             "13" | "q" | "Q" => return Ok(()),
+            "14" => show_adaptive_status(),
             _ => {
-                println!("Unknown option; choose 1..13.");
+                println!("Unknown option; choose 1..14.");
                 continue;
             }
         };
         if let Err(error) = action {
             eprintln!("Operation failed: {error}");
         }
+    }
+}
+
+fn show_adaptive_status() -> Result<()> {
+    match fs::read(PERF_STATUS) {
+        Ok(bytes) => {
+            let data: Value = serde_json::from_slice(&bytes)?;
+            println!("Adaptive Performance (Go core, automatic)");
+            println!("  Profile: {}", data["profile"].as_str().unwrap_or("unknown"));
+            println!("  RTT: {} ms", data["rtt_ms"]);
+            println!("  Jitter: {} ms", data["jitter_ms"]);
+            println!("  Probe loss estimate: {}", data["probe_loss_estimate"]);
+            println!("  Next TCP retransmission: {} ms", data["next_tcp_resend_ms"]);
+            println!("  Next TCP window: {}", data["next_tcp_window"]);
+            println!("  Samples: {}", data["rtt_samples"]);
+            println!("  Existing TCP streams retain native BB congestion control.");
+            Ok(())
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            println!("No performance samples yet. Run the client Go service to start automatic measurement.");
+            Ok(())
+        }
+        Err(err) => Err(Box::new(err)),
     }
 }
 
@@ -621,6 +653,7 @@ fn main_inner() -> Result<()> {
         "setup" | "quick-setup" => setup::wizard(),
         "configure" | "config" => configure(),
         "protocol" => setup::protocol_menu(),
+        "performance" => show_adaptive_status(),
         "service-install" => service_install(),
         "validate" => {
             load_config()?;

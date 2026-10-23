@@ -77,12 +77,11 @@ jobs:
           cd upstream
           git checkout --detach df16e52771ee67f1f9770ec68763b425672a36fc
           test "$(git rev-parse HEAD)" = "df16e52771ee67f1f9770ec68763b425672a36fc"
-      - name: Overlay Go crypto source and tests
+      - name: Overlay Go crypto and adaptive performance source
         run: |
-          cp Go/crypto.go upstream/crypto.go
-          cp Go/auto_crypto.go Go/auto_crypto_test.go upstream/
+          cp Go/*.go upstream/
           cd upstream
-          gofmt -w crypto.go auto_crypto.go auto_crypto_test.go
+          gofmt -w crypto.go auto_crypto.go auto_crypto_test.go adaptive_performance.go adaptive_performance_test.go client.go
       - name: Run upstream and auto crypto tests
         run: cd upstream && go test ./...
       - name: Build static modified Go core
