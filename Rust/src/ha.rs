@@ -246,7 +246,7 @@ pub(crate) fn setup(cfg: &mut Value) -> Result<()> {
     });
     validate(cfg)?;
     crate::store_config(cfg)?;
-    println!("HA configured. Apply: sudo pingtunnel service-install && sudo pingtunnel restart");
+    println!("HA settings saved. Service changes are applied automatically by the menu.");
     println!("Verify the backup and watch: sudo pingtunnel ha-status");
     Ok(())
 }

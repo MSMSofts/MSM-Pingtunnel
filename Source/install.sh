@@ -24,7 +24,7 @@ case "$(uname -m)" in
 esac
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y --no-install-recommends curl ca-certificates unzip tar
+apt-get install -y --no-install-recommends curl ca-certificates unzip tar nano
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 mkdir -p /opt/pingtunnel/bin /opt/pingtunnel/conf
@@ -60,11 +60,10 @@ if (( ! prebuilt )); then
   cargo build --release --manifest-path "$work/source/Pingtunnel_manager-main/Rust/Cargo.toml"
   cp "$work/source/Pingtunnel_manager-main/Rust/target/release/pingtunnel" "$work/manager"
 fi
-# Refuse stale rolling-release assets from the previous 2.1 release.
-# Do not silently install a TCP-only HA manager when the user requested UDP HA.
+# Do not accidentally install a stale rolling release while upgrading the manager.
 manager_version="$("$work/manager" --version)"
-if [[ "$manager_version" != "2.2.0" ]]; then
-  echo "Expected Pingtunnel Manager 2.2.0 with UDP HA, got: $manager_version" >&2
+if [[ "$manager_version" != "2.3.0" ]]; then
+  echo "Expected Pingtunnel Manager 2.3.0 with unified automatic menu, got: $manager_version" >&2
   echo "Check the current rust-latest release assets before retrying." >&2
   exit 1
 fi
@@ -78,13 +77,15 @@ if [[ "${PINGTUNNEL_REFRESH_GO:-0}" == "1" || ! -f "$CORE" ]]; then
   [[ -s "$work/core" ]] || { echo "Empty core." >&2; exit 1; }
   chmod 755 "$work/core"
 fi
+configured=0
 if [[ -f "$CONFIG" ]]; then
   "$work/manager" validate
+  chmod 600 "$CONFIG"
+  configured=1
 else
-  echo "First-time configuration:"
-  "$work/manager" configure
+  echo "First install: the lightweight menu wizard is available after installation."
+  echo "No role/server address has been invented. Run 'pingtunnel' and select Easy setup."
 fi
-chmod 600 "$CONFIG"
 
 echo "[3/4] Atomic manager installation..."
 previously_active=0
@@ -123,9 +124,16 @@ if [[ -f "$work/core" ]]; then
   mv -f "$core_new" "$CORE"
   core_new=""
 fi
-"$MANAGER" service-install
-if (( previously_active )) || systemctl is-enabled --quiet pingtunnel.service; then
-  systemctl restart pingtunnel.service
+if (( configured )); then
+  "$MANAGER" service-install
+  if (( previously_active )) || systemctl is-enabled --quiet pingtunnel.service; then
+    systemctl restart pingtunnel.service
+  fi
+else
+  # A fresh install must not start an unconfigured service.
+  systemctl daemon-reload
 fi
 trap - ERR
-echo "[4/4] Installed. Use: sudo pingtunnel ; sudo pingtunnel status"
+echo "[4/4] Installed successfully."
+echo "Type: pingtunnel"
+echo "All options are in its menu; choose Easy setup once to pair the two servers."
