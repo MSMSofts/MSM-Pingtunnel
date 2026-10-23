@@ -2,7 +2,7 @@ package pingtunnel
 
 import (
 	"encoding/binary"
-	"bytes"
+	stdbytes "bytes"
 	"errors"
 	"net"
 	"sync"
@@ -121,7 +121,7 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *bool, conn icmp.PacketConn, 
         if cryptoConfig!=nil && cryptoConfig.sec!=nil {
             peer:=icmpSrcToIPAddr(srcaddr)
             if peer==nil||!cryptoConfig.SecurePeerAllowed(peer.IP){continue}
-            if bytes.HasPrefix(payloadData,secureControlMagic[:]) {
+            if stdbytes.HasPrefix(payloadData,secureControlMagic[:]) {
                 response,err:=cryptoConfig.ReceiveSecureControl(payloadData,time.Now())
                 if err==nil&&len(response)>0 {
                     replyType:=8
