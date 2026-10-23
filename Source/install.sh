@@ -90,6 +90,8 @@ rollback() {
   code=$?
   trap - ERR
   echo "Installation failed ($code). Restoring previous files." >&2
+  if [[ -n "${manager_new:-}" ]]; then rm -f "$manager_new"; fi
+  if [[ -n "${core_new:-}" ]]; then rm -f "$core_new"; fi
   if (( had_manager )); then rm -f "$MANAGER"; cp -a "$work/old-manager" "$MANAGER"; else rm -f "$MANAGER"; fi
   if (( had_core )); then cp -a "$work/old-core" "$CORE"; else rm -f "$CORE"; fi
   if (( had_unit )); then cp -a "$work/old-unit" "$UNIT"; else rm -f "$UNIT"; fi
@@ -98,13 +100,20 @@ rollback() {
   if (( previously_active )); then systemctl restart pingtunnel.service || true; fi
   exit "$code"
 }
+manager_new=""
+core_new=""
 trap rollback ERR
 systemctl stop pingtunnel.service >/dev/null 2>&1 || true
-install -m 0755 "$work/manager" "$work/manager.new"
-mv -f "$work/manager.new" "$MANAGER"
+# Stage on the same filesystem as the destination for atomic rename.
+manager_new="$(mktemp /usr/local/bin/.pingtunnel.XXXXXX)"
+install -m 0755 "$work/manager" "$manager_new"
+mv -f "$manager_new" "$MANAGER"
+manager_new=""
 if [[ -f "$work/core" ]]; then
-  install -m 0755 "$work/core" "$work/core.new"
-  mv -f "$work/core.new" "$CORE"
+  core_new="$(mktemp /opt/pingtunnel/bin/.pingtunnel.XXXXXX)"
+  install -m 0755 "$work/core" "$core_new"
+  mv -f "$core_new" "$CORE"
+  core_new=""
 fi
 "$MANAGER" service-install
 if (( previously_active )) || systemctl is-enabled --quiet pingtunnel.service; then
