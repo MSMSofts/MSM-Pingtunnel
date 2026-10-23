@@ -1,6 +1,8 @@
 package pingtunnel
 
 import (
+	"net"
+	"time"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -29,6 +31,7 @@ type CryptoConfig struct {
 	Key    []byte
 	Cipher cipher.AEAD
 	auto *autoCrypto
+	sec *secureSession
 }
 
 // NewCryptoConfig creates a new crypto configuration
@@ -89,6 +92,34 @@ func NewCryptoConfig(mode EncryptionMode, keyInput string) (*CryptoConfig, error
 	}, nil
 }
 
+// BindSecurePeer restricts all v4 handshake and data frames to the
+// explicitly configured opposite VPS's IPv4 address.
+func (c *CryptoConfig) BindSecurePeer(address string) error {
+ if c.sec==nil {return errors.New("ephemeral v4 secure session not configured")}
+ return c.sec.setPeer(address)
+}
+func (c *CryptoConfig) SecurePeerAllowed(address net.IP) bool {
+ return c.sec!=nil && c.sec.acceptsPeer(address)
+}
+func (c *CryptoConfig) SecureReady() bool {
+ return c.sec!=nil && c.sec.ready()
+}
+func (c *CryptoConfig) SecureControl(now time.Time)([]byte,error) {
+ if c.sec==nil{return nil,errors.New("v4 session missing")}
+ return c.sec.outbound(now)
+}
+func (c *CryptoConfig) ReceiveSecureControl(frame []byte,now time.Time)([]byte,error){
+ if c.sec==nil{return nil,errors.New("v4 session missing")}
+ return c.sec.handle(frame,now)
+}
+func (c *CryptoConfig) RecoverSecureSession(now time.Time,traffic bool)bool{
+ return c.sec!=nil && c.sec.recoverIfStale(now,traffic)
+}
+func (c *CryptoConfig) SecureStats()sessionStats{
+ if c.sec==nil{return sessionStats{}}
+ return c.sec.stats()
+}
+
 // deriveKey derives an encryption key from the input string
 func deriveKey(keyInput string, keySize int) ([]byte, error) {
 	if keyInput == "" {
@@ -114,7 +145,7 @@ func (c *CryptoConfig) Encrypt(data []byte) ([]byte, error) {
 		return data, nil
 	}
 
-	if c.Mode == AUTO { return c.auto.encrypt(data) }
+	if c.Mode == AUTO { if c.sec != nil { return c.sec.encrypt(data) }; return c.auto.encrypt(data) }
 	if c.Cipher == nil {
 		return nil, errors.New("cipher not initialized")
 	}
@@ -142,7 +173,7 @@ func (c *CryptoConfig) Decrypt(data []byte) ([]byte, error) {
 		return data, nil
 	}
 
-	if c.Mode == AUTO { return c.auto.decrypt(data) }
+	if c.Mode == AUTO { if c.sec != nil { return c.sec.decrypt(data) }; return c.auto.decrypt(data) }
 	if c.Cipher == nil {
 		return nil, errors.New("cipher not initialized")
 	}

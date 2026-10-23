@@ -6,6 +6,7 @@ import(
  "encoding/base64"
  "net"
  "testing"
+ "time"
 )
 
 func pairedTestKey(t *testing.T)string{
@@ -15,29 +16,48 @@ func pairedTestKey(t *testing.T)string{
  return base64.StdEncoding.EncodeToString(bytes)
 }
 
+func establishEphemeralPair(t *testing.T,iran,foreign *CryptoConfig) {
+ t.Helper()
+ if err:=iran.BindRegion("iran");err!=nil{t.Fatal(err)}
+ if err:=foreign.BindRegion("foreign");err!=nil{t.Fatal(err)}
+ if err:=iran.BindSecurePeer("203.0.113.5");err!=nil{t.Fatal(err)}
+ if err:=foreign.BindSecurePeer("203.0.113.4");err!=nil{t.Fatal(err)}
+ handshakeEphemeral(t,iran,foreign)
+}
+func handshakeEphemeral(t *testing.T,iran,foreign *CryptoConfig){
+ t.Helper()
+ now:=time.Now()
+ hello,err:=iran.SecureControl(now)
+ if err!=nil||len(hello)==0{t.Fatalf("client hello: %v",err)}
+ answer,err:=foreign.ReceiveSecureControl(hello,now)
+ if err!=nil||len(answer)==0{t.Fatalf("server hello: %v",err)}
+ finish,err:=iran.ReceiveSecureControl(answer,now)
+ if err!=nil||len(finish)==0{t.Fatalf("client proof: %v",err)}
+ done,err:=foreign.ReceiveSecureControl(finish,now)
+ if err!=nil||len(done)==0{t.Fatalf("server proof: %v",err)}
+ if _,err=iran.ReceiveSecureControl(done,now);err!=nil{t.Fatal(err)}
+ if !iran.SecureReady()||!foreign.SecureReady(){t.Fatal("session handshake did not complete")}
+}
 func TestV3DirectionalAEADBothAlgorithms(t *testing.T){
  key:=pairedTestKey(t)
- iran,err:=NewCryptoConfig(AUTO,key)
- if err!=nil{t.Fatal(err)}
- foreign,err:=NewCryptoConfig(AUTO,key)
- if err!=nil{t.Fatal(err)}
- if err=iran.BindRegion("iran");err!=nil{t.Fatal(err)}
- if err=foreign.BindRegion("foreign");err!=nil{t.Fatal(err)}
+ iran,err:=NewCryptoConfig(AUTO,key);if err!=nil{t.Fatal(err)}
+ foreign,err:=NewCryptoConfig(AUTO,key);if err!=nil{t.Fatal(err)}
+ establishEphemeralPair(t,iran,foreign)
  for _,algorithm:=range []byte{autoAES,autoXChaCha}{
-  iran.auto.preferred=algorithm
-  foreign.auto.preferred=algorithm
+  iran.sec.preferred=algorithm
+  foreign.sec.preferred=algorithm
   msg:=[]byte("payload from Iran")
   sealed,err:=iran.Encrypt(msg)
   if err!=nil{t.Fatal(err)}
   opened,err:=foreign.Decrypt(sealed)
   if err!=nil||!bytes.Equal(msg,opened){t.Fatalf("Iran->foreign cipher %d error %v",algorithm,err)}
-  if _,err=iran.Decrypt(sealed);err==nil{t.Fatal("same physical direction should not decrypt its own transmission")}
-  reply,err:=foreign.Encrypt([]byte("foreign response"))
+  if _,err=iran.Decrypt(sealed);err==nil{t.Fatal("same direction cannot open its own ciphertext")}
+  response,err:=foreign.Encrypt([]byte("foreign response"))
   if err!=nil{t.Fatal(err)}
-  plaintext,err:=iran.Decrypt(reply)
-  if err!=nil||string(plaintext)!="foreign response"{t.Fatal("foreign->Iran message failed")}
+  reply,err:=iran.Decrypt(response)
+  if err!=nil||string(reply)!="foreign response"{t.Fatalf("reply failed: %v",err)}
  }
- if err:=iran.BindRegion("client");err==nil{t.Fatal("Go roles cannot replace physical region")}
+ if err:=iran.BindRegion("client");err==nil{t.Fatal("physical region required")}
 }
 
 func TestV3PeerAndDestinationPolicy(t *testing.T){

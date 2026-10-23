@@ -62,8 +62,8 @@ fi
 # Do not install stale rolling assets when removing legacy HA.
 chmod 755 "$work/manager"
 manager_version="$("$work/manager" --version)"
-if [[ "$manager_version" != "3.0.0" ]]; then
-  echo "Expected Pingtunnel Manager 3.0.0 (strict pairing configuration), got: $manager_version" >&2
+if [[ "$manager_version" != "3.1.0" ]]; then
+  echo "Expected Pingtunnel Manager 3.1.0 (v4 secure session, v3 pairing compatibility), got: $manager_version" >&2
   echo "Check the current rust-latest release assets before retrying." >&2
   exit 1
 fi

@@ -232,6 +232,9 @@ func (p *Client) activeConnCount() int {
 }
 
 func (p *Client) nextPingInterval(now time.Time) time.Duration {
+    if p.cryptoConfig != nil && p.cryptoConfig.sec != nil && !p.cryptoConfig.SecureReady() {
+        return time.Second // bounded retransmission is handled inside the handshake FSM
+    }
 	const (
 		hotActivityWindow  = 5 * time.Second
 		warmActivityWindow = 30 * time.Second
@@ -329,6 +332,10 @@ func (p *Client) Run() error {
 
 			now := time.Now()
             p.adaptive.OnTick(now)
+            if p.cryptoConfig != nil && p.cryptoConfig.RecoverSecureSession(now, p.activeConnCount()>0 || now.Sub(p.lastActivity())<30*time.Second) {
+                loggo.Info("Smart Recovery: restarting authenticated ephemeral session after sustained silence")
+                nextPingAt=now
+            }
             if lastAdaptiveStatus.IsZero() || now.Sub(lastAdaptiveStatus) >= 10*time.Second {
                 p.adaptive.WriteStatus("/run/pingtunnel-performance.json", p.tcpmode_buffersize, p.tcpmode_maxwin, p.tcpmode_resend_timems)
                 lastAdaptiveStatus = now

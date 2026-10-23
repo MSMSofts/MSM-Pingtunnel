@@ -337,6 +337,12 @@ func main() {
             fmt.Fprintf(os.Stderr,"Invalid v3 pairing region: %v\n",err)
             os.Exit(1)
         }
+        expectedPeer:=peerIP
+        if region=="iran" {expectedPeer=*server}
+        if err=cryptoConfig.BindSecurePeer(expectedPeer);err!=nil {
+            fmt.Fprintf(os.Stderr,"Invalid secure peer IP: %v\n",err)
+            os.Exit(1)
+        }
     }
 
 	level := loggo.LEVEL_INFO
