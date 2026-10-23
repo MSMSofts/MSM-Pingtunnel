@@ -1,5 +1,7 @@
 use serde_json::{json, Value};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use sha2::{Digest, Sha256};
+use std::net::Ipv4Addr;
 use std::env;
 use std::error::Error;
 use std::fs::{self, OpenOptions};
@@ -64,53 +66,24 @@ fn get_number(cfg: &Value, field: &str, default: u64) -> Result<u64> {
 }
 
 fn validate(cfg: &Value) -> Result<()> {
-    if !cfg.is_object() {
-        return Err(failure("Configuration must be a JSON object."));
+    if !cfg.is_object()||cfg.get("schema_version").and_then(Value::as_u64)!=Some(setup::SCHEMA) {
+        return Err(failure("Configuration v3 is required. Legacy settings are unsupported; back up/remove old JSON and run setup."));
     }
-    let role = get_string(cfg, "type").unwrap_or("server");
-    if role != "server" && role != "client" {
-        return Err(failure("type must be server or client."));
+    let region=get_string(cfg,"region").ok_or_else(||failure("missing region"))?;
+    if region!="iran"&&region!="foreign"{return Err(failure("region must be iran or foreign"));}
+    let peer=get_string(cfg,"peer_ip").ok_or_else(||failure("missing peer IP"))?;
+    let ip:Ipv4Addr=peer.parse().map_err(|_|failure("peer_ip must be IPv4"))?;
+    if ip.is_unspecified()||ip.is_loopback()||ip.is_multicast()||ip.is_broadcast(){
+        return Err(failure("peer_ip must be the opposite VPS reachable IPv4"));
     }
-    let key = cfg
-        .get("key")
-        .and_then(as_string)
-        .ok_or_else(|| failure("key is required."))?;
-    if key.is_empty() || key.len() > 128 || key.contains('\n') || key.contains('\0') {
-        return Err(failure("key must contain 1-128 characters with no newline or NUL."));
-    }
-    let tcp = get_number(cfg, "tcp", 1)?;
-    if tcp > 1 {
-        return Err(failure("tcp must be 0 (UDP) or 1 (TCP)."));
-    }
-    if let Some(key) = cfg.get("crypto_key") {
-        let key = key.as_str().ok_or_else(|| failure("crypto_key must be base64 text."))?;
-        let bytes = STANDARD.decode(key).map_err(|_| failure("crypto_key must be base64."))?;
-        if bytes.len() != 32 || STANDARD.encode(&bytes) != key {
-            return Err(failure("crypto_key must be a canonical base64-encoded 32-byte random key."));
-        }
-    }
-    if get_number(cfg, "memory_mb", 0)? > 1_048_576 {
-        return Err(failure("memory_mb exceeds the supported limit."));
-    }
-    if role == "client" {
-        let port = get_number(cfg, "l_port", 0)?;
-        if !(1..=65535).contains(&port) {
-            return Err(failure("Client l_port must be 1..65535."));
-        }
-        let server = get_string(cfg, "server").unwrap_or("");
-        if server.is_empty() || server.contains(char::is_whitespace) || server.starts_with('-') {
-            return Err(failure("Client server must be a valid nonempty host/IP."));
-        }
-        if let Some(target) = get_string(cfg, "target") {
-            let (host, p) = target
-                .rsplit_once(':')
-                .ok_or_else(|| failure("target must be host:port (use [IPv6]:port)."))?;
-            let target_port: u16 = p.parse().map_err(|_| failure("invalid target port"))?;
-            if host.is_empty() || target_port == 0 || host.chars().any(char::is_whitespace) {
-                return Err(failure("invalid target host or port"));
-            }
-        }
-    }
+    let transport=get_string(cfg,"transport").ok_or_else(||failure("missing transport"))?;
+    if transport!="tcp"&&transport!="udp"{return Err(failure("transport must be tcp or udp"));}
+    if !(1..=65535).contains(&get_number(cfg,"port",0)?){return Err(failure("invalid local port"));}
+    let secret=get_string(cfg,"pair_key").ok_or_else(||failure("missing pairing key"))?;
+    let bytes=STANDARD.decode(secret).map_err(|_|failure("pairing key not base64"))?;
+    if bytes.len()!=32||STANDARD.encode(&bytes)!=secret{return Err(failure("pairing key must be 32 random bytes in canonical base64"));}
+    if get_number(cfg,"memory_mb",0)?>1_048_576{return Err(failure("invalid memory limit"));}
+    if cfg.get("autostart").and_then(Value::as_bool).is_none(){return Err(failure("autostart must be boolean"));}
     Ok(())
 }
 
@@ -153,124 +126,48 @@ fn store_config(cfg: &Value) -> Result<()> {
     atomic_save(&config_path(), &json, 0o600)
 }
 
-// Compatibility-only: convert legacy HA configurations to the sole direct route.
-// Keep the original authentication key, forwarding port, target and TCP/UDP mode.
-fn strip_legacy_multi_route(cfg: &mut Value) -> bool {
-    let previous_primary = cfg.get("ha")
-        .and_then(|v| v.get("endpoints"))
-        .and_then(Value::as_array)
-        .and_then(|v| v.first())
-        .and_then(|v| v.get("server"))
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    let Some(obj) = cfg.as_object_mut() else { return false };
-    if obj.remove("ha").is_none() { return false; }
-    let missing_server = obj.get("server").and_then(Value::as_str)
-        .map(|v| v.trim().is_empty()).unwrap_or(true);
-    if missing_server && obj.get("type").and_then(Value::as_str) == Some("client") {
-        if let Some(server) = previous_primary {
-            obj.insert("server".into(), Value::String(server));
-        }
-    }
-    true
+// The integer Pingtunnel identifier is derived from the root secret, never
+// entered by a user or reused as the actual 256-bit encryption key.
+fn numeric_auth_code(pair_key:&str)->Result<u32>{
+    let bytes=STANDARD.decode(pair_key)?;
+    if bytes.len()!=32{return Err(failure("invalid root key"));}
+    let mut digest=Sha256::new();
+    digest.update(b"pingtunnel-v3/packet-id");
+    digest.update(&bytes);
+    let hash=digest.finalize();
+    Ok((u32::from_be_bytes([hash[0],hash[1],hash[2],hash[3]]) & 0x7fff_ffff).max(1))
 }
 
-fn migrate_legacy_multi_route() -> Result<bool> {
-    root_required()?;
-    if !config_path().exists() { return Ok(false); }
-    let original = fs::read(config_path())?;
-    let mut cfg: Value = serde_json::from_slice(&original)?;
-    if !strip_legacy_multi_route(&mut cfg) { return Ok(false); }
-    validate(&cfg)?;
-    // Safe one-time snapshot with restrictive permissions.
-    let backup = PathBuf::from(format!("{CONFIG}.before-single-route.bak"));
-    if !backup.exists() {
-        atomic_save(&backup, &original, 0o600)?;
-    }
-    store_config(&cfg)?;
-    println!("Legacy multi-route settings converted to a single direct tunnel.");
-    println!("Backup: {}", backup.display());
-    Ok(true)
-}
-
-fn core_binary(cfg: &Value) -> PathBuf {
-    // Legacy "binary" is respected to avoid unexpectedly changing custom installs.
-    if let Some(p) = get_string(cfg, "binary") {
-        if Path::new(p).is_file() {
-            return PathBuf::from(p);
-        }
-    }
-    PathBuf::from(CORE)
-}
-
-fn core_args(cfg: &Value) -> Result<Vec<String>> {
+fn go_core_config(cfg:&Value)->Result<Value>{
     validate(cfg)?;
-    let role = get_string(cfg, "type").unwrap_or("server");
-    let key = cfg.get("key").and_then(as_string).ok_or_else(|| failure("missing key"))?;
-    let tcp = get_number(cfg, "tcp", 1)?;
-    let mut args = vec!["-type".to_owned(), role.to_owned()];
-    if role == "client" {
-        let port = get_number(cfg, "l_port", 0)?;
-        let host = get_string(cfg, "server").unwrap_or("");
-        let target = get_string(cfg, "target")
-            .map(str::to_owned)
-            .unwrap_or_else(|| format!("{host}:{port}")); // preserves the old manager's target
-        args.extend([
-            "-l".into(),
-            format!(":{port}"),
-            "-s".into(),
-            host.into(),
-            "-t".into(),
-            target,
-        ]);
-    }
-    args.extend([
-        "-key".into(),
-        key,
-        "-noprint".into(),
-        "1".into(),
-        "-nolog".into(),
-        "1".into(),
-        "-tcp".into(),
-        tcp.to_string(),
-    ]);
-    Ok(args)
-}
-
-// Translate the legacy manager config into the upstream Go core's JSON schema.
-// Never place authentication or encryption secrets in /proc/PID/cmdline.
-fn go_core_config(cfg: &Value) -> Result<Value> {
-    validate(cfg)?;
-    let role = get_string(cfg, "type").unwrap_or("server");
-    let key: i64 = cfg.get("key").and_then(as_string)
-        .ok_or_else(|| failure("Missing shared numeric authentication key"))?
-        .parse().map_err(|_| failure("Shared authentication key must be numeric"))?;
-    if !(0..=2147483647).contains(&key) {
-        return Err(failure("Shared authentication key outside Go core's valid range"));
-    }
-    let mut go = json!({
-        "type":role, "key":key, "tcp":get_number(cfg,"tcp",1)?,
-        "nolog":1, "noprint":1
+    let region=get_string(cfg,"region").unwrap();
+    let peer=get_string(cfg,"peer_ip").unwrap();
+    let key=get_string(cfg,"pair_key").unwrap();
+    let transport=get_string(cfg,"transport").unwrap();
+    let port=get_number(cfg,"port",0)?;
+    let protocol=if transport=="tcp"{1}else{0};
+    let mut config=json!({
+        "type":if region=="iran"{"client"}else{"server"},
+        "key":numeric_auth_code(key)?,
+        "encrypt":"auto", "encrypt_key":key,
+        "tcp":protocol,"noprint":1,"nolog":1
     });
-    if role == "client" {
-        let port = get_number(cfg,"l_port",0)?;
-        let host = get_string(cfg,"server").unwrap_or("");
-        let target = get_string(cfg,"target")
-            .map(str::to_owned).unwrap_or_else(|| format!("{host}:{port}"));
-        go["listen"] = json!(format!(":{port}"));
-        go["server"] = json!(host);
-        go["target"] = json!(target);
+    if region=="iran"{
+        config["listen"]=json!(format!(":{port}"));
+        config["server"]=json!(peer);
+        // The foreign server MUST ignore this compatibility placeholder.
+        config["target"]=json!("127.0.0.1:1");
+    }else{
+        config["peer_ip"]=json!(peer);
+        config["fixed_target"]=json!(format!("127.0.0.1:{port}"));
+        config["forward_protocol"]=json!(protocol);
     }
-    if let Some(secret) = get_string(cfg,"crypto_key") {
-        go["encrypt"] = json!("auto");
-        go["encrypt_key"] = json!(secret);
-    }
-    Ok(go)
+    Ok(config)
 }
 
 fn run_core(dry_run: bool) -> Result<()> {
     let cfg = load_config()?;
-    let bin = core_binary(&cfg);
+    let bin = PathBuf::from(CORE);
     if !bin.is_file() {
         return Err(failure(format!("Missing Go core at {}", bin.display())));
     }
@@ -313,73 +210,8 @@ fn prompt(title: &str, default: &str) -> Result<String> {
     Ok(if answer.is_empty() { default.to_owned() } else { answer.to_owned() })
 }
 
-fn configure() -> Result<()> {
-    root_required()?;
-    let mut cfg = if config_path().exists() {
-        let data: Value = serde_json::from_slice(&fs::read(config_path())?)?;
-        if !data.is_object() {
-            return Err(failure("Current config is not a JSON object."));
-        }
-        data
-    } else {
-        json!({"type":"server","tcp":1,"memory_mb":0,"autostart":false})
-    };
-    println!("Pingtunnel Manager — configuration (existing settings are preserved)");
-    let role = prompt("Role (server/client)", get_string(&cfg, "type").unwrap_or("server"))?;
-    if role != "server" && role != "client" {
-        return Err(failure("Role must be server or client."));
-    }
-    cfg["type"] = json!(role);
-    let previous_tcp = get_number(&cfg, "tcp", 1)?;
-    let selected_tcp = prompt("Forwarded traffic TCP=1, UDP=0", &previous_tcp.to_string())?
-        .parse::<u8>()?;
-    if selected_tcp > 1 {
-        return Err(failure("Select 0 (UDP) or 1 (TCP)."));
-    }
-    cfg["tcp"] = json!(selected_tcp);
-    if role == "client" {
-        let saved_port = get_number(&cfg, "l_port", u64::from(setup::default_listen_port(previous_tcp)))?;
-        let suggested = setup::switched_listen_port(saved_port, previous_tcp, selected_tcp.into());
-        let port = prompt("Local listening port", &suggested.to_string())?.parse::<u16>()?;
-        if port == 0 {
-            return Err(failure("Port cannot be zero."));
-        }
-        cfg["l_port"] = json!(port);
-        let host = prompt("Pingtunnel server host/IP", get_string(&cfg, "server").unwrap_or(""))?;
-        cfg["server"] = json!(host);
-        let current_target = get_string(&cfg, "target").unwrap_or("");
-        let target = prompt("Forward destination host:port (blank = legacy server:local-port)", current_target)?;
-        if target.is_empty() {
-            if let Some(map) = cfg.as_object_mut() {
-                map.remove("target");
-            }
-        } else {
-            cfg["target"] = json!(target);
-        }
-    }
-    // Don't display existing secrets in a terminal prompt.
-    let has_key = cfg.get("key").and_then(as_string).map(|s| !s.is_empty()).unwrap_or(false);
-    let message = if has_key { "Key (leave blank to keep existing key)" } else { "Key (same on both peers)" };
-    let entered = prompt(message, "")?;
-    if !entered.is_empty() {
-        cfg["key"] = json!(entered);
-    } else if !has_key {
-        return Err(failure("Key cannot be empty."));
-    }
-    let limit = get_number(&cfg, "memory_mb", 0)?.to_string();
-    cfg["memory_mb"] = json!(prompt("Memory limit in MB (0=unlimited)", &limit)?.parse::<u64>()?);
-    let enabled = cfg.get("autostart").and_then(Value::as_bool).unwrap_or(false);
-    let auto = prompt("Start on boot (y/n)", if enabled { "y" } else { "n" })?;
-    cfg["autostart"] = json!(matches!(auto.to_lowercase().as_str(), "y" | "yes"));
-    store_config(&cfg)?;
-    println!("Saved {CONFIG} (mode 0600). Applying changes automatically...");
-    apply_config()
-
-}
-
 fn service_install() -> Result<()> {
     root_required()?;
-    migrate_legacy_multi_route()?;
     let cfg = load_config()?;
     if !Path::new("/run/systemd/system").exists() {
         return Err(failure("systemd is not running on this host."));
@@ -436,27 +268,6 @@ fn apply_config() -> Result<()> {
     service_install()?;
     run_systemctl(&["restart", "pingtunnel.service"])?;
     Ok(())
-}
-
-fn edit_config() -> Result<()> {
-    root_required()?;
-    let editor = env::var("EDITOR").unwrap_or_else(|_| "nano".to_owned());
-    if !editor.chars().all(|c| c.is_ascii_alphanumeric() || "/_.-".contains(c)) {
-        return Err(failure("EDITOR must be a single executable path/name."));
-    }
-    let original = fs::read(CONFIG)?;
-    let status = Command::new(editor).arg(CONFIG).status()?;
-    if !status.success() {
-        atomic_save(&config_path(), &original, 0o600)?;
-        return Err(failure("Editor failed; original config restored."));
-    }
-    if let Err(error) = load_config() {
-        atomic_save(&config_path(), &original, 0o600)?;
-        return Err(failure(format!("Edited config invalid ({error}); original restored.")));
-    }
-    fs::set_permissions(CONFIG, fs::Permissions::from_mode(0o600))?;
-    println!("Config validated; applying new settings automatically.");
-    apply_config()
 }
 
 fn update() -> Result<()> {
@@ -516,78 +327,54 @@ fn uninstall(purge: bool) -> Result<()> {
     Ok(())
 }
 
-fn help() {
-    println!("Pingtunnel Manager v{} (Rust)", env!("CARGO_PKG_VERSION"));
-    println!("  pingtunnel                   Interactive menu");
-    println!("  pingtunnel setup             First-run automatic wizard (minimum peer details)");
-    println!("  pingtunnel configure         Advanced config in menu; applies immediately");
-    println!("  pingtunnel protocol          Choose TCP/UDP in menu; applies immediately");
-    println!("  pingtunnel performance       Show automatic RTT, jitter and TCP tuning");
-    println!("  pingtunnel service-install   Write a native systemd unit");
-    println!("  pingtunnel validate          Validate configuration");
-    println!("  pingtunnel dry-run           Show the generated core command with key redacted");
-    println!("  pingtunnel start|stop|restart|status");
-    println!("  pingtunnel logs [lines]      Show journald entries");
-    println!("  pingtunnel update            Reinstall from official repo script");
-    println!("  pingtunnel edit              Edit config ($EDITOR, default nano)");
-    println!("  pingtunnel uninstall [--purge]   Purge removes configuration too");
-    println!("  pingtunnel run               Internal: exec() the Go tunnel core");
+fn help(){
+    println!("Pingtunnel Manager v{} — pairing v3",env!("CARGO_PKG_VERSION"));
+    println!("  pingtunnel            Unified menu");
+    println!("  pingtunnel setup      Five questions on each VPS");
+    println!("  pingtunnel key        Show existing pairing key (root only)");
+    println!("  pingtunnel validate | performance | dry-run");
+    println!("  pingtunnel start | stop | restart | status | logs [lines]");
+    println!("  pingtunnel update | uninstall [--purge]");
 }
 
-fn menu() -> Result<()> {
+fn display_pair_key()->Result<()>{
     root_required()?;
-    if migrate_legacy_multi_route()? {
-        apply_config()?;
-    }
-    loop {
-        let installed = config_path().exists();
-        println!("\n╔══════════════════════════════════════════════╗");
-        println!("║       Pingtunnel Manager {}              ║", env!("CARGO_PKG_VERSION"));
-        println!("╚══════════════════════════════════════════════╝");
-        println!("  Topology: Iran Client -> foreign Server (one ICMP tunnel)");
-        if installed {
-            match load_config() {
-                Ok(cfg) => {
-                    let role = get_string(&cfg, "type").unwrap_or("server");
-                    let protocol = if get_number(&cfg, "tcp", 1).unwrap_or(1) == 0 { "UDP" } else { "TCP" };
-                    println!("  Role: {role}   Forwarded traffic: {protocol}");
-                }
-                Err(error) => eprintln!("  Config problem: {error}"),
-            }
-        } else {
-            println!("  First setup: option 6 pairs your two VPS servers.");
-        }
-        println!("1) Status       2) Start        3) Stop         4) Restart");
-        println!("5) Logs         6) Easy setup   7) Settings     8) TCP / UDP");
-        println!("9) Validate    10) Update      11) Uninstall  12) Expert editor");
-        println!("13) Exit         14) Adaptive Performance status");
-        let choice = prompt("Choose", if installed { "1" } else { "6" })?;
-        let action = match choice.as_str() {
-            "1" => run_systemctl(&["status", "pingtunnel.service", "--no-pager"]),
-            "2" => run_systemctl(&["start", "pingtunnel.service"]),
-            "3" => run_systemctl(&["stop", "pingtunnel.service"]),
-            "4" => run_systemctl(&["restart", "pingtunnel.service"]),
-            "5" => logs("100"),
-            "6" => setup::wizard(),
-            "7" => configure(),
-            "8" => setup::protocol_menu(),
-            "9" => match load_config() {
-                Ok(_) => { println!("Configuration OK."); Ok(()) },
-                Err(error) => Err(error),
-            },
-            "10" => update(),
-            "11" => uninstall(false),
-            "12" => edit_config(),
-            "13" | "q" | "Q" => return Ok(()),
-            "14" => show_adaptive_status(),
-            _ => {
-                println!("Unknown option; choose 1..14.");
-                continue;
-            }
+    let config=load_config()?;
+    println!("Secret pairing key: {}",get_string(&config,"pair_key").unwrap());
+    println!("Keep it private and use it only to pair the opposite VPS.");
+    Ok(())
+}
+
+fn menu()->Result<()>{
+    root_required()?;
+    loop{
+        let cfg=load_config().ok();
+        println!("\nPingtunnel Manager v3 — single Iran/Foreign ICMP tunnel");
+        if let Some(c)=&cfg{
+            println!("Region: {} | Peer: {} | Forward: {}:{}",
+                get_string(c,"region").unwrap(),get_string(c,"peer_ip").unwrap(),
+                get_string(c,"transport").unwrap(),get_number(c,"port",0).unwrap_or(0));
+        }else{println!("Not configured for v3 — choose Setup.");}
+        println!("1) Status    2) Start     3) Stop      4) Restart");
+        println!("5) Logs      6) Setup     7) Pair key  8) Performance");
+        println!("9) Validate 10) Update   11) Uninstall 12) Exit");
+        let choice=prompt("Choose",if cfg.is_some(){"1"}else{"6"})?;
+        let action=match choice.as_str(){
+            "1"=>run_systemctl(&["status","pingtunnel.service","--no-pager"]),
+            "2"=>run_systemctl(&["start","pingtunnel.service"]),
+            "3"=>run_systemctl(&["stop","pingtunnel.service"]),
+            "4"=>run_systemctl(&["restart","pingtunnel.service"]),
+            "5"=>logs("100"),
+            "6"=>setup::wizard(),
+            "7"=>display_pair_key(),
+            "8"=>show_adaptive_status(),
+            "9"=>{load_config()?;println!("Version-3 config valid");Ok(())},
+            "10"=>update(),
+            "11"=>uninstall(false),
+            "12"|"q"|"Q"=>return Ok(()),
+            _=>{println!("Select 1..12");continue}
         };
-        if let Err(error) = action {
-            eprintln!("Operation failed: {error}");
-        }
+        if let Err(e)=action{eprintln!("Operation failed: {e}");}
     }
 }
 
@@ -629,60 +416,34 @@ fn logs(lines: &str) -> Result<()> {
     Ok(())
 }
 
-fn main_inner() -> Result<()> {
-    let args: Vec<String> = env::args().skip(1).collect();
-    // Bare "pingtunnel" always opens the interactive menu, even when invoked
-    // as a regular Linux user; sudo handles only the privileged operations.
-    if args.is_empty() || args[0] == "menu" {
-        let output = Command::new("id").arg("-u").output()?;
-        if String::from_utf8_lossy(&output.stdout).trim() != "0" {
-            let status = Command::new("sudo")
-                .arg(env::current_exe()?)
-                .arg("menu")
-                .status()?;
-            if !status.success() {
-                return Err(failure("Unable to elevate permissions for Pingtunnel menu."));
-            }
+fn main_inner()->Result<()>{
+    let args:Vec<String>=env::args().skip(1).collect();
+    if args.is_empty()||args[0]=="menu"{
+        let out=Command::new("id").arg("-u").output()?;
+        if String::from_utf8_lossy(&out.stdout).trim()!="0"{
+            let code=Command::new("sudo").arg(env::current_exe()?).arg("menu").status()?;
+            if !code.success(){return Err(failure("Could not elevate menu"));}
             return Ok(());
         }
     }
-    let sub = args.first().map(String::as_str).unwrap_or("menu");
-    match sub {
-        "menu" => menu(),
-        "migrate" => { migrate_legacy_multi_route()?; Ok(()) },
-        "setup" | "quick-setup" => setup::wizard(),
-        "configure" | "config" => configure(),
-        "protocol" => setup::protocol_menu(),
-        "performance" => show_adaptive_status(),
-        "service-install" => service_install(),
-        "validate" => {
-            load_config()?;
-            println!("Configuration OK.");
-            Ok(())
-        }
-        "dry-run" => run_core(true),
-        "run" | "--run" => run_core(false),
-        "start" | "stop" | "restart" => {
-            root_required()?;
-            run_systemctl(&[sub, "pingtunnel.service"])
-        }
-        "status" => run_systemctl(&["status", "pingtunnel.service", "--no-pager"]),
-        "logs" => logs(args.get(1).map(String::as_str).unwrap_or("100")),
-        "edit" => edit_config(),
-        "update" => update(),
-        "uninstall" => uninstall(args.get(1).map(String::as_str) == Some("--purge")),
-        "version" | "--version" => {
-            println!("{}", env!("CARGO_PKG_VERSION"));
-            Ok(())
-        }
-        "help" | "--help" | "-h" => {
-            help();
-            Ok(())
-        }
-        _ => {
-            help();
-            Err(failure(format!("Unknown command: {sub}")))
-        }
+    let sub=args.first().map(String::as_str).unwrap_or("menu");
+    match sub{
+        "menu"=>menu(),
+        "setup"=>setup::wizard(),
+        "key"=>display_pair_key(),
+        "performance"=>show_adaptive_status(),
+        "service-install"=>service_install(),
+        "validate"=>{load_config()?;println!("Version-3 configuration valid");Ok(())},
+        "dry-run"=>run_core(true),
+        "run"|"--run"=>run_core(false),
+        "start"|"stop"|"restart"=>{root_required()?;run_systemctl(&[sub,"pingtunnel.service"])},
+        "status"=>run_systemctl(&["status","pingtunnel.service","--no-pager"]),
+        "logs"=>logs(args.get(1).map(String::as_str).unwrap_or("100")),
+        "update"=>update(),
+        "uninstall"=>uninstall(args.get(1).map(String::as_str)==Some("--purge")),
+        "version"|"--version"=>{println!("{}",env!("CARGO_PKG_VERSION"));Ok(())},
+        "help"|"--help"|"-h"=>{help();Ok(())},
+        _=>{help();Err(failure(format!("Unknown command: {sub}")))}
     }
 }
 
@@ -693,6 +454,45 @@ fn main() {
     }
 }
 
+#[cfg(test)]
+mod tests{
+    use super::*;
+    fn conf(region:&str,protocol:&str,port:u16)->Value{
+        json!({"schema_version":3,"region":region,"peer_ip":"198.51.100.45",
+            "pair_key":STANDARD.encode([7u8;32]),
+            "transport":protocol,"port":port,"memory_mb":0,"autostart":true})
+    }
+    #[test]
+    fn role_independent_pair_identity_and_authentication(){
+        let iran=conf("iran","udp",444);
+        let foreign=conf("foreign","udp",8443);
+        assert_eq!(numeric_auth_code(get_string(&iran,"pair_key").unwrap()).unwrap(),
+                   numeric_auth_code(get_string(&foreign,"pair_key").unwrap()).unwrap());
+        assert_eq!(go_core_config(&iran).unwrap()["listen"],":444");
+        let remote=go_core_config(&foreign).unwrap();
+        assert_eq!(remote["fixed_target"],"127.0.0.1:8443");
+        assert_eq!(remote["forward_protocol"],0);
+        assert_eq!(remote["peer_ip"],"198.51.100.45");
+    }
+    #[test]
+    fn no_legacy_or_unencrypted_fallback(){
+        let legacy=json!({"type":"client","key":"123456","tcp":1,"l_port":443,"server":"198.51.100.45"});
+        assert!(validate(&legacy).is_err());
+        let mut c=conf("iran","tcp",443);
+        c.as_object_mut().unwrap().remove("pair_key");
+        assert!(validate(&c).is_err());
+        assert!(go_core_config(&c).is_err());
+    }
+    #[test]
+    fn mismatched_inputs_rejected(){
+        let mut c=conf("foreign","tcp",443);
+        c["peer_ip"]=json!("127.0.0.1");
+        assert!(validate(&c).is_err());
+        c["peer_ip"]=json!("198.51.100.45");
+        c["port"]=json!(0);
+        assert!(validate(&c).is_err());
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
