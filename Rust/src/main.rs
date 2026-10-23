@@ -13,6 +13,7 @@ use std::process::{self, Command, Stdio};
 
 mod setup;
 mod menu_ui;
+mod resource_monitor;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -370,23 +371,34 @@ fn current_service_state() -> String {
 
 fn menu()->Result<()>{
     root_required()?;
+    // Samples exist only while this CLI is displaying the dashboard.
+    let mut monitor=resource_monitor::ResourceMonitor::new();
+    monitor.refresh();
     loop{
         let cfg=load_config().ok();
-        let service_state=current_service_state();
-        let view=menu_ui::MenuView {
-            version: env!("CARGO_PKG_VERSION"),
-            region:cfg.as_ref().and_then(|v|get_string(v,"region")).unwrap_or("unknown"),
-            peer:cfg.as_ref().and_then(|v|get_string(v,"peer_ip")).unwrap_or("-"),
-            transport:cfg.as_ref().and_then(|v|get_string(v,"transport")).unwrap_or("-"),
-            port:cfg.as_ref().and_then(|v|v.get("port")).and_then(Value::as_u64).and_then(|n|u16::try_from(n).ok()),
-            service:&service_state,
-            configured:cfg.is_some(),
+        let default=if cfg.is_some(){"1"}else{"6"};
+        let display=|resources:resource_monitor::Resources| -> String {
+            let state=current_service_state();
+            let view=menu_ui::MenuView{
+                version:env!("CARGO_PKG_VERSION"),
+                region:cfg.as_ref().and_then(|v|get_string(v,"region")).unwrap_or("unknown"),
+                peer:cfg.as_ref().and_then(|v|get_string(v,"peer_ip")).unwrap_or("-"),
+                transport:cfg.as_ref().and_then(|v|get_string(v,"transport")).unwrap_or("-"),
+                port:cfg.as_ref().and_then(|v|v.get("port")).and_then(Value::as_u64)
+                    .and_then(|n|u16::try_from(n).ok()),
+                service:&state,
+                configured:cfg.is_some(),
+                resources,
+            };
+            menu_ui::render(&view,menu_ui::supports_color(),menu_ui::supports_unicode())
         };
-        // No terminal control codes for pipes, logs, dumb terminals, or NO_COLOR.
-        print!("{}",menu_ui::render(
-            &view,menu_ui::supports_color(),menu_ui::supports_unicode()
-        ));
-        let choice=prompt("Choose option (1-14)",if cfg.is_some(){"1"}else{"6"})?;
+        let choice=if menu_ui::interactive_available(){
+            // Alternate screen + raw keyboard mode are restored BEFORE each action.
+            menu_ui::choose(&mut monitor,display,default)?
+        }else{
+            print!("{}",display(monitor.current()));
+            prompt("Choose (1-14)",default)?
+        };
         let action=match choice.as_str(){
             "1"=>run_systemctl(&["status","pingtunnel.service","--no-pager"]),
             "2"=>run_systemctl(&["start","pingtunnel.service"]),
@@ -402,9 +414,10 @@ fn menu()->Result<()>{
             "12"|"q"|"Q"=>return Ok(()),
             "13"=>show_security_status(),
             "14"=>show_health(),
-            _=>{println!("Invalid choice. Select a number from 1 to 14.");continue}
+            _=>{println!("Invalid choice: use 1..14.");continue}
         };
         if let Err(e)=action{eprintln!("Operation failed: {e}");}
+        monitor.refresh();
     }
 }
 

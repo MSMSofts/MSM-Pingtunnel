@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Rust Pingtunnel Manager: release-first installer with failure rollback.
 set -Eeuo pipefail
-RELEASE="https://github.com/MSMSofts/Pingtunnel_manager/releases/download/v3.2.2"
+RELEASE="https://github.com/MSMSofts/Pingtunnel_manager/releases/download/v3.2.3"
 CORE_RELEASE="$RELEASE"
 MANAGER="/usr/local/bin/pingtunnel"
 CORE="/opt/pingtunnel/bin/pingtunnel"
@@ -41,8 +41,8 @@ if ! printf '%s  %s\n' "$digest" "$work/manager" | sha256sum --check --status; t
 fi
 chmod 755 "$work/manager"
 manager_version="$("$work/manager" --version)"
-if [[ "$manager_version" != "3.2.2" ]]; then
-  echo "Expected Pingtunnel Manager 3.2.2 (wire 4, config schema 3, security fixes), got: $manager_version" >&2
+if [[ "$manager_version" != "3.2.3" ]]; then
+  echo "Expected Pingtunnel Manager 3.2.3 (wire 4, config schema 3, security fixes), got: $manager_version" >&2
   echo "Check the current rust-latest release assets before retrying." >&2
   exit 1
 fi
@@ -61,7 +61,7 @@ fi
 chmod 755 "$work/core"
 # The release manifest binds the manager and core to the same tagged build.
 curl -fsSL --retry 3 "$RELEASE/release-manifest.txt" -o "$work/manifest"
-for invariant in "release=v3.2.2" "config_schema=3" "wire=4"; do
+for invariant in "release=v3.2.3" "config_schema=3" "wire=4"; do
   if ! grep -Fxq "$invariant" "$work/manifest"; then
     echo "Release manifest is missing $invariant; aborting." >&2
     exit 1
@@ -76,8 +76,8 @@ for file in "pingtunnel-manager-linux-$release_arch" "pingtunnel-core-linux-$rel
     exit 1
   fi
 done
-if [[ "$("$work/core" -security-protocol)" != "pingtunnel-go-core=3.2.2 config-schema=3 wire=4" ]]; then
-  echo "Downloaded Go core is not the matching v3.2.2 secure wire-4 build." >&2
+if [[ "$("$work/core" -security-protocol)" != "pingtunnel-go-core=3.2.3 config-schema=3 wire=4" ]]; then
+  echo "Downloaded Go core is not the matching v3.2.3 secure wire-4 build." >&2
   exit 1
 fi
 
@@ -120,7 +120,12 @@ rollback() {
   if (( had_dropin )); then mkdir -p "$(dirname "$DROPIN")"; cp -a "$work/old-dropin" "$DROPIN"; else rm -f "$DROPIN"; fi
   if (( had_config )); then cp -a "$work/old-config" "$CONFIG"; fi
   systemctl daemon-reload || true
-  if (( previously_active )); then systemctl restart pingtunnel.service || true; fi
+  if (( previously_active )); then
+    systemctl restart pingtunnel.service || true
+  else
+    # Restore the pre-update stopped state if this was an offline service.
+    systemctl stop pingtunnel.service || true
+  fi
   exit "$code"
 }
 manager_new=""
@@ -141,30 +146,32 @@ fi
 if (( configured )); then
   "$MANAGER" validate
   "$MANAGER" service-install
-  if (( previously_active )) || systemctl is-enabled --quiet pingtunnel.service; then
-    systemctl restart pingtunnel.service
-    # systemctl restart can return success before ExecStart crashes. Verify
-    # both a live MainPID and that Go published a fresh process heartbeat.
-    sleep 3
-    if ! systemctl is-active --quiet pingtunnel.service; then
-      echo "New Go core did not remain active; restoring previous installation." >&2
-      false
-    fi
-    running_pid="$(systemctl show -p MainPID --value pingtunnel.service)"
-    if [[ ! "$running_pid" =~ ^[1-9][0-9]*$ ]] || ! kill -0 "$running_pid" 2>/dev/null; then
-      echo "Go core has no live systemd MainPID; rolling back." >&2
-      false
-    fi
-    if ! "$MANAGER" health; then
-      echo "New Go core failed runtime heartbeat validation; rolling back." >&2
-      false
-    fi
+  # Every successful configured upgrade must leave the tunnel running with
+  # the new Go executable, even if it was stopped/disabled before the update.
+  # Never restart a first install that has not completed the pairing wizard.
+  echo "[4/4] Restarting updated encrypted tunnel and verifying Go health..."
+  systemctl restart pingtunnel.service
+  # systemctl restart can succeed before a crashing ExecStart fails.
+  sleep 3
+  if ! systemctl is-active --quiet pingtunnel.service; then
+    echo "New Go core did not remain active; restoring previous installation." >&2
+    false
   fi
+  running_pid="$(systemctl show -p MainPID --value pingtunnel.service)"
+  if [[ ! "$running_pid" =~ ^[1-9][0-9]*$ ]] || ! kill -0 "$running_pid" 2>/dev/null; then
+    echo "Go core has no live systemd MainPID; rolling back." >&2
+    false
+  fi
+  if ! "$MANAGER" health; then
+    echo "New Go core failed runtime heartbeat validation; rolling back." >&2
+    false
+  fi
+  echo "Updated tunnel restarted successfully; systemd and Go heartbeat are healthy."
 else
   # A fresh install must not start an unconfigured service.
   systemctl daemon-reload
 fi
 trap - ERR
-echo "[4/4] Installed successfully."
+echo "Installed successfully."
 echo "Type: pingtunnel"
 echo "One Iran VPS + one foreign VPS. Choose Setup on foreign first, then Iran."
