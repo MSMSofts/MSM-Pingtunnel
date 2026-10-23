@@ -251,24 +251,24 @@ mod tests {
         sleep(Duration::from_millis(30)).await;
         let first = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let second = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let send = |socket: &UdpSocket, value: &'static [u8]| async move {
+        async fn send(socket: &UdpSocket, value: &[u8], public: SocketAddr) -> String {
             socket.send_to(value, public).await.unwrap();
             let mut buf = [0u8; 128];
             let (n, _) = timeout(Duration::from_secs(2), socket.recv_from(&mut buf)).await.unwrap().unwrap();
             String::from_utf8(buf[..n].to_vec()).unwrap()
-        };
-        assert_eq!(send(&first, b"one").await, "A:one");
+        }
+        assert_eq!(send(&first, b"one", public).await, "A:one");
         {
             state.lock().unwrap().active = Some(1);
         }
         // Existing peer stays on A while A is healthy.
-        assert_eq!(send(&first, b"two").await, "A:two");
+        assert_eq!(send(&first, b"two", public).await, "A:two");
         // New peer switches to B immediately.
-        assert_eq!(send(&second, b"three").await, "B:three");
+        assert_eq!(send(&second, b"three", public).await, "B:three");
         state.lock().unwrap().health[0].good = false;
         // The UDP worker sees the failure and rebinds to B.
         sleep(Duration::from_millis(1150)).await;
-        assert_eq!(send(&first, b"four").await, "B:four");
+        assert_eq!(send(&first, b"four", public).await, "B:four");
         ctrl.abort();
         echo_a.abort();
         echo_b.abort();
