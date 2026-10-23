@@ -102,7 +102,15 @@ func clampAdaptive(v,lo,hi int) int {
 }
 func (a *AdaptivePerformance) parametersLocked(bufferBytes,maxWindow,rto int) AdaptiveFrameSettings {
  p:=AdaptiveFrameSettings{BufferBytes:bufferBytes,Window:maxWindow,ResendMs:rto}
- if a.samples==0{return p}
+ if a.samples==0 {
+  // A completely silent ICMP path provides no RTT sample, but repeated
+  // timed-out probes still mean we must slow new TCP handshakes.
+  if a.degraded {
+   p.Window=clampAdaptive(maxWindow/2,256,10000)
+   p.ResendMs=clampAdaptive(rto*2,800,2400)
+  }
+  return p
+ }
  p.ResendMs=clampAdaptive(int(math.Round(a.srttMs+4*a.jitterMs+80)),300,2000)
  if a.degraded {
   p.Window=clampAdaptive(maxWindow/2,256,10000)
