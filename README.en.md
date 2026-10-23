@@ -2,15 +2,15 @@
 
 **A lightweight, encrypted ICMP tunnel between exactly two Linux VPSs, with a five-question setup wizard.**
 
-[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.2.3](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.3)
+[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.2.4](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.4)
 
-![Version](https://img.shields.io/badge/version-3.2.3-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.2.4-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml)
 
 Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** between an **Iran-side VPS** and an **overseas VPS**. Local TCP or UDP traffic enters the Iran VPS, travels inside authenticated, encrypted ICMP packets, and is forwarded by the overseas VPS to its configured local service.
 
 **This is a transport layer—not a standalone VPN server.** Services such as Hysteria 2, s-ui or other TCP/UDP applications run and are configured separately.
 
-**Current release: 3.2.3** · Rust management CLI · Modified Go Pingtunnel core · Config schema **3** · Secure wire protocol **4** · Direct Iran → foreign ICMP only.
+**Current release: 3.2.4** · Rust management CLI · Modified Go Pingtunnel core · Config schema **3** · Secure wire protocol **4** · Direct Iran → foreign ICMP only.
 
 ## Highlights
 
@@ -86,7 +86,7 @@ sudo bash /tmp/pingtunnel-install.sh
 
 Review downloaded scripts before executing them with elevated privileges.
 
-The installer pins the [v3.2.3 release](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.3), checks SHA256 and the release manifest, verifies manager/core compatibility, and backs up existing installed files for failure rollback.
+The installer pins the [v3.2.4 release](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.4), checks SHA256 and the release manifest, verifies manager/core compatibility, and backs up existing installed files for failure rollback.
 
 ### Set up the overseas VPS first
 
@@ -116,40 +116,43 @@ Suggested default ports are **TCP 443** and **UDP 444** on either VPS, but you c
 
 ## Interactive terminal menu
 
-Run `sudo pingtunnel` to open the redesigned **v3.2.3** menu. The header shows the physical server location, opposite VPS IPv4, this VPS's TCP/UDP port, and the current systemd service state **without revealing the pairing key**. The interface groups all **14 original numbered actions** into four sections.
+**Fixed in v3.2.4:** raw-mode CRLF prevents diagonal terminal output; the menu uses a single column with **strictly ascending 1–14 actions from top to bottom**, responsive width and compact layout for smaller terminal windows.
+
+
+Run `sudo pingtunnel` to open the redesigned **v3.2.4** menu. The header shows the physical server location, opposite VPS IPv4, this VPS's TCP/UDP port, and the current systemd service state **without revealing the pairing key**. The interface groups all **14 original numbered actions** into four sections.
 
 ~~~text
-+--------------------------------------------------------------------+
-|   PINGTUNNEL MANAGER                                               |
-|   SECURE ICMP TUNNEL  |  v3.2.3  |  Wire v4                        |
-+--------------------------------------------------------------------+
+================================================================
+  PINGTUNNEL  /  CONTROL CENTER
+  v3.2.4   |   Encrypted ICMP   |   Wire v4
+----------------------------------------------------------------
+LIVE TUNNEL STATUS
+  Location     Foreign (service)
+  Peer IPv4    203.0.113.10
+  Transport    UDP / 444
+  Service      active
+  CPU (10s)    0.3%          avg 60s 0.3%
+  RAM (RSS)    13.9 MiB      avg 60s 13.9 MiB
 
-  TUNNEL OVERVIEW
-  ------------------------------------------------------------------
-  Location          : Iran (ingress)
-  Peer IPv4         : 203.0.113.10
-  Local transport   : UDP / 444
-  Service status    : active
-
-  SERVICE CONTROLS
-  ------------------------------------------------------------------
-   1) Status                      2) Start
-   3) Stop                        4) Restart
-   5) View logs
-
-  SETUP & CONFIGURATION
-  ------------------------------------------------------------------
-   6) Setup Wizard                7) Show pairing key
-
-  DIAGNOSTICS
-  ------------------------------------------------------------------
-   8) Adaptive Performance        9) Validate config
-  13) Security status            14) Health check
-
-  MAINTENANCE
-  ------------------------------------------------------------------
-  10) Update                     11) Uninstall
-  12) Exit
+SERVICE CONTROLS
+  1) Status
+  2) Start
+  3) Stop
+  4) Restart
+  5) Logs
+SETUP & CONFIGURATION
+  6) Setup Wizard
+  7) Pairing key
+DIAGNOSTICS
+  8) Performance
+  9) Validate
+MAINTENANCE
+ 10) Update
+ 11) Uninstall
+ 12) Exit
+SECURITY & HEALTH
+ 13) Security
+ 14) Health
 ~~~
 
 This is an illustrative screen, not live server output. With a UTF-8 terminal the interface uses subtle cyan section headings and a Unicode border. It automatically disables ANSI color codes for redirected output, `NO_COLOR`, or `TERM=dumb` and falls back to ASCII for non-UTF-8 locales. The displayed version is taken from the actual manager package, not hard-coded into the Rust menu.
@@ -187,7 +190,7 @@ The manager stores the configuration with restricted permissions, configures sys
 
 After setup, use menu **1 / 13 / 14 / 8** or run `pingtunnel status`, `pingtunnel security`, `pingtunnel health`, and `pingtunnel performance`.
 
-### Live CPU & RAM dashboard (v3.2.3)
+### Live CPU & RAM dashboard (v3.2.4)
 
 Directly below **Service status**, the interactive TUI shows recent Go tunnel resource consumption:
 
@@ -210,7 +213,7 @@ Directly below **Service status**, the interactive TUI shows recent Go tunnel re
 
 ### Automatic tunnel restart after Update
 
-Menu **10 — Update** and `sudo pingtunnel update` install the pinned, checksum/manifest-verified manager+Go release. Since **v3.2.3**, a VPS with **valid existing pairing configuration** always **restarts its tunnel after an update**, including when that service was deliberately stopped or disabled beforehand. The installer verifies that systemd has a live main process and that the Go health heartbeat is fresh; on failure it rolls back to the prior installed binaries.
+Menu **10 — Update** and `sudo pingtunnel update` install the pinned, checksum/manifest-verified manager+Go release. Since **v3.2.4**, a VPS with **valid existing pairing configuration** always **restarts its tunnel after an update**, including when that service was deliberately stopped or disabled beforehand. The installer verifies that systemd has a live main process and that the Go health heartbeat is fresh; on failure it rolls back to the prior installed binaries.
 
 **Notice:** running VPN sessions may be interrupted by that restart. A fresh VPS without completed Setup is not automatically started. A previously stopped service becomes active following a successful update.
 
@@ -264,7 +267,8 @@ These features **do not guarantee uninterrupted VPN sessions**, live adaptation 
 
 | Version | Config schema | Wire format | Compatibility |
 | --- | --- | --- | --- |
-| **3.2.3** | 3 | **v4** (`PTH4/PTD4`) | Current; live resource monitor and post-update restart |
+| **3.2.4** | 3 | **v4** (`PTH4/PTD4`) | Current; raw-mode and menu-order fix |
+| **3.2.3** | 3 | **v4** | Previous release; resource dashboard |
 | **3.2.2** | 3 | **v4** | Previous compatible patch |
 | **3.2.1** | 3 | **v4** | Previous compatible maintenance release |
 | **3.2.0** | 3 | **v4** | Previous patch release; wire-compatible |
@@ -276,7 +280,7 @@ Upgrading both VPSs is recommended during a maintenance window. The manager pres
 
 > **Repository transfer note:** For updates, use the canonical installer URL under `MSMSofts/Pingtunnel_manager` shown in the Install section. Earlier manager binaries may still use the former repository owner in the built-in `pingtunnel update` URL.
 
-[Version history](CHANGELOG.md) · [Pinned release](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.3) · [Rolling assets](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/rust-latest)
+[Version history](CHANGELOG.md) · [Pinned release](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.4) · [Rolling assets](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/rust-latest)
 
 ## Important paths
 
@@ -302,7 +306,7 @@ Upgrading both VPSs is recommended during a maintenance window. The manager pres
 
 ## Scope & limitations
 
-**Not implemented as of 3.2.3:** actual reverse tunnel forwarding, automatic Direct/Reverse switching, high availability, multiple VPSs, simultaneous TCP+UDP forwarding through one configured tunnel, or guaranteed ICMP traffic camouflage.
+**Not implemented as of 3.2.4:** actual reverse tunnel forwarding, automatic Direct/Reverse switching, high availability, multiple VPSs, simultaneous TCP+UDP forwarding through one configured tunnel, or guaranteed ICMP traffic camouflage.
 
 **Still required before high-assurance deployment:** testing two real VPSs with ICMP packet loss/jitter, Hysteria 2 end-to-end testing, restart/upgrade interruption testing, and independent cryptographic review.
 

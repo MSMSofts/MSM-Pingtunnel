@@ -2,15 +2,15 @@
 
 **یک تونل ICMP رمزنگاری‌شده، دو سرور، راه‌اندازی ساده و مدیریت سبک.**
 
-[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.2.3](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.3)
+[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.2.4](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.4)
 
-![Version](https://img.shields.io/badge/version-3.2.3-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.2.4-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml)
 
 **Pingtunnel Manager** ابزاری برای نصب، جفت‌سازی، مدیریت و پایش یک تونل مبتنی بر **ICMP** میان **یک VPS ایران و یک VPS خارج** است. ترافیک برنامه‌های TCP یا UDP ابتدا وارد سرور ایران می‌شود، از طریق ICMP رمزنگاری‌شده به سرور خارج می‌رسد و در نهایت به سرویس محلی موردنظر تحویل داده می‌شود.
 
 این پروژه **به‌تنهایی سرویس VPN یا جایگزین Hysteria 2، Xray و s-ui نیست**؛ بلکه لایهٔ انتقال میان دو سرور را فراهم می‌کند.
 
-> **نسخه فعلی: 3.2.3** — مدیریت با Rust، هستهٔ انتقال با Go، تنظیمات نسخه 3 و پروتکل رمزنگاری Wire v4. قابلیت تونل معکوس و تغییر خودکار جهت هنوز پیاده‌سازی نشده است.
+> **نسخه فعلی: 3.2.4** — مدیریت با Rust، هستهٔ انتقال با Go، تنظیمات نسخه 3 و پروتکل رمزنگاری Wire v4. قابلیت تونل معکوس و تغییر خودکار جهت هنوز پیاده‌سازی نشده است.
 
 ## چرا Pingtunnel Manager؟
 
@@ -82,7 +82,7 @@ curl -fsSL https://raw.githubusercontent.com/MSMSofts/Pingtunnel_manager/main/So
 sudo bash /tmp/pingtunnel-install.sh
 ~~~
 
-پیشنهاد می‌شود پیش از اجرای هر اسکریپت نصب اینترنتی، محتوای فایل دانلودشده را بررسی کنی. نصب‌کننده باینری‌های منتشرشدهٔ [v3.2.3](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.3) را همراه با SHA256 و Manifest بررسی می‌کند و قبل از جایگزینی فایل‌های موجود، تطابق نسخهٔ Manager، هسته Go و Wire Protocol را کنترل می‌کند.
+پیشنهاد می‌شود پیش از اجرای هر اسکریپت نصب اینترنتی، محتوای فایل دانلودشده را بررسی کنی. نصب‌کننده باینری‌های منتشرشدهٔ [v3.2.4](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.4) را همراه با SHA256 و Manifest بررسی می‌کند و قبل از جایگزینی فایل‌های موجود، تطابق نسخهٔ Manager، هسته Go و Wire Protocol را کنترل می‌کند.
 
 ### راه‌اندازی: ابتدا خارج، سپس ایران
 
@@ -120,40 +120,44 @@ sudo pingtunnel logs 100
 
 ## راهنمای منوی تعاملی جدید
 
-منوی اصلی با اجرای `sudo pingtunnel` باز می‌شود و در نسخه **3.2.3** به چهار بخش تقسیم شده است. بالای منو، موقعیت فیزیکی VPS، IP سرور مقابل، نوع ترافیک و **پورت همین سرور**، و وضعیت جاری سرویس systemd را می‌بینی. این خلاصه کلید رمزنگاری یا سایر اسرار را نمایش نمی‌دهد.
+**اصلاح مهم نسخه 3.2.4:** اگر منوی نسخه 3.2.3 به‌صورت پلکانی و نامرتب نمایش داده می‌شد، با نصب 3.2.4 مشکل پایان خطوط در حالت Raw برطرف می‌شود. گزینه‌های منو به ترتیب **۱ تا ۱۴ از بالا به پایین** و در یک ستون نمایش داده می‌شوند. در ترمینال کوچک، نمایش فشرده فعال است و اطلاعات CPU/RAM حفظ می‌شوند.
+
+
+
+منوی اصلی با اجرای `sudo pingtunnel` باز می‌شود و در نسخه **3.2.4** به چهار بخش تقسیم شده است. بالای منو، موقعیت فیزیکی VPS، IP سرور مقابل، نوع ترافیک و **پورت همین سرور**، و وضعیت جاری سرویس systemd را می‌بینی. این خلاصه کلید رمزنگاری یا سایر اسرار را نمایش نمی‌دهد.
 
 ~~~text
-+--------------------------------------------------------------------+
-|   PINGTUNNEL MANAGER                                               |
-|   SECURE ICMP TUNNEL  |  v3.2.3  |  Wire v4                        |
-+--------------------------------------------------------------------+
+================================================================
+  PINGTUNNEL  /  CONTROL CENTER
+  v3.2.4   |   Encrypted ICMP   |   Wire v4
+----------------------------------------------------------------
+LIVE TUNNEL STATUS
+  Location     Foreign (service)
+  Peer IPv4    203.0.113.10
+  Transport    UDP / 444
+  Service      active
+  CPU (10s)    0.3%          avg 60s 0.3%
+  RAM (RSS)    13.9 MiB      avg 60s 13.9 MiB
 
-  TUNNEL OVERVIEW
-  ------------------------------------------------------------------
-  Location          : Iran (ingress)
-  Peer IPv4         : 203.0.113.10
-  Local transport   : UDP / 444
-  Service status    : active
-
-  SERVICE CONTROLS
-  ------------------------------------------------------------------
-   1) Status                      2) Start
-   3) Stop                        4) Restart
-   5) View logs
-
-  SETUP & CONFIGURATION
-  ------------------------------------------------------------------
-   6) Setup Wizard                7) Show pairing key
-
-  DIAGNOSTICS
-  ------------------------------------------------------------------
-   8) Adaptive Performance        9) Validate config
-  13) Security status            14) Health check
-
-  MAINTENANCE
-  ------------------------------------------------------------------
-  10) Update                     11) Uninstall
-  12) Exit
+SERVICE CONTROLS
+  1) Status
+  2) Start
+  3) Stop
+  4) Restart
+  5) Logs
+SETUP & CONFIGURATION
+  6) Setup Wizard
+  7) Pairing key
+DIAGNOSTICS
+  8) Performance
+  9) Validate
+MAINTENANCE
+ 10) Update
+ 11) Uninstall
+ 12) Exit
+SECURITY & HEALTH
+ 13) Security
+ 14) Health
 ~~~
 
 نمای بالا **صرفاً مثال** است. در ترمینال UTF-8، کادرهای گرافیکی و رنگ‌های ملایم نمایش داده می‌شوند؛ اگر خروجی ترمینال نباشد، `TERM=dumb` باشد یا متغیر `NO_COLOR` تنظیم شده باشد، منو بدون کد رنگ نمایش داده می‌شود. نسخه برنامه به‌صورت خودکار خوانده می‌شود، نه اینکه ثابت داخل منو نوشته شده باشد.
@@ -193,7 +197,7 @@ sudo pingtunnel logs 100
 
 برای بررسی نتیجه از منو گزینه‌های **1، 13، 14 و 8** را ببین؛ یا `sudo pingtunnel status`، `sudo pingtunnel security`، `sudo pingtunnel health` و `sudo pingtunnel performance` را اجرا کن.
 
-### پایش زنده CPU و حافظه در منوی نسخه 3.2.3
+### پایش زنده CPU و حافظه در منوی نسخه 3.2.4
 
 در بخش **LIVE TUNNEL OVERVIEW**، دقیقاً زیر `Service status` دو ردیف جدید دیده می‌شود:
 
@@ -216,7 +220,7 @@ sudo pingtunnel logs 100
 
 ### Restart خودکار بعد از Update
 
-گزینه **10 — Update** و اجرای `sudo pingtunnel update` از نصب‌کننده نسخه‌دار استفاده می‌کنند. از نسخه **3.2.3**، پس از نصب سالم Manager و Go Core روی VPS **دارای تنظیمات معتبر**، تونل **حتماً یک‌بار Restart می‌شود**؛ حتی اگر سرویس قبل از ارتقا متوقف یا غیرفعال بوده باشد. سپس وضعیت `MainPID` و Heartbeat ارزیابی می‌شود و در صورت خطای راه‌اندازی، نصب‌کننده به فایل‌های قبلی Rollback می‌کند.
+گزینه **10 — Update** و اجرای `sudo pingtunnel update` از نصب‌کننده نسخه‌دار استفاده می‌کنند. از نسخه **3.2.4**، پس از نصب سالم Manager و Go Core روی VPS **دارای تنظیمات معتبر**، تونل **حتماً یک‌بار Restart می‌شود**؛ حتی اگر سرویس قبل از ارتقا متوقف یا غیرفعال بوده باشد. سپس وضعیت `MainPID` و Heartbeat ارزیابی می‌شود و در صورت خطای راه‌اندازی، نصب‌کننده به فایل‌های قبلی Rollback می‌کند.
 
 **توجه:** این کار اتصال‌های فعال VPN را موقتاً قطع می‌کند. سروری که هنوز Setup نشده، پس از نصب اولیه Start نمی‌شود. اگر سرویس را عمداً متوقف نگه داشته‌ای، پس از Update دیگر متوقف نخواهد ماند.
 
@@ -265,10 +269,11 @@ sudo pingtunnel logs 100
 
 | نسخه | تنظیمات | پروتکل بین VPSها | سازگاری |
 | --- | --- | --- | --- |
-| **3.2.3** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | نسخه فعلی؛ پایش زنده و Restart پس از Update |
-| **3.2.2** | `schema_version=3` | Wire v4 | نسخه قبلی؛ سازگار با 3.2.3 |
-| **3.2.1** | `schema_version=3` | Wire v4 | نسخه قبلی؛ هم‌ساز با 3.2.3 |
-| **3.2.0** | `schema_version=3` | Wire v4 | با 3.2.3 سازگار در سطح پروتکل |
+| **3.2.4** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | رفع نمایش منو؛ بدون تغییر شبکه |
+| **3.2.3** | `schema_version=3` | Wire v4 | نسخه قبل؛ پایش منابع و Restart پس از Update |
+| **3.2.2** | `schema_version=3` | Wire v4 | نسخه قبلی؛ سازگار با 3.2.4 |
+| **3.2.1** | `schema_version=3` | Wire v4 | نسخه قبلی؛ هم‌ساز با 3.2.4 |
+| **3.2.0** | `schema_version=3` | Wire v4 | با 3.2.4 سازگار در سطح پروتکل |
 | **3.1.0** | `schema_version=3` | Wire v4 | پایه Forward Secrecy و Anti-Replay |
 | **3.0.0** | `schema_version=3` | قالب قدیمی `PTA1` | از نظر قالب تنظیمات قابل ارتقاست، اما با Wire v4 هم‌زمان متصل نمی‌شود |
 | **قبل از 3.0** | قالب قدیمی | قدیمی | مهاجرت خودکار پشتیبانی نمی‌شود |
@@ -277,7 +282,7 @@ sudo pingtunnel logs 100
 
 > **نکته پس از انتقال مخزن:** برای به‌روزرسانی، فعلاً از دستور نصب با نشانی جدید `MSMSofts/Pingtunnel_manager` در بخش «نصب سریع» استفاده کن. برخی باینری‌های منتشرشده پیش از انتقال، ممکن است در فرمان داخلی `pingtunnel update` هنوز به نشانی قدیمی مراجعه کنند.
 
-[جزئیات تغییرات](CHANGELOG.md) · [نسخه ثابت 3.2.3](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.3) · [نسخه rolling](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/rust-latest)
+[جزئیات تغییرات](CHANGELOG.md) · [نسخه ثابت 3.2.4](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.4) · [نسخه rolling](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/rust-latest)
 
 ## مسیر فایل‌ها
 
@@ -300,7 +305,7 @@ sudo pingtunnel logs 100
 
 ## محدودیت‌های فعلی و برنامه توسعه
 
-**در نسخه 3.2.3 وجود ندارند:** تونل معکوس واقعی (Reverse Forwarding)، انتخاب خودکار Direct/Reverse، HA، چند VPS، انتقال هم‌زمان TCP و UDP در یک نمونه تونل، تضمین مقابله با DoS حجمی، و Forward Secrecy فراتر از فرضیات امنیتی نشست‌های X25519.
+**در نسخه 3.2.4 وجود ندارند:** تونل معکوس واقعی (Reverse Forwarding)، انتخاب خودکار Direct/Reverse، HA، چند VPS، انتقال هم‌زمان TCP و UDP در یک نمونه تونل، تضمین مقابله با DoS حجمی، و Forward Secrecy فراتر از فرضیات امنیتی نشست‌های X25519.
 
 **بررسی‌های ضروری پیش از استفاده گسترده:** آزمایش ICMP روی دو VPS واقعی، تست عملی Hysteria 2، تزریق Packet Loss/Jitter، آزمون Restart و ارتقای دوطرفه، و ممیزی مستقل پروتکل رمزنگاری.
 

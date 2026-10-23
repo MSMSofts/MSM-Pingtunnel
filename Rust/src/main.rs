@@ -377,7 +377,7 @@ fn menu()->Result<()>{
     loop{
         let cfg=load_config().ok();
         let default=if cfg.is_some(){"1"}else{"6"};
-        let display=|resources:resource_monitor::Resources| -> String {
+        let display=|resources:resource_monitor::Resources, columns:u16, rows:u16| -> String {
             let state=current_service_state();
             let view=menu_ui::MenuView{
                 version:env!("CARGO_PKG_VERSION"),
@@ -390,13 +390,13 @@ fn menu()->Result<()>{
                 configured:cfg.is_some(),
                 resources,
             };
-            menu_ui::render(&view,menu_ui::supports_color(),menu_ui::supports_unicode())
+            menu_ui::render_sized(&view,menu_ui::supports_color(),menu_ui::supports_unicode(),columns,rows)
         };
         let choice=if menu_ui::interactive_available(){
             // Alternate screen + raw keyboard mode are restored BEFORE each action.
             menu_ui::choose(&mut monitor,display,default)?
         }else{
-            print!("{}",display(monitor.current()));
+            print!("{}",display(monitor.current(),80,40));
             prompt("Choose (1-14)",default)?
         };
         let action=match choice.as_str(){
