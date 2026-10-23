@@ -67,10 +67,13 @@ func TestAdaptiveIgnoresOldPongs(t *testing.T) {
  a.OnPing(now)
  next:=now.Add(time.Second)
  a.OnPing(next)
+ // Out-of-order responses are valid while the old probe is outstanding.
  a.OnPong(now,now.Add(40*time.Millisecond))
- if a.Status(1048576,20000,400).Samples!=0 {t.Fatal("accepted delayed response for superseded probe")}
+ if a.Status(1048576,20000,400).Samples!=1 {t.Fatal("did not accept outstanding earlier probe")}
  a.OnPong(next,next.Add(50*time.Millisecond))
- if a.Status(1048576,20000,400).Samples!=1 {t.Fatal("did not accept current probe response")}
+ if a.Status(1048576,20000,400).Samples!=2 {t.Fatal("did not accept current probe response")}
+ a.OnPong(now,now.Add(80*time.Millisecond))
+ if a.Status(1048576,20000,400).Samples!=2 {t.Fatal("accepted duplicate response")}
 }
 
 func TestAdaptiveStatusIsSecretFreeAndPrivate(t *testing.T) {
