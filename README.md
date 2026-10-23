@@ -1,73 +1,74 @@
-# Pingtunnel Manager
+# Pingtunnel Manager — Rust edition
 
-مدیریت و نصب آسان [Pingtunnel](https://github.com/esrrhs/pingtunnel) در لینوکس، با منوی تعاملی، مدیریت سرویس `systemd` و نمایش لاگ‌ها.
+**مدیر کم‌مصرف برای [Pingtunnel](https://github.com/esrrhs/pingtunnel)، مستقل از Python در زمان اجرا.**
 
-> این مخزن بر پایهٔ Pingtunnel Manager اولیه است و مسیرهای نصب و به‌روزرسانی به **meysamrn/Pingtunnel_manager** منتقل شده‌اند. پروژهٔ اصلی انتقال ICMP، [esrrhs/pingtunnel](https://github.com/esrrhs/pingtunnel) است.
+در این نسخه، رابط مدیریتی Rust فقط برای تنظیمات و کنترل سرویس اجرا می‌شود. فرمان `run` با `exec()` پردازش خودش را جایگزین هسته Go می‌کند و `systemd` مسئول Restart، محدودیت حافظه و ثبت لاگ است. **هیچ فرایند مدیریت Python یا Rust به‌طور دائمی در کنار هسته Go اجرا نمی‌شود.** این تغییر به‌تنهایی سرعت انتقال ترافیک ICMP را افزایش نمی‌دهد.
 
-## نصب سریع روی Ubuntu / Debian
+## نصب سریع — Ubuntu/Debian با systemd
 
-روی هر سرور، این دو دستور را اجرا کنید. می‌توانید اسکریپت دانلودشده را پیش از اجرا بررسی کنید:
-
-~~~bash
+```bash
 curl -fsSL https://raw.githubusercontent.com/meysamrn/Pingtunnel_manager/main/Source/install.sh -o /tmp/pingtunnel-install.sh
+less /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
-~~~
+```
 
-نصب‌کننده با `apt-get` بسته‌های `python3`، `python3-colorama`، `curl` و `ca-certificates` را نصب می‌کند، کد Manager را در `/usr/local/bin/install_pingtunnel.py` قرار می‌دهد و باینری متناسب با معماری را از [انتشارهای رسمی Pingtunnel](https://github.com/esrrhs/pingtunnel/releases) دریافت می‌کند. فایل‌های نصب در `/opt/pingtunnel` قرار می‌گیرند.
+نصب‌کننده برای CPUهای x86_64 و aarch64 ابتدا باینری استاتیک Rust را از [GitHub Releases](https://github.com/meysamrn/Pingtunnel_manager/releases) و فایل SHA256 آن دریافت می‌کند. در صورت نبود Release، روی Debian/Ubuntu از source با Cargo کامپایل می‌کند؛ این مرحله روی VPS ضعیف می‌تواند سنگین باشد. برای ممنوع‌کردن کامپایل:
 
-**پیش‌نیازها:** توزیع Ubuntu/Debian با `apt-get`، Python 3.8 یا جدیدتر، دسترسی `sudo`، اینترنت، و برای مدیریت سرویس، `systemd`. معماری‌های تعریف‌شده: `x86_64`، `aarch64/arm64`، `armv6l/armv7l` و `i386/i686`. هنوز تست نصب انتهابه‌انتها روی تمامی نسخه‌های لینوکس انجام نشده است.
+```bash
+sudo env PINGTUNNEL_NO_COMPILE=1 bash /tmp/pingtunnel-install.sh
+```
 
-## تنظیم اولیه
+باینری Go اصلی از [نسخه‌های رسمی esrrhs/pingtunnel](https://github.com/esrrhs/pingtunnel/releases) دانلود می‌شود، فقط اگر هنوز نصب نشده باشد. برای دانلود مجدد آخرین نسخه هسته:
 
-1. در مرحلهٔ `Type` نقش `server` را برای سرور و `client` را برای سمت متصل‌شونده انتخاب کنید.
-2. در هر دو سمت از **کلید عددی یکسان** در محدودهٔ `0` تا `2147483647` استفاده کنید. مقدار پیش‌فرض `123456` فقط نمونه است؛ برای استفادهٔ واقعی آن را تغییر دهید.
-3. در سمت کلاینت، `l_port` و آدرس IP یا دامنهٔ سرور را تعیین کنید. مقدار `tcp=1` برای TCP و `tcp=0` برای UDP است.
-4. تنظیمات در `/opt/pingtunnel/conf/config.json` ذخیره می‌شود. اگر autostart را فعال نکردید، با `sudo pingtunnel start` سرویس را شروع کنید.
-5. `sudo pingtunnel status` و `sudo pingtunnel logs 100` را در دو سمت بررسی کنید. شبکه/فایروال نیز باید ICMP موردنیاز را عبور دهد.
+```bash
+sudo env PINGTUNNEL_REFRESH_GO=1 bash /tmp/pingtunnel-install.sh
+```
 
-> **محدودیت نسخهٔ مبنا:** مقصد `-t` در کلاینت به شکل `server:l_port` ساخته می‌شود و تنظیم مقصد سفارشی از طریق منوی فعلی وجود ندارد. این نسخه تمام گزینه‌های Pingtunnel اصلی (مانند SOCKS5) را در منو پیاده‌سازی نکرده است؛ برای چنین سناریوهایی باید `build_args` تغییر کند.
+**ارتقا از نسخه Python:** فایل `/opt/pingtunnel/conf/config.json` حفظ می‌شود. کلیدهای `type`, `key`, `server`, `l_port`, `tcp`, `memory_mb`, `autostart` پشتیبانی می‌شوند. ابتدا از فایل تنظیمات نسخه پشتیبان بگیرید. نصب‌کننده در صورت شکست پس از مرحلهٔ جایگزینی، برای بازگرداندن باینری‌ها و فایل‌های سرویس تلاش می‌کند.
 
-## فرمان‌ها
+## دستورات
 
-~~~bash
-sudo pingtunnel             # منوی مدیریتی
-sudo pingtunnel start       # اجرا
-sudo pingtunnel stop        # توقف
-sudo pingtunnel restart     # راه‌اندازی مجدد
-sudo pingtunnel status      # وضعیت
-sudo pingtunnel logs 100    # صد خط آخر لاگ
-sudo pingtunnel edit        # ویرایش تنظیمات (نیازمند EDITOR مانند nano)
-sudo pingtunnel update      # نصب آخرین نسخه از همین مخزن، با حفظ config
-sudo pingtunnel uninstall   # حذف برنامه، تنظیمات و لاگ‌ها
-~~~
+```bash
+sudo pingtunnel                  # منوی تعاملی
+sudo pingtunnel configure        # تنظیم server/client و پورت‌ها
+sudo pingtunnel validate         # بررسی کانفیگ بدون تغییر
+sudo pingtunnel dry-run          # فرمان Go (کلید مخفی)
+sudo pingtunnel service-install  # ساخت واحد systemd و MemoryMax
+sudo pingtunnel start
+sudo pingtunnel stop
+sudo pingtunnel restart
+sudo pingtunnel status
+sudo pingtunnel logs 100
+sudo pingtunnel edit
+sudo pingtunnel update
+sudo pingtunnel uninstall        # حفظ config و logs
+sudo pingtunnel uninstall --purge # پاکسازی کامل
+```
 
-برای بازگشت به منوی نصب و حذف:
+در کلاینت، `server` سرور Pingtunnel، `l_port` پورت گوش‌دادن محلی و `target` مقصد واقعی `host:port` است؛ مثلاً `127.0.0.1:22`. برای سازگاری اگر `target` در تنظیمات قدیمی نباشد مانند قبل `server:l_port` استفاده می‌شود. `tcp=1` برای TCP و `tcp=0` برای UDP است. شبکه باید عبور ICMP موردنیاز را مجاز بداند.
 
-~~~bash
-sudo python3 /usr/local/bin/install_pingtunnel.py
-~~~
+فایل‌های مهم: `/opt/pingtunnel/conf/config.json` (با دسترسی 0600)، `/opt/pingtunnel/bin/pingtunnel` (هسته)، `/usr/local/bin/pingtunnel` (Rust) و `/etc/systemd/system/pingtunnel.service`.
 
-اسکریپت‌های قدیمی `Source/bash.sh` و `Source/bash2.sh` برای سازگاری حفظ شده‌اند؛ مسیر نصب پیشنهادی `Source/install.sh` است.
+## مصرف منابع و عیب‌یابی
 
-## عیب‌یابی
-
-~~~bash
+```bash
 sudo systemctl status pingtunnel.service --no-pager
 sudo journalctl -u pingtunnel.service -n 100 --no-pager
-sudo tail -n 100 /var/log/pingtunnel/pingtunnel.log
-~~~
+sudo systemctl show pingtunnel.service -p MainPID -p MemoryCurrent -p NRestarts
+```
 
-- اگر باینری دانلود نشد، دسترسی به GitHub و [Releaseهای اصلی](https://github.com/esrrhs/pingtunnel/releases) را بررسی کنید.
-- صرف نصب سرویس، اتصال تونل را تضمین نمی‌کند؛ ICMP باید در مسیر مجاز باشد.
-- نصب مجدد و به‌روزرسانی، فایل تنظیمات فعلی را حفظ می‌کنند. `uninstall` تنظیمات و لاگ‌ها را هم پاک می‌کند؛ از `config.json` پشتیبان بگیرید.
-- اجرای اسکریپت از اینترنت با `root` خطر دارد؛ قبل از اجرا محتوای اسکریپت را بررسی کنید. باینری از انتشار اصلی Pingtunnel دریافت می‌شود ولی SHA256/امضای آن هنوز به‌طور خودکار تأیید نمی‌شود.
+`memory_mb` سقف مصرف سرویس را به `MemoryMax=` تبدیل می‌کند؛ 0 یعنی بدون سقف تعیین‌شده از طرف Manager. پیش از نتیجه‌گیری درباره درصد صرفه‌جویی RAM یا افزایش سرعت، روی VPS خود بنچمارک بگیرید.
 
-## English quick start
+## توسعه و Build
 
-On Ubuntu/Debian, run the two commands above with sudo. Choose `server` or `client`, configure a matching numeric key and ensure required ICMP traffic is allowed. The manager runs with `sudo pingtunnel`; use `sudo pingtunnel status` to check it. The current baseline client target is generated as `server:local-port` and is not a configurable arbitrary destination.
+کد Rust در `Rust/src/main.rs` و تست‌های سازگاری تنظیمات در همان فایل هستند. GitHub Actions روی Pull Request تست می‌کند و پس از موفقیت نسخه اصلی روی `main` فایل‌های Linux amd64/arm64 (musl static) را در Release شناور `rust-latest` منتشر می‌کند.
 
-## Credits & License
+```bash
+cd Rust
+cargo test
+cargo build --release
+```
 
-- Core tool: [esrrhs/pingtunnel](https://github.com/esrrhs/pingtunnel)
-- Original Manager code and attribution: [hoseinlolready/Pingtunnel_manager](https://github.com/hoseinlolready/Pingtunnel_manager)
-- Manager source license: [Apache-2.0](LICENSE); the upstream Pingtunnel binary has its own license.
+نسخه Rust برای مدیریت سرویس به Linux + systemd نیاز دارد. فایل `Source/Pingtunnel.py` برای مشاهده کد قدیمی نگهداری شده ولی به‌عنوان Runner استفاده نمی‌شود. SHA256 تنها یک بررسی تمامیت است، نه تأیید مستقل زنجیره تأمین. اسکریپتی را که با root اجرا می‌کنید ابتدا بازبینی کنید.
+
+**Credits:** [Go core by esrrhs](https://github.com/esrrhs/pingtunnel)؛ [Original Python manager](https://github.com/hoseinlolready/Pingtunnel_manager). [Apache-2.0 license](LICENSE) برای این Manager؛ هسته مجوز خودش را دارد.
