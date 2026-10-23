@@ -7,7 +7,7 @@ use crate::{
 };
 use serde_json::{json, Value};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Read;
 
 fn new_key() -> Result<String> {
     let mut input = fs::File::open("/dev/urandom")?;
@@ -69,12 +69,15 @@ pub(crate) fn wizard() -> Result<()> {
     println!("TCP tuning, systemd, health checks and restart are automatic.");
     println!("Only the remote address, shared key and actual destination are needed.");
 
-    let role = choose_role(get_string(&cfg, "type").unwrap_or("server"))?;
+    let previous_role = get_string(&cfg, "type").unwrap_or("").to_owned();
+    let role = choose_role(&previous_role)?;
     cfg["type"] = json!(role);
     if role == "server" {
-        let key = cfg.get("key").and_then(as_string)
-            .filter(|v| !v.is_empty())
-            .unwrap_or(new_key()?);
+        let key = if previous_role == "server" {
+            cfg.get("key").and_then(as_string).filter(|v| !v.is_empty())
+        } else {
+            None // Never reuse a former client key as a new server identity.
+        }.unwrap_or(new_key()?);
         cfg["key"] = json!(key);
         cfg["autostart"] = json!(true);
         if let Some(map) = cfg.as_object_mut() {
@@ -93,7 +96,11 @@ pub(crate) fn wizard() -> Result<()> {
         }
         cfg["server"] = json!(host);
 
-        let existing_key = cfg.get("key").and_then(as_string);
+        let existing_key = if previous_role == "client" {
+            cfg.get("key").and_then(as_string)
+        } else {
+            None // A server key from a previous role is not the remote shared key.
+        };
         println!("Use the authentication key shown by the FOREIGN server setup.");
         let key = prompt(
             "Shared numeric key (Enter keeps the existing key)",
@@ -157,9 +164,17 @@ pub(crate) fn wizard() -> Result<()> {
                 "udp_idle_seconds":90
             });
             println!("Automatic HA enabled: both remote servers must use the same key.");
-        } else if initial {
+        } else if initial || previous_role != "client" {
             cfg.as_object_mut().unwrap().remove("ha");
             println!("Single-endpoint mode. Add a second server in the menu to enable HA.");
+        } else if let Some(endpoints) = cfg.get_mut("ha")
+            .and_then(|v| v.get_mut("endpoints"))
+            .and_then(Value::as_array_mut)
+        {
+            // A changed primary endpoint must also update the HA route list.
+            if let Some(first) = endpoints.first_mut() {
+                first["server"] = json!(host);
+            }
         }
     }
 
