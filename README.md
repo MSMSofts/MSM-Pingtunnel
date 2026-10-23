@@ -1,67 +1,86 @@
-# Pingtunnel Manager — Rust edition
+# Pingtunnel Manager 2.3 — نصب یک‌خطی، منوی یکپارچه، مدیریت خودکار
 
-**مدیر کم‌مصرف برای [Pingtunnel](https://github.com/esrrhs/pingtunnel)، مستقل از Python در زمان اجرا.**
+مدیریت کم‌مصرف تونل [Pingtunnel](https://github.com/esrrhs/pingtunnel) روی Ubuntu/Debian همراه `systemd`؛ هسته انتقال همچنان **Go** است و Manager با Rust نوشته شده است.
 
-در این نسخه، رابط مدیریتی Rust فقط برای تنظیمات و کنترل سرویس اجرا می‌شود. فرمان `run` با `exec()` پردازش خودش را جایگزین هسته Go می‌کند و `systemd` مسئول Restart، محدودیت حافظه و ثبت لاگ است. **هیچ فرایند مدیریت Python یا Rust به‌طور دائمی در کنار هسته Go اجرا نمی‌شود.** این تغییر به‌تنهایی سرعت انتقال ترافیک ICMP را افزایش نمی‌دهد.
+## نصب با فقط یک فرمان
 
-## نصب سریع — Ubuntu/Debian با systemd
+روی هر VPS لینوکسی اجرا کن:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/meysamrn/Pingtunnel_manager/main/Source/install.sh -o /tmp/pingtunnel-install.sh
-less /tmp/pingtunnel-install.sh
-sudo bash /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/meysamrn/Pingtunnel_manager/main/Source/install.sh -o /tmp/pingtunnel-install.sh && sudo bash /tmp/pingtunnel-install.sh
 ```
 
-نصب‌کننده برای CPUهای x86_64 و aarch64 ابتدا باینری استاتیک Rust را از [GitHub Releases](https://github.com/meysamrn/Pingtunnel_manager/releases) و فایل SHA256 آن دریافت می‌کند. در صورت نبود Release، روی Debian/Ubuntu از source با Cargo کامپایل می‌کند؛ این مرحله روی VPS ضعیف می‌تواند سنگین باشد. برای ممنوع‌کردن کامپایل:
+بعد از نصب فقط کافی است این دستور را اجرا کنی:
 
 ```bash
-sudo env PINGTUNNEL_NO_COMPILE=1 bash /tmp/pingtunnel-install.sh
+pingtunnel
 ```
 
-باینری Go اصلی از [نسخه‌های رسمی esrrhs/pingtunnel](https://github.com/esrrhs/pingtunnel/releases) دانلود می‌شود، فقط اگر هنوز نصب نشده باشد. برای دانلود مجدد آخرین نسخه هسته:
+با همین دستور **منوی کامل** باز می‌شود. اگر با کاربر عادی وارد شده باشی، برنامه هنگام نیاز با `sudo` سطح دسترسی مناسب می‌گیرد. برای نصب جدید، گزینه **6 — Easy setup** به طور پیش‌فرض پیشنهاد می‌شود. نصب‌کننده نیازی به ورودی تعاملی ندارد و به‌صورت خودکار معماری CPU، باینری آماده AMD64/ARM64، وابستگی‌ها و سرویس‌های لازم را مدیریت می‌کند.
+
+> اجرای اسکریپت اینترنتی با دسترسی root نیازمند اعتماد به کد ریپازیتوری است. برای بازبینی ابتدا URL نصب‌کننده را باز کن. دستور بالا پس از دانلود موفق، فایل را اجرا می‌کند.
+
+## اولین بار: تنها اطلاعات واقعاً ضروری
+
+برای برقراری یک اتصال میان **دو VPS مستقل**، هیچ اسکریپتی نمی‌تواند بدون اطلاع از نقش میزبان و آدرس طرف مقابل، سرورها را مطمئن به هم متصل کند. این اطلاعات فقط **یک‌بار** در Easy setup درخواست می‌شوند؛ تنظیمات جزئی و مدیریت بعدی خودکار است.
+
+در VPS **خارج**: گزینه 6 → نقش `1) Server`؛ کلید عددی با منبع تصادفی سیستم تولید و ذخیره می‌شود. این کلید و IP عمومی سرور را از کانال امن به سمت ایران منتقل کن.
+
+در VPS **ایران**: گزینه 6 → نقش `2) Client`؛ IP/DNS سرور خارج، همان کلید و مقصد واقعی `host:port` را وارد کن (مثل `127.0.0.1:443` فقط وقتی واقعاً آن سرویس در سمت خارج وجود دارد). پورت محلی پیش‌فرض `4455` و پروتکل اولیه TCP است. آدرس سرور پشتیبان اختیاری است؛ فقط اگر VPS دوم خارجی و مستقلی داری آن را وارد کن.
+
+**بقیه کارها خودکار انجام می‌شوند:** اعتبارسنجی تنظیمات، فعال‌سازی autostart، ایجاد/به‌روزرسانی واحد systemd، شروع یا راه‌اندازی دوباره سرویس، تنظیمات پیش‌فرض Go و در صورت وجود پشتیبان، فعال‌کردن Health Check و Failover.
+
+بدون VPS دوم، سیستم تک‌مسیره فعالیت می‌کند؛ جایگزین ساختگی یا سرور خارجی حدسی تولید نمی‌شود.
+
+## همه تنظیمات و کارها از یک منو
+
+| گزینه | کارکرد |
+| --- | --- |
+| 1–5 | وضعیت، شروع، توقف، راه‌اندازی مجدد، مشاهده لاگ |
+| 6 | Easy setup: اتصال اولیه با حداقل ورودی |
+| 7 | Advanced config: تغییر جزئیات و اعمال خودکار |
+| 8 | انتخاب TCP یا UDP برای ترافیک مقصد، با اعمال خودکار |
+| 9 | اضافه‌کردن Endpoint پشتیبان و فعال‌کردن HA |
+| 10 | نمایش وضعیت واقعی و مسیر منتخب HA |
+| 11 | غیرفعال‌کردن HA و بازگشت به تک‌مسیره |
+| 12 | بررسی صحت تنظیمات |
+| 13 | دانلود و نصب نسخه جدید |
+| 14 | حذف برنامه (با تأیید) |
+| 15 | خروج |
+
+برای اعمال تنظیمات **نیازی به اجرای جداگانه** `service-install` یا `restart` نیست؛ گزینه‌های منو تغییرات را ذخیره و خودکار اعمال می‌کنند. فرمان‌های مستقیم (`pingtunnel status`، `pingtunnel logs 100` و غیره) برای کارهای حرفه‌ای همچنان برقرارند.
+
+## HA و انتخاب خودکار مسیر
+
+اگر سمت ایران Client و دست‌کم **دو سرور خارج** با کلید یکسان داشته باشی، HA خودکار بین آن‌ها تصمیم می‌گیرد. در پس‌زمینه پروب HTTPS روی یک تونل ICMP جداگانه اجرا می‌شود؛ سنجش پیش‌فرض هر ۱۰ ثانیه، تشخیص خرابی با چند نتیجه متوالی و جلوگیری از نوسان با Hysteresis/Cooldown انجام می‌شود.
+
+- **TCP:** اتصال‌های فعال هنگام تغییر برنامه‌ریزی‌شده روی مسیر قبلی باقی می‌مانند؛ اتصال‌های جدید به مسیر سالم‌تر هدایت می‌شوند. خرابی کامل مسیر قبلی نمی‌تواند نشست TCP را زنده منتقل کند.
+- **UDP:** نگاشت هر فرستنده تا سالم بودن مسیر حفظ می‌شود؛ پس از خرابی، بسته‌های بعدی به مسیر سالم منتقل می‌شوند. افت بسته یا ازبین‌رفتن نشست مقصد هنگام تغییر مسیر ممکن است.
+- **بدون HA:** باینری Go مستقیم تحت systemd فعال می‌ماند و پردازش Rust جداگانه دائمی نیاز نیست.
+- **با HA:** برای چند نمونهٔ Go و مسیریابی نشست‌ها، RAM بیشتری مصرف می‌شود.
+
+Auto در این نسخه یعنی **انتخاب خودکار Endpoint سالم در معماری مستقیم**؛ معکوس‌کردن ارتباط، کشف خودکار VPS و بهینه‌سازی پیوسته سرعت انتقال هنوز پیاده‌سازی نشده‌اند.
+
+## به‌روزرسانی و حفظ تنظیمات
+
+از منو گزینه 13 را انتخاب کن. نصب تنظیمات قدیمی `/opt/pingtunnel/conf/config.json` را حفظ می‌کند. برای احتیاط قبل از ارتقای سرور اصلی از config نسخه پشتیبان بگیر:
 
 ```bash
-sudo env PINGTUNNEL_REFRESH_GO=1 bash /tmp/pingtunnel-install.sh
+sudo cp /opt/pingtunnel/conf/config.json /opt/pingtunnel/conf/config.json.backup
 ```
 
-**ارتقا از نسخه Python:** فایل `/opt/pingtunnel/conf/config.json` حفظ می‌شود. کلیدهای `type`, `key`, `server`, `l_port`, `tcp`, `memory_mb`, `autostart` پشتیبانی می‌شوند. ابتدا از فایل تنظیمات نسخه پشتیبان بگیرید. نصب‌کننده در صورت شکست پس از مرحلهٔ جایگزینی، برای بازگرداندن باینری‌ها و فایل‌های سرویس تلاش می‌کند.
-
-## دستورات
+## عیب‌یابی
 
 ```bash
-sudo pingtunnel                  # منوی تعاملی
-sudo pingtunnel configure        # تنظیم server/client و پورت‌ها
-sudo pingtunnel validate         # بررسی کانفیگ بدون تغییر
-sudo pingtunnel dry-run          # فرمان Go (کلید مخفی)
-sudo pingtunnel service-install  # ساخت واحد systemd و MemoryMax
-sudo pingtunnel start
-sudo pingtunnel stop
-sudo pingtunnel restart
-sudo pingtunnel status
-sudo pingtunnel logs 100
-sudo pingtunnel edit
-sudo pingtunnel update
-sudo pingtunnel uninstall        # حفظ config و logs
-sudo pingtunnel uninstall --purge # پاکسازی کامل
-```
-
-در کلاینت، `server` سرور Pingtunnel، `l_port` پورت گوش‌دادن محلی و `target` مقصد واقعی `host:port` است؛ مثلاً `127.0.0.1:22`. برای سازگاری اگر `target` در تنظیمات قدیمی نباشد مانند قبل `server:l_port` استفاده می‌شود. `tcp=1` برای TCP و `tcp=0` برای UDP است. شبکه باید عبور ICMP موردنیاز را مجاز بداند.
-
-فایل‌های مهم: `/opt/pingtunnel/conf/config.json` (با دسترسی 0600)، `/opt/pingtunnel/bin/pingtunnel` (هسته)، `/usr/local/bin/pingtunnel` (Rust) و `/etc/systemd/system/pingtunnel.service`.
-
-## مصرف منابع و عیب‌یابی
-
-```bash
+pingtunnel
 sudo systemctl status pingtunnel.service --no-pager
 sudo journalctl -u pingtunnel.service -n 100 --no-pager
-sudo systemctl show pingtunnel.service -p MainPID -p MemoryCurrent -p NRestarts
+sudo systemctl show pingtunnel.service -p MemoryCurrent -p MainPID -p NRestarts
 ```
 
-`memory_mb` سقف مصرف سرویس را به `MemoryMax=` تبدیل می‌کند؛ 0 یعنی بدون سقف تعیین‌شده از طرف Manager. پیش از نتیجه‌گیری درباره درصد صرفه‌جویی RAM یا افزایش سرعت، روی VPS خود بنچمارک بگیرید.
+**پیش‌نیاز:** Ubuntu/Debian دارای systemd، دسترسی root/sudo، اینترنت برای دریافت باینری از GitHub و امکان عبور ICMP. نصب‌کننده از Release آماده به همراه SHA256 استفاده می‌کند و در صورت نبود آن ممکن است به کامپایل موقت Rust نیاز داشته باشد. قبل از استفاده عملی، تونل و HA باید روی VPS واقعی آزمایش شوند.
 
-## توسعه و Build
-
-کد Rust در `Rust/src/main.rs` و تست‌های سازگاری تنظیمات در همان فایل هستند. GitHub Actions روی Pull Request تست می‌کند و پس از موفقیت نسخه اصلی روی `main` فایل‌های Linux amd64/arm64 (musl static) را در Release شناور `rust-latest` منتشر می‌کند.
+## توسعه
 
 ```bash
 cd Rust
@@ -69,99 +88,6 @@ cargo test
 cargo build --release
 ```
 
-نسخه Rust برای مدیریت سرویس به Linux + systemd نیاز دارد. فایل `Source/Pingtunnel.py` برای مشاهده کد قدیمی نگهداری شده ولی به‌عنوان Runner استفاده نمی‌شود. SHA256 تنها یک بررسی تمامیت است، نه تأیید مستقل زنجیره تأمین. اسکریپتی را که با root اجرا می‌کنید ابتدا بازبینی کنید.
+[نصب‌کننده رسمی](Source/install.sh) · [Rust Manager](Rust/src/main.rs) · [HA TCP/UDP](Rust/src/ha.rs) · [Release binaries](https://github.com/meysamrn/Pingtunnel_manager/releases/tag/rust-latest)
 
-**Credits:** [Go core by esrrhs](https://github.com/esrrhs/pingtunnel)؛ [Original Python manager](https://github.com/hoseinlolready/Pingtunnel_manager). [Apache-2.0 license](LICENSE) برای این Manager؛ هسته مجوز خودش را دارد.
-
-## High Availability (HA) — TCP and UDP automatic failover
-
-این قابلیت برای کاربران ایران/خارج به‌صورت **اختیاری** اضافه شده است. نوع هسته Go عوض نمی‌شود.
-
-**محدودیت فنی مهم:** این حالت بین دو یا چند سرور **خارج** که هرکدام Pingtunnel Server هستند جابه‌جا می‌شود؛ «تونل معکوس» را پیاده‌سازی نمی‌کند. در **TCP** ارتباط‌های سالم قبلی روی مسیرشان باقی می‌مانند و فقط اتصال‌های جدید به مسیر بهتر می‌روند. اگر مسیر قبلی ناگهان قطع شود، نشست‌های TCP قابل انتقال زنده نیستند. در **UDP** نگاشت هر فرستنده تا زمانی که مسیر سالم باشد ثابت می‌ماند و در خرابی مسیر به Endpoint سالم دیگری منتقل می‌شود؛ امکان افت چند بسته و تغییر وضعیت نشست‌های مبتنی بر UDP وجود دارد. SOCKS5 و Reverse HA هنوز پشتیبانی نمی‌شوند.
-
-### پیش‌نیاز
-
-1. در ایران: Pingtunnel Client در حالت TCP (`type=client`, `tcp=1`) **یا** UDP (`type=client`, `tcp=0`) با پورت محلی ثابت.
-2. در خارج: دست‌کم **دو Pingtunnel Server مستقل** با کلید عددی مشترک و امکان دسترسی به یک مقصد TCP مشترک.
-3. در همه مقصدهای خارج، اتصال HTTPS به `1.1.1.1:443` برای Health Probe پیش‌فرض برقرار باشد (یا `ha.probe_target` و `ha.probe_domain` را مطابق یک سرور HTTPS معتبر خودتان تنظیم کنید). **حتی برای UDP** مسیر سلامت از یک نمونهٔ جداگانه Pingtunnel TCP و تبادل HTTPS ارزیابی می‌شود؛ بنابراین سلامت UDP مقصد را مستقلاً تضمین نمی‌کند. در UDP گزینهٔ `ha.probe_enabled` باید `true` باشد.
-4. VPS ایران باید RAM کافی برای دو نمونهٔ هسته داده + دو نمونهٔ هسته تست سلامت و پردازش Rust proxy داشته باشد. پیش از فعال‌سازی روی سرور اصلی، تست واقعی انجام دهید.
-
-### راه‌اندازی HA روی سرور ایران
-
-پس از نصب نسخه جدید و انجام `sudo pingtunnel configure` برای تونل مستقیم (انتخاب `tcp=0` برای UDP یا `tcp=1` برای TCP):
-
-```bash
-sudo pingtunnel ha-setup           # IP سرور خارج دوم را وارد کنید
-sudo pingtunnel validate
-sudo pingtunnel service-install
-sudo pingtunnel restart
-sudo pingtunnel ha-status
-sudo pingtunnel logs 100
-```
-
-**توجه:** سرویس برای شروع HA باید یک بار restart شود و در همان مرحله انتقال اولیه ممکن است اتصال‌ها قطع شوند. پس از فعال‌شدن HA، تغییر *خودکار مسیر* در همان اجرای سرویس، اتصال‌های سالمِ موجود را روی مسیر قبلی حفظ می‌کند.
-
-برای بازگشت به حالت تک‌مسیره، مقدار `ha.enabled` را در `/opt/pingtunnel/conf/config.json` به `false` تغییر دهید، سپس `service-install` و `restart` را اجرا کنید.
-
-### مثال تنظیمات پیشرفته
-
-این بخش را به تنظیمات **Client** فعلی اضافه کنید و IPها را با مقادیر واقعی جایگزین کنید:
-
-```json
-{
-  "type": "client",
-  "key": "123456",
-  "tcp": 1,
-  "l_port": 4455,
-  "server": "203.0.113.10",
-  "target": "10.0.0.5:443",
-  "autostart": true,
-  "memory_mb": 0,
-  "ha": {
-    "enabled": true,
-    "listen_host": "127.0.0.1",
-    "endpoints": [
-      {"name": "foreign-a", "server": "203.0.113.10"},
-      {"name": "foreign-b", "server": "198.51.100.20"}
-    ],
-    "data_port_base": 36000,
-    "probe_port_base": 37000,
-    "probe_enabled": true,
-    "probe_target": "1.1.1.1:443",
-    "probe_domain": "one.one.one.one",
-    "check_seconds": 10,
-    "failure_threshold": 2,
-    "success_threshold": 2,
-    "switch_streak": 3,
-    "cooldown_seconds": 120,
-    "max_connections": 256,
-    "udp_idle_seconds": 90
-  }
-}
-```
-
-آدرس‌ها در مثال **آزمایشی و غیرقابل استفاده واقعی** هستند. برای سازگاری با نصب‌های فعلی، دستور `ha-setup` درگاه عمومی `0.0.0.0:l_port` را حفظ می‌کند. در تنظیم دستی می‌توانید `listen_host=127.0.0.1` قرار دهید تا دسترسی محدود به خود سرور شود. داخلی‌ها روی `127.0.0.1:36000..` و پروب‌ها روی `127.0.0.1:37000..` فعال می‌شوند و نباید با پورت‌های برنامه‌های دیگر تداخل داشته باشند.
-
-**مکانیسم انتخاب:** برای TCP و UDP، هر ۱۰ ثانیه نمونه‌ای از تبادل HTTPS واقعی از داخل ICMP (از مسیر پروب TCP مستقل) انجام می‌شود؛ بعد از دو موفقیت مسیر سالم و بعد از دو شکست متوالی ناسالم ارزیابی می‌شود. انتقال اضطراری به مسیر سالم بدون درنظرگرفتن cooldown انجام می‌شود. برای انتخاب مسیر بهتر از نظر تأخیر، بهبود معنادار پایدار، ۳ اندازه‌گیری متوالی و حداقل ۱۲۰ ثانیه فاصله از آخرین تغییر لازم است. به این ترتیب نوسان‌های جزئی موجب تغییر پیاپی مسیر نمی‌شوند. این الگوریتم توان عملیاتی را اندازه نمی‌گیرد و صرفاً کیفیت probe را مقایسه می‌کند.
-
-**حریم خصوصی و امنیت:** فایل‌های اجرای هسته در `/run/pingtunnel-ha` با مجوز `0600` تولید می‌شوند تا کلید در فهرست آرگومان‌ها قرار نگیرد. دسترسی به فایل وضعیت `/run/pingtunnel-ha/status.json` نیز به root محدود است. برای استفاده امن‌تر، پورت ورودی HA را فقط به شبکه مجاز محدود کنید.
-
-در صورت خاموش‌بودن HA، همچنان همان معماری کم‌مصرف قبلی با `exec` و بدون پردازش مدیریتی دائمی کار می‌کند.
-
-### UDP در حالت HA (جدید در نسخه 2.2)
-
-برای فعال‌سازی UDP، قبل از `ha-setup` مقدار `tcp` را `0` انتخاب کنید. در حالت UDP، درگاه عمومی `l_port` **UDP** است؛ در حالت TCP این درگاه **TCP** است. پورت‌های داخلی `data_port_base` برای هر Endpoint همان پروتکل داده را خواهند داشت و پورت‌های `probe_port_base` همیشه TCP/HTTPS هستند. گزینهٔ `udp_idle_seconds` (پیش‌فرض ۹۰ ثانیه، محدوده ۵ تا ۳۶۰۰ ثانیه) مشخص می‌کند چند ثانیه بعد از قطع فعالیت، نگاشت هر فرستنده حذف شود. `max_connections` تعداد هم‌زمان نگاشت‌های UDP را هم محدود می‌کند؛ صف ورودی هر فرستنده محدود است؛ مجموع حافظهٔ صف‌ها نیز سقف **۱۶ MiB** دارد و در ازدحام بستهٔ اضافه ممکن است حذف شود.
-
-**رفتار تغییر مسیر:** وقتی مسیر A سالم باشد، بسته‌های بعدی همان فرستنده همچنان از A عبور می‌کنند حتی اگر برای نشست‌های جدید مسیر B انتخاب شود. اگر A در تست سلامت نامناسب تشخیص داده شود و B سالم باشد، جریان آن فرستنده به B متصل می‌شود. این فرایند به دلیل ماهیت UDP و وضعیت برنامهٔ مقصد، **تضمین صفر packet loss، حفظ state سرویس مقصد یا ثابت‌ماندن IP/port خروجی** نمی‌دهد. عملکرد UDP واقعی با یک مقصد Echo/DNS آزمایشی در هر دو سرور تست شود.
-
-برای کنترل:
-
-```bash
-sudo pingtunnel validate
-sudo pingtunnel service-install
-sudo pingtunnel restart
-sudo pingtunnel ha-status
-sudo pingtunnel logs 100
-```
-
-در خروجی `ha-status` فیلد `protocol` برابر `udp` یا `tcp` خواهد بود. برای بازگشت به حالت معمول، `ha.enabled=false` را تنظیم کرده و سرویس را مجدداً نصب/راه‌اندازی کنید. تغییر TCP/UDP یا فعال‌سازی اولیه HA نیازمند راه‌اندازی مجدد سرویس است و همان لحظه می‌تواند وقفه ایجاد کند. قبل از اعمال روی VPS اصلی از `config.json` نسخه پشتیبان تهیه کنید.
+**Credits & license:** Manager تحت [Apache-2.0](LICENSE)؛ پروژه اصلی [esrrhs/pingtunnel](https://github.com/esrrhs/pingtunnel) و Manager اولیه [hoseinlolready/Pingtunnel_manager](https://github.com/hoseinlolready/Pingtunnel_manager). باینری Go مجوز مستقل خودش را دارد.
