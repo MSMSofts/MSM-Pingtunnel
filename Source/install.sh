@@ -90,15 +90,11 @@ for invariant in "release=v3.2.0" "config_schema=3" "wire=4"; do
 done
 for file in "pingtunnel-manager-linux-$release_arch" "pingtunnel-core-linux-$release_arch"; do
   expected="$(awk -v file="$file" '$2 == file {print $1}' "$work/manifest")"
-  actual="$(sha256sum "$work/${file#pingtunnel-}" 2>/dev/null | awk '{print $1}')"
+  if [[ "$file" == pingtunnel-manager-* ]]; then local_asset="$work/manager"; else local_asset="$work/core"; fi
+  actual="$(sha256sum "$local_asset" | awk '{print $1}')"
   if [[ -z "$expected" || "$actual" != "$expected" ]]; then
-    # Files use local names manager/core, not their remote asset titles.
-    if [[ "$file" == pingtunnel-manager-* ]]; then actual="$(sha256sum "$work/manager" | awk '{print $1}')"; fi
-    if [[ "$file" == pingtunnel-core-* ]]; then actual="$(sha256sum "$work/core" | awk '{print $1}')"; fi
-    if [[ -z "$expected" || "$actual" != "$expected" ]]; then
-      echo "Release manifest rejected mismatched $file" >&2
-      exit 1
-    fi
+    echo "Release manifest rejected mismatched $file" >&2
+    exit 1
   fi
 done
 if [[ "$("$work/core" -security-protocol)" != "pingtunnel-go-core=3.2.0 config-schema=3 wire=4" ]]; then
