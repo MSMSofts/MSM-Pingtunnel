@@ -90,8 +90,10 @@ async fn handle_flow(
                 }
                 Err(error) => {
                     eprintln!("HA UDP: backend reply error for {peer}: {error}");
-                    // Wait for the health checker to mark the path unhealthy.
-                    // Remaining pinned avoids churning on a transient socket error.
+                    // Avoid a busy loop on repeated ECONNREFUSED while the
+                    // Go UDP listener restarts; health monitoring will decide
+                    // whether to move this peer to a standby route.
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
             },
             _ = ticker.tick() => {
