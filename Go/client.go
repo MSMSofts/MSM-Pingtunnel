@@ -332,6 +332,7 @@ func (p *Client) Run() error {
 
 			now := time.Now()
             p.adaptive.OnTick(now)
+            if p.cryptoConfig!=nil {p.cryptoConfig.WriteSecureStatus("/run/pingtunnel-security.json")}
             if p.cryptoConfig!=nil {FlushPendingICMP(*p.conn,p.cryptoConfig)}
             if p.cryptoConfig != nil && p.cryptoConfig.RecoverSecureSession(now, p.activeConnCount()>0 || now.Sub(p.lastActivity())<30*time.Second) {
                 loggo.Info("Smart Recovery: restarting authenticated ephemeral session after sustained silence")
