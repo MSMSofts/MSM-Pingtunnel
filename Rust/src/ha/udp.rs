@@ -3,7 +3,7 @@
 //! endpoint becomes unhealthy, later datagrams can move to a healthy endpoint.
 //! UDP has no transferable transport session state, so packet loss is possible.
 
-use super::{failure, RouterState, Settings, Result};
+use super::{RouterState, Settings, Result};
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
@@ -247,7 +247,8 @@ mod tests {
             ],
         }));
         let public = cfg.listen;
-        let ctrl = tokio::spawn(serve(cfg, state.clone()));
+        let background_state = state.clone();
+        let ctrl = tokio::spawn(async move { serve(cfg, background_state).await.expect("UDP HA listener failed"); });
         sleep(Duration::from_millis(30)).await;
         let first = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let second = UdpSocket::bind("127.0.0.1:0").await.unwrap();
