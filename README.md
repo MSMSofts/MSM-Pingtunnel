@@ -2,9 +2,9 @@
 
 **یک تونل ICMP رمزنگاری‌شده، دو سرور، راه‌اندازی ساده و مدیریت سبک.**
 
-[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.2.0](https://github.com/meysamrn/Pingtunnel_manager/releases/tag/v3.2.0)
+[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.2.0](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.0)
 
-![Version](https://img.shields.io/badge/version-3.2.0-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/meysamrn/Pingtunnel_manager/actions/workflows/rust.yml/badge.svg)](https://github.com/meysamrn/Pingtunnel_manager/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.2.0-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml)
 
 **Pingtunnel Manager** ابزاری برای نصب، جفت‌سازی، مدیریت و پایش یک تونل مبتنی بر **ICMP** میان **یک VPS ایران و یک VPS خارج** است. ترافیک برنامه‌های TCP یا UDP ابتدا وارد سرور ایران می‌شود، از طریق ICMP رمزنگاری‌شده به سرور خارج می‌رسد و در نهایت به سرویس محلی موردنظر تحویل داده می‌شود.
 
@@ -78,11 +78,11 @@
 فرمان نصب روی **هر دو VPS** یکسان است:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/meysamrn/Pingtunnel_manager/main/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/Pingtunnel_manager/main/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 ~~~
 
-پیشنهاد می‌شود پیش از اجرای هر اسکریپت نصب اینترنتی، محتوای فایل دانلودشده را بررسی کنی. نصب‌کننده باینری‌های منتشرشدهٔ [v3.2.0](https://github.com/meysamrn/Pingtunnel_manager/releases/tag/v3.2.0) را همراه با SHA256 و Manifest بررسی می‌کند و قبل از جایگزینی فایل‌های موجود، تطابق نسخهٔ Manager، هسته Go و Wire Protocol را کنترل می‌کند.
+پیشنهاد می‌شود پیش از اجرای هر اسکریپت نصب اینترنتی، محتوای فایل دانلودشده را بررسی کنی. نصب‌کننده باینری‌های منتشرشدهٔ [v3.2.0](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.0) را همراه با SHA256 و Manifest بررسی می‌کند و قبل از جایگزینی فایل‌های موجود، تطابق نسخهٔ Manager، هسته Go و Wire Protocol را کنترل می‌کند.
 
 ### راه‌اندازی: ابتدا خارج، سپس ایران
 
@@ -168,7 +168,7 @@ sudo pingtunnel logs 100
 
 در ارتقای دو سرور، **کلید جفت‌سازی و تنظیمات v3 حفظ می‌شوند**؛ بااین‌حال سرویس‌ها ممکن است Restart شوند و اتصال‌های فعال قطع شوند. برای ارتقای نسخه‌های ناسازگار، هر دو VPS را در یک بازه نگهداری به‌روزرسانی کن. نصب‌کننده هنگام مشاهده تنظیمات قدیمیِ نامعتبر، قبل از تغییر سرویس متوقف می‌شود.
 
-[جزئیات تغییرات](CHANGELOG.md) · [نسخه ثابت 3.2.0](https://github.com/meysamrn/Pingtunnel_manager/releases/tag/v3.2.0) · [نسخه rolling](https://github.com/meysamrn/Pingtunnel_manager/releases/tag/rust-latest)
+[جزئیات تغییرات](CHANGELOG.md) · [نسخه ثابت 3.2.0](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.0) · [نسخه rolling](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/rust-latest)
 
 ## مسیر فایل‌ها
 
