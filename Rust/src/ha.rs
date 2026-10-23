@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::io::copy_bidirectional;
+use tokio::io::{copy_bidirectional, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Command;
 use tokio::sync::Semaphore;
@@ -137,8 +137,8 @@ fn parse(cfg: &Value) -> Result<Settings> {
         if !names.insert(name.to_owned()) || !valid_host(server) || !servers.insert(server.to_owned()) {
             return Err(failure("Endpoints need unique names and distinct, valid server addresses."));
         }
-        let dp = base_data + i as u64;
-        let pp = base_probe + i as u64;
+        let dp = base_data.checked_add(i as u64).ok_or_else(|| failure("Invalid data port base"))?;
+        let pp = base_probe.checked_add(i as u64).ok_or_else(|| failure("Invalid probe port base"))?;
         if !(1024..=65535).contains(&dp) || !(1024..=65535).contains(&pp)
             || !used.insert(dp) || !used.insert(pp)
         {
