@@ -80,6 +80,27 @@ if ! printf '%s  %s\n' "$core_digest" "$work/core" | sha256sum --check --status;
   exit 1
 fi
 chmod 755 "$work/core"
+# The release manifest binds the manager and core to the same tagged build.
+curl -fsSL --retry 3 "$RELEASE/release-manifest.txt" -o "$work/manifest"
+for invariant in "release=v3.2.0" "config_schema=3" "wire=4"; do
+  if ! grep -Fxq "$invariant" "$work/manifest"; then
+    echo "Release manifest is missing $invariant; aborting." >&2
+    exit 1
+  fi
+done
+for file in "pingtunnel-manager-linux-$release_arch" "pingtunnel-core-linux-$release_arch"; do
+  expected="$(awk -v file="$file" '$2 == file {print $1}' "$work/manifest")"
+  actual="$(sha256sum "$work/${file#pingtunnel-}" 2>/dev/null | awk '{print $1}')"
+  if [[ -z "$expected" || "$actual" != "$expected" ]]; then
+    # Files use local names manager/core, not their remote asset titles.
+    if [[ "$file" == pingtunnel-manager-* ]]; then actual="$(sha256sum "$work/manager" | awk '{print $1}')"; fi
+    if [[ "$file" == pingtunnel-core-* ]]; then actual="$(sha256sum "$work/core" | awk '{print $1}')"; fi
+    if [[ -z "$expected" || "$actual" != "$expected" ]]; then
+      echo "Release manifest rejected mismatched $file" >&2
+      exit 1
+    fi
+  fi
+done
 if [[ "$("$work/core" -security-protocol)" != "pingtunnel-go-core=3.2.0 config-schema=3 wire=4" ]]; then
   echo "Downloaded Go core is not the matching v3.2.0 secure wire-4 build." >&2
   exit 1
