@@ -88,6 +88,19 @@ jobs:
           cd upstream
           go test ./...
           go test -race -count=1 ./...
+      - name: Verify fail-closed CLI and versioned Go core identity
+        run: |
+          cd upstream
+          go build -o /tmp/pingtunnel-security-verify ./cmd
+          test "$(/tmp/pingtunnel-security-verify -security-protocol)" = "pingtunnel-go-core=3.2.0 config-schema=3 wire=4"
+          if /tmp/pingtunnel-security-verify -c /tmp/does-not-exist-pingtunnel-config.json; then
+            echo "Go core returned success for an invalid config" >&2
+            exit 1
+          fi
+          if /tmp/pingtunnel-security-verify -type server -encrypt auto -encrypt-key invalid; then
+            echo "Go core returned success for a missing/invalid pairing" >&2
+            exit 1
+          fi
       - name: Build static modified Go core
         run: |
           mkdir -p dist
