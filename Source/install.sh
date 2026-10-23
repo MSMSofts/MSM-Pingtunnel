@@ -24,7 +24,7 @@ case "$(uname -m)" in
 esac
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y --no-install-recommends curl ca-certificates unzip tar
+apt-get install -y --no-install-recommends curl ca-certificates unzip tar nano
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 mkdir -p /opt/pingtunnel/bin /opt/pingtunnel/conf
