@@ -2,9 +2,9 @@
 
 **A lightweight, encrypted ICMP tunnel between exactly two Linux VPSs, with a five-question setup wizard.**
 
-[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.2.0](https://github.com/meysamrn/Pingtunnel_manager/releases/tag/v3.2.0)
+[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.2.0](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.0)
 
-![Version](https://img.shields.io/badge/version-3.2.0-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/meysamrn/Pingtunnel_manager/actions/workflows/rust.yml/badge.svg)](https://github.com/meysamrn/Pingtunnel_manager/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.2.0-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml)
 
 Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** between an **Iran-side VPS** and an **overseas VPS**. Local TCP or UDP traffic enters the Iran VPS, travels inside authenticated, encrypted ICMP packets, and is forwarded by the overseas VPS to its configured local service.
 
@@ -80,13 +80,13 @@ The overseas server **enforces its own loopback destination**. It does not trust
 Run the **same installer on both VPSs**:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/meysamrn/Pingtunnel_manager/main/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/Pingtunnel_manager/main/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 ~~~
 
 Review downloaded scripts before executing them with elevated privileges.
 
-The installer pins the [v3.2.0 release](https://github.com/meysamrn/Pingtunnel_manager/releases/tag/v3.2.0), checks SHA256 and the release manifest, verifies manager/core compatibility, and backs up existing installed files for failure rollback.
+The installer pins the [v3.2.0 release](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.0), checks SHA256 and the release manifest, verifies manager/core compatibility, and backs up existing installed files for failure rollback.
 
 ### Set up the overseas VPS first
 
@@ -170,7 +170,7 @@ These features **do not guarantee uninterrupted VPN sessions**, live adaptation 
 
 Upgrading both VPSs is recommended during a maintenance window. The manager preserves a valid v3 configuration and pairing root, but service restarts may interrupt active application traffic. Mixed old/new **wire protocols do not silently downgrade**.
 
-[Version history](CHANGELOG.md) · [Pinned release](https://github.com/meysamrn/Pingtunnel_manager/releases/tag/v3.2.0) · [Rolling assets](https://github.com/meysamrn/Pingtunnel_manager/releases/tag/rust-latest)
+[Version history](CHANGELOG.md) · [Pinned release](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.0) · [Rolling assets](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/rust-latest)
 
 ## Important paths
 
