@@ -110,7 +110,7 @@ pub(crate) fn render_sized(view: &MenuView<'_>, color: bool, unicode: bool,
     let mut out = String::new();
     // Keep a margin for terminals that auto-wrap at their last column.
     let width = usize::from(columns).saturating_sub(3).min(65).max(16);
-    let compact = rows < 36;
+    let compact = rows < 40;
     let line = if unicode { "━" } else { "=" };
     let _ = writeln!(out, "{}", paint(&line.repeat(width), "1;36", color));
     let _ = writeln!(out, "{}", paint("  PINGTUNNEL  /  CONTROL CENTER", "1;36", color));
@@ -205,10 +205,10 @@ where F:FnMut(Resources,u16,u16)->String {
     loop {
         let (cols,rows)=terminal::size().unwrap_or((80,40));
         let display=draw(monitor.current(),cols,rows);
-        let compact=rows<36;
+        let compact=rows<40;
         let hint=if compact{"  Enter: select  |  Esc: exit\n"}
             else{"\n  Enter: confirm   Backspace: edit   Esc/q: exit\n"};
-        let prompt=format!("  > {}\n",if entered.is_empty(){format!("[{default}]")}else{entered.clone()});
+        let prompt=format!("  > {}",if entered.is_empty(){format!("[{default}]")}else{entered.clone()});
         let screen=raw_frame(&display,hint,&prompt);
         execute!(output,cursor::MoveTo(0,0),terminal::Clear(ClearType::All))?;
         output.write_all(screen.as_bytes())?;
