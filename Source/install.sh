@@ -2,7 +2,7 @@
 # Rust Pingtunnel Manager: release-first installer with failure rollback.
 set -Eeuo pipefail
 RELEASE="https://github.com/meysamrn/Pingtunnel_manager/releases/download/rust-latest"
-CORE_RELEASE="https://github.com/esrrhs/pingtunnel/releases/latest/download"
+CORE_RELEASE="$RELEASE"
 MANAGER="/usr/local/bin/pingtunnel"
 CORE="/opt/pingtunnel/bin/pingtunnel"
 CONFIG="/opt/pingtunnel/conf/config.json"
@@ -18,8 +18,7 @@ fi
 case "$(uname -m)" in
   x86_64|amd64) release_arch="amd64"; go_arch="amd64" ;;
   aarch64|arm64) release_arch="arm64"; go_arch="arm64" ;;
-  armv7l|armv6l) release_arch=""; go_arch="arm" ;;
-  i386|i686) release_arch=""; go_arch="386" ;;
+  armv7l|armv6l|i386|i686) echo "Auto-AEAD release supports AMD64 or ARM64 only." >&2; exit 1 ;;
   *) echo "Unsupported architecture." >&2; exit 1 ;;
 esac
 export DEBIAN_FRONTEND=noninteractive
@@ -63,21 +62,29 @@ fi
 # Do not install stale rolling assets when removing legacy HA.
 chmod 755 "$work/manager"
 manager_version="$("$work/manager" --version)"
-if [[ "$manager_version" != "2.4.0" ]]; then
-  echo "Expected Pingtunnel Manager 2.4.0 (single direct tunnel), got: $manager_version" >&2
+if [[ "$manager_version" != "2.5.0" ]]; then
+  echo "Expected Pingtunnel Manager 2.5.0 (auto AEAD crypto), got: $manager_version" >&2
   echo "Check the current rust-latest release assets before retrying." >&2
   exit 1
 fi
 chmod 755 "$work/manager"
-echo "[2/4] Check config and Go tunnel core..."
-if [[ "${PINGTUNNEL_REFRESH_GO:-0}" == "1" || ! -f "$CORE" ]]; then
-  curl -fsSL --retry 3 "$CORE_RELEASE/pingtunnel_linux_$go_arch.zip" -o "$work/core.zip"
-  entry="$(unzip -Z1 "$work/core.zip" | awk -F/ '$NF ~ /^pingtunnel([_-].*)?$/ && $NF !~ /\.(txt|md|json)$/ {print;exit}')"
-  if [[ -z "$entry" ]]; then echo "Missing core in ZIP." >&2; exit 1; fi
-  unzip -p "$work/core.zip" "$entry" > "$work/core"
-  [[ -s "$work/core" ]] || { echo "Empty core." >&2; exit 1; }
-  chmod 755 "$work/core"
+echo "[2/4] Download matching authenticated Go core and check configuration..."
+# Do not install the upstream Go binary: it does not support the auto-AEAD
+# authenticated frame and would silently break encrypted two-peer sessions.
+# Both manager and Go core MUST come from the same 2.5 release.
+curl -fsSL --retry 3 "$CORE_RELEASE/pingtunnel-core-linux-$release_arch" -o "$work/core"
+curl -fsSL --retry 3 "$CORE_RELEASE/pingtunnel-core-linux-$release_arch.sha256" -o "$work/core.sha"
+core_digest="$(awk '{print $1; exit}' "$work/core.sha")"
+if ! printf '%s  %s\n' "$core_digest" "$work/core" | sha256sum --check --status; then
+  echo "Patched Go core checksum mismatch; installation aborted." >&2
+  exit 1
 fi
+chmod 755 "$work/core"
+if ! "$work/core" -version >/dev/null; then
+  echo "Downloaded Go core failed to start." >&2
+  exit 1
+fi
+
 configured=0
 if [[ -f "$CONFIG" ]]; then
   # Legacy multi-route JSON is validated only AFTER the 2.4 migration.
