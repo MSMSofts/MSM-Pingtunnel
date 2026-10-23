@@ -1,0 +1,417 @@
+package main
+
+import (
+	"flag"
+	"os"
+	"fmt"
+	"github.com/esrrhs/gohome/common"
+	"github.com/esrrhs/gohome/loggo"
+	"github.com/esrrhs/pingtunnel"
+	"net/http"
+	_ "net/http/pprof"
+	"strconv"
+	"time"
+)
+
+var usage = `
+    通过伪造ping，把tcp/udp/sock5流量通过远程服务器转发到目的服务器上。用于突破某些运营商封锁TCP/UDP流量。
+    By forging ping, the tcp/udp/sock5 traffic is forwarded to the destination server through the remote server. Used to break certain operators to block TCP/UDP traffic.
+
+Usage:
+
+    // server
+    pingtunnel -type server
+
+    // client, Forward udp
+    pingtunnel -type client -l LOCAL_IP:4455 -s SERVER_IP -t SERVER_IP:4455
+
+    // client, Forward tcp
+    pingtunnel -type client -l LOCAL_IP:4455 -s SERVER_IP -t SERVER_IP:4455 -tcp 1
+
+    // client, Forward sock5, implicitly open tcp, so no target server is needed
+    pingtunnel -type client -l LOCAL_IP:4455 -s SERVER_IP -sock5 1
+
+    -type     服务器或者客户端
+              client or server
+
+服务器参数server param:
+
+    -icmp_l   本地地址，侦听此地址上的ICMP流量，默认为0.0.0.0
+              Local address, listen for ICMP traffic on this address, defaults to 0.0.0.0
+
+    -key      设置的纯数字密码，默认0, 参数为int类型，范围从0-2147483647，不可夹杂字母特殊符号
+              Set password, default 0
+
+    -nolog    不写日志文件，只打印标准输出，默认0
+              Do not write log files, only print standard output, default 0 is off
+
+    -noprint  不打印屏幕输出，默认0
+              Do not print standard output, default 0 is off
+
+    -loglevel 日志文件等级，默认info
+              log level, default is info
+
+    -maxconn  最大连接数，默认0，不受限制
+              the max num of connections, default 0 is no limit
+
+    -maxprt   server最大处理线程数，默认100
+              max process thread in server, default 100
+
+    -maxprb   server最大处理线程buffer，默认1000
+              max process thread's buffer in server, default 1000
+
+    -conntt   server与目标服务连接的超时时间，默认1000ms
+              the connect call's timeout, default 1000ms
+
+    -forward  设置前置/上游二级代理，支持socks5://host:port或http://host:port
+              Forward TCP traffic through an upstream proxy (socks5://host:port or http://host:port)
+
+客户端参数client param:
+
+    -l        本地侦听地址
+              listen addr, default :4455
+
+    -s        服务器地址，侦听此地址上的ICMP流量
+              server addr
+
+    -t        目标地址，服务端向此地址转发流量
+              target addr
+
+    -timeout  本地连接超时时间，默认60s
+              conn timeout, default 60s
+
+    -key      设置的密码，默认0, 参数为int类型，范围从0-2147483647，不可夹杂字母特殊符号
+              Set password, default 0
+
+    -tcp      设置是否按tcp模式转发，默认0为udp模式，1为tcp模式
+              Set whether to forward in tcp mode, default 0 is udp mode, 1 is tcp mode
+
+    -tcp_bs   tcp模式发送接收缓冲区大小，默认1MB
+              tcp mode buffer size, default 1MB
+
+    -tcp_mw   tcp模式最大窗口，默认20000
+              tcp mode max win, default 20000
+
+    -tcp_rst  tcp模式超时重传时间，默认400ms
+              tcp mode resend time ms, default 400ms
+
+    -tcp_gz   tcp模式数据大于指定大小启用压缩，默认0表示不压缩
+              tcp data gz, default 0 is off
+
+    -tcp_stat 打印tcp统计信息，默认0不打印
+              print tcp stat, default 0 is off
+
+    -nolog    不写日志文件，只打印标准输出，默认0
+              Do not write log files, only print standard output, default 0 is off
+
+    -noprint  不打印屏幕输出，默认0
+              Do not print standard output, default 0 is off
+
+    -loglevel 日志文件等级，默认info
+              log level, default is info
+
+    -sock5    开启sock5转发，隐藏参数-tcp 1
+              sock5 mode, implicitly open tcp, so no target server is needed
+
+    -s5user   sock5身份认证用户名，默认空无密码
+              sock5 username, default is empty and no authentication is required
+
+    -s5pass   sock5身份认证密码，默认空无密码
+              sock5 password, default is empty and no authentication is required
+
+    -profile  在指定端口开启性能检测，默认0不开启
+              Enable performance detection on the specified port. The default 0 is not enabled.
+
+    -congestion 拥塞控制算法，默认bb（带宽自适应算法，防止大流量打满网络断网），设为空表示不开启
+              Congestion control algorithm, default is 'bb', empty string means disabled
+
+    -c        从指定json配置文件读取参数，命令行参数可覆盖配置文件
+              Read parameters from the specified json config file, command line parameters take precedence
+
+    -v, -version 打印版本及编译构建信息
+              Print version and build information
+`
+
+func main() {
+
+	defer common.CrashLog()
+
+	t := flag.String("type", "", "client or server")
+	listen := flag.String("l", "", "listen addr")
+	target := flag.String("t", "", "target addr")
+	server := flag.String("s", "", "server addr")
+	icmpListen := flag.String("icmp_l", "0.0.0.0", "listen address for ICMP traffic")
+	timeout := flag.Int("timeout", 60, "conn timeout")
+	key := flag.Int("key", 0, "key")
+	encryption := flag.String("encrypt", "", "encryption mode: aes128, aes256, chacha20")
+	encryptionKey := flag.String("encrypt-key", "", "encryption key (base64 or passphrase)")
+	tcpmode := flag.Int("tcp", 0, "tcp mode")
+	tcpmode_buffersize := flag.Int("tcp_bs", 1*1024*1024, "tcp mode buffer size")
+	tcpmode_maxwin := flag.Int("tcp_mw", 20000, "tcp mode max win")
+	tcpmode_resend_timems := flag.Int("tcp_rst", 400, "tcp mode resend time ms")
+	tcpmode_compress := flag.Int("tcp_gz", 0, "tcp data compress")
+	nolog := flag.Int("nolog", 0, "write log file")
+	noprint := flag.Int("noprint", 0, "print stdout")
+	tcpmode_stat := flag.Int("tcp_stat", 0, "print tcp stat")
+	loglevel := flag.String("loglevel", "info", "log level")
+	open_sock5 := flag.Int("sock5", 0, "sock5 mode")
+	sock5_user := flag.String("s5user", "", "sock5 username")
+	sock5_pass := flag.String("s5pass", "", "sock5 password")
+	maxconn := flag.Int("maxconn", 0, "max num of connections")
+	max_process_thread := flag.Int("maxprt", 100, "max process thread in server")
+	max_process_buffer := flag.Int("maxprb", 1000, "max process thread's buffer in server")
+	profile := flag.Int("profile", 0, "open profile")
+	conntt := flag.Int("conntt", 1000, "the connect call's timeout")
+	forward := flag.String("forward", "", "forward TCP traffic through proxy (socks5://host:port or http://host:port)")
+	congestion := flag.String("congestion", "bb", "congestion control algorithm: bb or empty")
+	peerIP := ""
+	fixedTarget := ""
+	forwardProtocol := 0
+	configFile := flag.String("c", "", "path to json config file")
+	showVersion := flag.Bool("v", false, "show version and build info")
+	showVersionLong := flag.Bool("version", false, "show version and build info")
+	flag.Usage = func() {
+		fmt.Print(usage)
+	}
+
+	flag.Parse()
+
+	if *showVersion || *showVersionLong {
+		fmt.Println("pingtunnel " + pingtunnel.GetVersionInfo())
+		return
+	}
+
+	// Track which flags were explicitly set via command line
+	setFlags := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) {
+		setFlags[f.Name] = true
+	})
+
+	// Load configuration file if specified
+	if *configFile != "" {
+		cfg, err := pingtunnel.LoadConfig(*configFile)
+		if err != nil {
+			fmt.Printf("Failed to load config file: %v\n", err)
+			return
+		}
+
+		peerIP = cfg.PeerIP
+		fixedTarget = cfg.FixedTarget
+		forwardProtocol = cfg.ForwardProtocol
+		if !setFlags["type"] && cfg.Type != "" {
+			*t = cfg.Type
+		}
+		if !setFlags["l"] && cfg.Listen != "" {
+			*listen = cfg.Listen
+		}
+		if !setFlags["t"] && cfg.Target != "" {
+			*target = cfg.Target
+		}
+		if !setFlags["s"] && cfg.Server != "" {
+			*server = cfg.Server
+		}
+		if !setFlags["icmp_l"] && cfg.ICMPListen != "" {
+			*icmpListen = cfg.ICMPListen
+		}
+		if !setFlags["timeout"] && cfg.Timeout != 0 {
+			*timeout = cfg.Timeout
+		}
+		if !setFlags["key"] && cfg.Key != 0 {
+			*key = cfg.Key
+		}
+		if !setFlags["encrypt"] && cfg.Encrypt != "" {
+			*encryption = cfg.Encrypt
+		}
+		if !setFlags["encrypt-key"] && cfg.EncryptKey != "" {
+			*encryptionKey = cfg.EncryptKey
+		}
+		if !setFlags["tcp"] && cfg.TCPMode != 0 {
+			*tcpmode = cfg.TCPMode
+		}
+		if !setFlags["tcp_bs"] && cfg.TCPBufferSize != 0 {
+			*tcpmode_buffersize = cfg.TCPBufferSize
+		}
+		if !setFlags["tcp_mw"] && cfg.TCPMaxWin != 0 {
+			*tcpmode_maxwin = cfg.TCPMaxWin
+		}
+		if !setFlags["tcp_rst"] && cfg.TCPResendTimeMs != 0 {
+			*tcpmode_resend_timems = cfg.TCPResendTimeMs
+		}
+		if !setFlags["tcp_gz"] && cfg.TCPCompress != 0 {
+			*tcpmode_compress = cfg.TCPCompress
+		}
+		if !setFlags["nolog"] && cfg.NoLog != 0 {
+			*nolog = cfg.NoLog
+		}
+		if !setFlags["noprint"] && cfg.NoPrint != 0 {
+			*noprint = cfg.NoPrint
+		}
+		if !setFlags["tcp_stat"] && cfg.TCPStat != 0 {
+			*tcpmode_stat = cfg.TCPStat
+		}
+		if !setFlags["loglevel"] && cfg.LogLevel != "" {
+			*loglevel = cfg.LogLevel
+		}
+		if !setFlags["sock5"] && cfg.Sock5 != 0 {
+			*open_sock5 = cfg.Sock5
+		}
+		if !setFlags["s5user"] && cfg.Sock5User != "" {
+			*sock5_user = cfg.Sock5User
+		}
+		if !setFlags["s5pass"] && cfg.Sock5Pass != "" {
+			*sock5_pass = cfg.Sock5Pass
+		}
+		if !setFlags["maxconn"] && cfg.MaxConn != 0 {
+			*maxconn = cfg.MaxConn
+		}
+		if !setFlags["maxprt"] && cfg.MaxProcessThread != 0 {
+			*max_process_thread = cfg.MaxProcessThread
+		}
+		if !setFlags["maxprb"] && cfg.MaxProcessBuffer != 0 {
+			*max_process_buffer = cfg.MaxProcessBuffer
+		}
+		if !setFlags["profile"] && cfg.Profile != 0 {
+			*profile = cfg.Profile
+		}
+		if !setFlags["conntt"] && cfg.ConnectTimeout != 0 {
+			*conntt = cfg.ConnectTimeout
+		}
+		if !setFlags["forward"] && cfg.Forward != "" {
+			*forward = cfg.Forward
+		}
+		if !setFlags["congestion"] && cfg.Congestion != "" {
+			*congestion = cfg.Congestion
+		}
+	}
+
+	if *t != "client" && *t != "server" {
+		flag.Usage()
+		return
+	}
+	if *t == "client" {
+		if len(*listen) == 0 || len(*server) == 0 {
+			flag.Usage()
+			return
+		}
+		if *open_sock5 == 0 && len(*target) == 0 {
+			flag.Usage()
+			return
+		}
+		if *open_sock5 != 0 {
+			*tcpmode = 1
+		}
+	}
+	if *tcpmode_maxwin*10 > pingtunnel.FRAME_MAX_ID {
+		fmt.Println("set tcp win to big, max = " + strconv.Itoa(pingtunnel.FRAME_MAX_ID/10))
+		return
+	}
+
+	// Validate encryption parameters
+	encryptionMode, err := pingtunnel.ParseEncryptionMode(*encryption)
+	if err != nil {
+		fmt.Printf("Invalid encryption mode: %v\n", err)
+		return
+	}
+
+	if encryptionMode != pingtunnel.NoEncryption && *encryptionKey == "" {
+		fmt.Println("Encryption key is required when encryption mode is specified")
+		return
+	}
+
+	// Create crypto configuration
+	var cryptoConfig *pingtunnel.CryptoConfig
+	if encryptionMode != pingtunnel.NoEncryption {
+		cryptoConfig, err = pingtunnel.NewCryptoConfig(encryptionMode, *encryptionKey)
+		if err != nil {
+			fmt.Printf("Failed to create crypto config: %v\n", err)
+			return
+		}
+	}
+
+	level := loggo.LEVEL_INFO
+	if loggo.NameToLevel(*loglevel) >= 0 {
+		level = loggo.NameToLevel(*loglevel)
+	}
+	loggo.Ini(loggo.Config{
+		Level:     level,
+		Prefix:    "pingtunnel",
+		MaxDay:    3,
+		NoLogFile: *nolog > 0,
+		NoPrint:   *noprint > 0,
+	})
+	loggo.Info("start pingtunnel (%s)...", pingtunnel.GetVersionInfo())
+	// Do not disclose even the derived packet identifier in logs.
+
+	if *t == "server" {
+		// Parse forward proxy configuration
+		var forwardConfig *pingtunnel.ForwardConfig
+		if *forward != "" {
+			var err error
+			forwardConfig, err = pingtunnel.ParseForwardURL(*forward)
+			if err != nil {
+				fmt.Printf("Invalid forward URL: %v\n", err)
+				return
+			}
+			loggo.Info("Forward proxy configured: %s", *forward)
+		}
+
+		s, err := pingtunnel.NewServer(*icmpListen, *key, *maxconn, *max_process_thread, *max_process_buffer, *conntt, cryptoConfig, forwardConfig, *congestion)
+		if err != nil {
+			loggo.Error("ERROR: %s", err.Error())
+			return
+		}
+        if fixedTarget=="" || peerIP=="" || cryptoConfig==nil || encryptionMode!=pingtunnel.AUTO {
+            fmt.Fprintln(os.Stderr,"v3 foreign server requires fixed_target, peer_ip and auto AEAD encryption")
+            os.Exit(1)
+        }
+        if err:=s.ApplyFixedForwardPolicy(peerIP,fixedTarget,forwardProtocol);err!=nil {
+            fmt.Fprintf(os.Stderr,"Refusing unsafe fixed forwarding policy: %v\n",err)
+            os.Exit(1)
+        }
+		loggo.Info("Server start")
+		err = s.Run()
+		if err != nil {
+			loggo.Error("Run ERROR: %s", err.Error())
+			return
+		}
+	} else if *t == "client" {
+
+		loggo.Info("type %s", *t)
+		loggo.Info("listen %s", *listen)
+		loggo.Info("server %s", *server)
+		loggo.Info("target %s", *target)
+
+		if *tcpmode == 0 {
+			*tcpmode_buffersize = 0
+			*tcpmode_maxwin = 0
+			*tcpmode_resend_timems = 0
+			*tcpmode_compress = 0
+			*tcpmode_stat = 0
+		}
+
+		c, err := pingtunnel.NewClient(*listen, *server, *target, *timeout, *key, *icmpListen,
+			*tcpmode, *tcpmode_buffersize, *tcpmode_maxwin, *tcpmode_resend_timems, *tcpmode_compress,
+			*tcpmode_stat, *open_sock5, *maxconn, cryptoConfig, *sock5_user, *sock5_pass, *congestion)
+		if err != nil {
+			loggo.Error("ERROR: %s", err.Error())
+			return
+		}
+		loggo.Info("Client Listen %s (%s) Server %s (%s) TargetPort %s ICMP Listen %s", c.Addr(), c.IPAddr(),
+			c.ServerAddr(), c.ServerIPAddr(), c.TargetAddr(), c.ICMPAddr())
+		err = c.Run()
+		if err != nil {
+			loggo.Error("Run ERROR: %s", err.Error())
+			return
+		}
+	} else {
+		return
+	}
+
+	if *profile > 0 {
+		go http.ListenAndServe("0.0.0.0:"+strconv.Itoa(*profile), nil)
+	}
+
+	for {
+		time.Sleep(time.Hour)
+	}
+}
