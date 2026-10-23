@@ -103,6 +103,7 @@ func (c *CryptoConfig) BindRegion(region string) error {
  c.auto.counter.Store(0)
  if _,err=rand.Read(c.auto.prefix[:]);err!=nil{return err}
  c.auto.preferred=autoBenchmark(txAES,txX)
+ c.sec=newSecureSession(c.Key,region,c.auto.preferred)
  return nil
 }
 
