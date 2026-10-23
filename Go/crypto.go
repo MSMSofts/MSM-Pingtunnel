@@ -31,7 +31,7 @@ type CryptoConfig struct {
 	Key    []byte
 	Cipher cipher.AEAD
 	auto *autoCrypto
-	secure *secureSession
+	sec *secureSession
 }
 
 // NewCryptoConfig creates a new crypto configuration
