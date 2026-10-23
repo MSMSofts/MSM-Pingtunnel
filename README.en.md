@@ -170,6 +170,8 @@ These features **do not guarantee uninterrupted VPN sessions**, live adaptation 
 
 Upgrading both VPSs is recommended during a maintenance window. The manager preserves a valid v3 configuration and pairing root, but service restarts may interrupt active application traffic. Mixed old/new **wire protocols do not silently downgrade**.
 
+> **Repository transfer note:** For updates, use the canonical installer URL under `MSMSofts/Pingtunnel_manager` shown in the Install section. Earlier manager binaries may still use the former repository owner in the built-in `pingtunnel update` URL.
+
 [Version history](CHANGELOG.md) · [Pinned release](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.0) · [Rolling assets](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/rust-latest)
 
 ## Important paths
