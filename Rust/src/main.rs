@@ -19,6 +19,7 @@ const CONFIG: &str = "/opt/pingtunnel/conf/config.json";
 const CORE: &str = "/opt/pingtunnel/bin/pingtunnel";
 const CORE_CONFIG: &str = "/run/pingtunnel-core.json";
 const PERF_STATUS: &str = "/run/pingtunnel-performance.json";
+const SECURITY_STATUS: &str = "/run/pingtunnel-security.json";
 const UNIT: &str = "/etc/systemd/system/pingtunnel.service";
 const DROPIN: &str = "/etc/systemd/system/pingtunnel.service.d/memory.conf";
 const UPDATE_URL: &str =
@@ -332,7 +333,7 @@ fn help(){
     println!("  pingtunnel            Unified menu");
     println!("  pingtunnel setup      Five questions on each VPS");
     println!("  pingtunnel key        Show existing pairing key (root only)");
-    println!("  pingtunnel validate | performance | dry-run");
+    println!("  pingtunnel validate | performance | security | dry-run");
     println!("  pingtunnel start | stop | restart | status | logs [lines]");
     println!("  pingtunnel update | uninstall [--purge]");
 }
@@ -357,7 +358,7 @@ fn menu()->Result<()>{
         }else{println!("Not configured for v3 — choose Setup.");}
         println!("1) Status    2) Start     3) Stop      4) Restart");
         println!("5) Logs      6) Setup     7) Pair key  8) Performance");
-        println!("9) Validate 10) Update   11) Uninstall 12) Exit");
+        println!("9) Validate 10) Update   11) Uninstall 12) Exit  13) Security");
         let choice=prompt("Choose",if cfg.is_some(){"1"}else{"6"})?;
         let action=match choice.as_str(){
             "1"=>run_systemctl(&["status","pingtunnel.service","--no-pager"]),
@@ -371,11 +372,40 @@ fn menu()->Result<()>{
             "9"=>{load_config()?;println!("Version-3 config valid");Ok(())},
             "10"=>update(),
             "11"=>uninstall(false),
+            "13"=>show_security_status(),
             "12"|"q"|"Q"=>return Ok(()),
             _=>{println!("Select 1..12");continue}
         };
         if let Err(e)=action{eprintln!("Operation failed: {e}");}
     }
+}
+
+fn show_security_status() -> Result<()> {
+    let metadata = match fs::metadata(SECURITY_STATUS) {
+        Ok(value) => value,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            println!("Security status unavailable: Go core has not published a session report.");
+            return Ok(());
+        }
+        Err(err) => return Err(Box::new(err)),
+    };
+    if let Ok(age) = metadata.modified()?.elapsed() {
+        if age.as_secs()>15 {
+            println!("WARNING: security status is stale ({} seconds old). Check systemd.",age.as_secs());
+        }
+    }
+    let report: Value=serde_json::from_slice(&fs::read(SECURITY_STATUS)?)?;
+    println!("Authenticated session: {}",report["state"].as_str().unwrap_or("unknown"));
+    println!("  Config schema: {} | Wire version: {}",report["config_schema"],report["wire_version"]);
+    println!("  Region: {}",report["region"].as_str().unwrap_or("unknown"));
+    println!("  Last valid message age: {} seconds",report["last_valid_age_seconds"]);
+    println!("  Pending key renegotiation: {}",report["pending_rekey"]);
+    println!("  Replays rejected: {}",report["replay_drops"]);
+    println!("  Authentication failures: {}",report["authentication_failures"]);
+    println!("  Recovery handshakes: {}",report["recoveries"]);
+    println!("  Queued data frames: {}",report["pending_packets"]);
+    println!("  Expired/overflow data frames: {}",report["expired_or_overflow_packets"]);
+    Ok(())
 }
 
 fn show_adaptive_status() -> Result<()> {
@@ -432,6 +462,7 @@ fn main_inner()->Result<()>{
         "setup"=>setup::wizard(),
         "key"=>display_pair_key(),
         "performance"=>show_adaptive_status(),
+        "security"=>show_security_status(),
         "service-install"=>service_install(),
         "validate"=>{load_config()?;println!("Version-3 configuration valid");Ok(())},
         "dry-run"=>run_core(true),

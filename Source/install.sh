@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Rust Pingtunnel Manager: release-first installer with failure rollback.
 set -Eeuo pipefail
-RELEASE="https://github.com/meysamrn/Pingtunnel_manager/releases/download/rust-latest"
+RELEASE="https://github.com/meysamrn/Pingtunnel_manager/releases/download/v3.2.0"
 CORE_RELEASE="$RELEASE"
 MANAGER="/usr/local/bin/pingtunnel"
 CORE="/opt/pingtunnel/bin/pingtunnel"
@@ -62,8 +62,8 @@ fi
 # Do not install stale rolling assets when removing legacy HA.
 chmod 755 "$work/manager"
 manager_version="$("$work/manager" --version)"
-if [[ "$manager_version" != "3.1.0" ]]; then
-  echo "Expected Pingtunnel Manager 3.1.0 (v4 secure session, v3 pairing compatibility), got: $manager_version" >&2
+if [[ "$manager_version" != "3.2.0" ]]; then
+  echo "Expected Pingtunnel Manager 3.2.0 (wire 4, config schema 3, security fixes), got: $manager_version" >&2
   echo "Check the current rust-latest release assets before retrying." >&2
   exit 1
 fi
@@ -80,8 +80,25 @@ if ! printf '%s  %s\n' "$core_digest" "$work/core" | sha256sum --check --status;
   exit 1
 fi
 chmod 755 "$work/core"
-if ! "$work/core" -version >/dev/null; then
-  echo "Downloaded Go core failed to start." >&2
+# The release manifest binds the manager and core to the same tagged build.
+curl -fsSL --retry 3 "$RELEASE/release-manifest.txt" -o "$work/manifest"
+for invariant in "release=v3.2.0" "config_schema=3" "wire=4"; do
+  if ! grep -Fxq "$invariant" "$work/manifest"; then
+    echo "Release manifest is missing $invariant; aborting." >&2
+    exit 1
+  fi
+done
+for file in "pingtunnel-manager-linux-$release_arch" "pingtunnel-core-linux-$release_arch"; do
+  expected="$(awk -v file="$file" '$2 == file {print $1}' "$work/manifest")"
+  if [[ "$file" == pingtunnel-manager-* ]]; then local_asset="$work/manager"; else local_asset="$work/core"; fi
+  actual="$(sha256sum "$local_asset" | awk '{print $1}')"
+  if [[ -z "$expected" || "$actual" != "$expected" ]]; then
+    echo "Release manifest rejected mismatched $file" >&2
+    exit 1
+  fi
+done
+if [[ "$("$work/core" -security-protocol)" != "pingtunnel-go-core=3.2.0 config-schema=3 wire=4" ]]; then
+  echo "Downloaded Go core is not the matching v3.2.0 secure wire-4 build." >&2
   exit 1
 fi
 

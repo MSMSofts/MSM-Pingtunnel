@@ -55,37 +55,51 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
 
 	// Encrypt the marshaled data if encryption is enabled
 	if cryptoConfig != nil {
-        mb, err = cryptoConfig.Encrypt(mb)
-        if errors.Is(err,ErrSecureNegotiation) {
+        ciphertext, encryptErr := cryptoConfig.Encrypt(mb)
+        if errors.Is(encryptErr,ErrSecureNegotiation) {
+            if msgType==uint32(MyMsg_DATA) && cryptoConfig.sec!=nil {
+                cryptoConfig.sec.queuePacket(pendingICMP{raw:mb,peer:server,id:id,seq:sequence,proto:sproto})
+            }
             control,e:=cryptoConfig.SecureControl(time.Now())
             if e==nil&&len(control)>0{sendSecureControl(id,sequence,conn,server,sproto,control)}
             return
         }
-		if err != nil {
-			loggo.Error("sendICMP Encrypt error %s %s", server.String(), err)
+		if encryptErr != nil {
+			loggo.Error("sendICMP Encrypt error %s %s", server.String(), encryptErr)
 			return
 		}
+        mb=ciphertext
 	}
 
-	body := &icmp.Echo{
-		ID:   id,
-		Seq:  sequence,
-		Data: mb,
-	}
+	sendEncryptedICMP(id,sequence,conn,server,sproto,mb)
+}
 
-	msg := &icmp.Message{
-		Type: (ipv4.ICMPType)(sproto),
-		Code: 0,
-		Body: body,
-	}
+// Send an already-encrypted payload without re-wrapping MyMsg or allocating
+// a second session sequence. Used for draining authenticated pending packets.
+func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr, proto int, encrypted []byte) {
+ if peer==nil || len(encrypted)==0{return}
+ msg:=&icmp.Message{Type:(ipv4.ICMPType)(proto),Code:0,
+  Body:&icmp.Echo{ID:id,Seq:sequence,Data:encrypted}}
+ wire,err:=msg.Marshal(nil)
+ if err!=nil{return}
+ _,_=conn.WriteTo(wire,icmpDstAddr(peer))
+}
 
-	bytes, err := msg.Marshal(nil)
-	if err != nil {
-		loggo.Error("sendICMP Marshal error %s %s", server.String(), err)
-		return
-	}
-
-	conn.WriteTo(bytes, icmpDstAddr(server))
+// Flush only when both peers finished their authenticated ephemeral exchange.
+// The 2 MiB bounded queue and TTL prevent stale UDP/QUIC replay after outages.
+func FlushPendingICMP(conn icmp.PacketConn, crypto *CryptoConfig) {
+ if crypto==nil||crypto.sec==nil||!crypto.SecureReady(){return}
+ packets:=crypto.sec.drainPending(time.Now())
+ for i,p:=range packets{
+  encrypted,err:=crypto.Encrypt(p.raw)
+  if err!=nil {
+   // A parallel recovery may have started after we drained the queue.
+   // Requeue the remainder, preserving expiry and accounting for drops.
+   for _,unsent:=range packets[i:] {crypto.sec.pushBack(unsent)}
+   return
+  }
+  sendEncryptedICMP(p.id,p.seq,conn,p.peer,p.proto,encrypted)
+ }
 }
 
 func recvICMP(workResultLock *sync.WaitGroup, exit *bool, conn icmp.PacketConn, recv chan<- *Packet, cryptoConfig *CryptoConfig) {

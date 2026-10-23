@@ -13,6 +13,8 @@ import (
  "crypto/rand"
  "crypto/sha256"
  "encoding/binary"
+ "encoding/json"
+ "os"
  "errors"
  "io"
  "math/big"
@@ -84,6 +86,14 @@ type secureSession struct{
  errors uint64
  replays uint64
  recoveries uint64
+ // A verified new handshake is staged separately from the established
+ // session. Replayed (but MAC-valid) ClientHellos cannot tear it down.
+ pending *secureSession
+ recent map[[16]byte]time.Time
+ lastCandidate time.Time
+ queued []pendingICMP
+ queueBytes int
+ queueDrops uint64
 }
 func newSecureSession(root []byte, region string, preferred byte)*secureSession{
  s:=&secureSession{region:region,preferred:preferred}
@@ -108,6 +118,7 @@ func (s *secureSession) ready()bool{
  return s.state==4&&s.keys!=nil
 }
 func (s *secureSession) resetLocked() {
+ s.pending=nil
  s.state=0;s.keys=nil;s.confirmKey=nil;s.localPrivate=nil
  s.clientPublic=nil;s.serverPublic=nil
  s.clientID=[16]byte{};s.serverID=[16]byte{}
@@ -240,10 +251,68 @@ func (s *secureSession) handle(frame []byte,now time.Time)([]byte,error){
  s.mu.Lock();defer s.mu.Unlock()
  if len(frame)<5+16+32{return nil,errors.New("short handshake")}
  body,tag:=frame[:len(frame)-32],frame[len(frame)-32:]
+ // Protect established sessions from a valid-but-recorded old ClientHello.
+ // An authenticated reconnect is prepared using a *candidate* handshake.
+ // Switching keys happens only AFTER a fresh ephemeral Finish proof.
+ if s.region=="foreign" && s.state==4 {
+  if typ==helloClient {
+   if len(body)!=5+16+32 || !verifyMAC(s.authenticationKey(),body,tag) {
+    s.errors++
+    return nil,errors.New("unauthenticated reconnect hello")
+   }
+   var cid [16]byte
+   copy(cid[:],body[5:21])
+   if cid==s.clientID {return nil,nil}
+   if _,seen:=s.recent[cid];seen{return nil,nil}
+   if s.pending!=nil && s.pending.clientID==cid {
+    return s.pending.handle(frame,now)
+   }
+   // One candidate at a time, with a deadline and arrival rate limit.
+   if s.pending!=nil && now.Sub(s.pending.started)<5*time.Second{return nil,nil}
+   if !s.lastCandidate.IsZero() && now.Sub(s.lastCandidate)<time.Second{return nil,nil}
+   candidate:=newSecureSession(s.root[:],"foreign",s.preferred)
+   candidate.peer=append(net.IP(nil),s.peer...)
+   result,err:=candidate.handle(frame,now)
+   if err!=nil{return nil,err}
+   s.pending=candidate
+   s.lastCandidate=now
+   return result,nil
+  }
+  if typ==helloFinish && s.pending!=nil {
+   result,err:=s.pending.handle(frame,now)
+   if err!=nil{s.errors++;return nil,err}
+   if s.pending.state==4 {
+    // Keep only a bounded recent-ID memory; old HMACed hellos are rejected
+    // without allocating a candidate or disturbing the active data path.
+    if s.recent==nil{s.recent=make(map[[16]byte]time.Time)}
+    s.recent[s.clientID]=now
+    if len(s.recent)>256 {
+     for key,when:=range s.recent {
+      if now.Sub(when)>10*time.Minute {delete(s.recent,key)}
+     }
+     if len(s.recent)>256 {
+      // Retain at least the current/previous active IDs; older entries
+      // are still harmless because candidate keys are isolated.
+      for key:=range s.recent {if key!=s.clientID{delete(s.recent,key);break}}
+     }
+    }
+    s.keys=s.pending.keys
+    s.clientID=s.pending.clientID
+    s.serverID=s.pending.serverID
+    s.clientPublic=s.pending.clientPublic
+    s.serverPublic=s.pending.serverPublic
+    s.confirmKey=s.pending.confirmKey
+    s.state=4
+    s.lastValid=now
+    s.pending=nil
+   }
+   return result,nil
+  }
+ }
  if typ==helloClient{
   if s.region!="foreign"||len(body)!=5+16+32{return nil,errors.New("invalid client hello")}
   var cid [16]byte;copy(cid[:],body[5:21])
-  if !verifyMAC(s.authenticationKey(),body,tag){return nil,errors.New("unauthenticated client hello")}
+  if !verifyMAC(s.authenticationKey(),body,tag){s.errors++;return nil,errors.New("unauthenticated client hello")}
   if s.state==4 && now.Sub(s.lastValid)<20*time.Second{return nil,nil}
   if s.state==3 && cid==s.clientID {
    reply:=controlBody(helloServer,s.clientID,s.serverID,s.serverPublic)
@@ -266,6 +335,7 @@ func (s *secureSession) handle(frame []byte,now time.Time)([]byte,error){
  if typ==helloServer{
   if s.region!="iran"||s.state!=1||len(body)!=5+16+16+32{return nil,errors.New("unexpected server hello")}
   if !bytes.Equal(body[5:21],s.clientID[:]) || !verifyMAC(s.authenticationKey(),body,tag){
+   s.errors++
    return nil,errors.New("untrusted server hello")
   }
   copy(s.serverID[:],body[21:37])
@@ -278,6 +348,7 @@ func (s *secureSession) handle(frame []byte,now time.Time)([]byte,error){
  if typ==helloFinish{
   if s.region!="foreign"||(s.state!=3&&s.state!=4)||len(body)!=5+16+16{return nil,errors.New("unexpected client finish")}
   if !bytes.Equal(body[5:21],s.clientID[:])||!bytes.Equal(body[21:37],s.serverID[:])||!verifyMAC(s.confirmKey,body,tag){
+   s.errors++
    return nil,errors.New("invalid client finish")
   }
   s.state=4;s.lastValid=now
@@ -287,6 +358,7 @@ func (s *secureSession) handle(frame []byte,now time.Time)([]byte,error){
  if typ==helloAck{
   if s.region!="iran"||s.state!=2||len(body)!=5+16+16{return nil,errors.New("unexpected server ack")}
   if !bytes.Equal(body[5:21],s.clientID[:])||!bytes.Equal(body[21:37],s.serverID[:])||!verifyMAC(s.confirmKey,body,tag){
+   s.errors++
    return nil,errors.New("untrusted server ack")
   }
   s.state=4;s.lastValid=now
@@ -347,12 +419,100 @@ func (s *secureSession) recoverIfStale(now time.Time,hasPendingTraffic bool)bool
  s.recoveries++
  return true
 }
+// Bounded 2 MiB / 256 frame / 12s queue for app packets generated while a
+// fresh X25519 session is negotiated. Oldest items are dropped explicitly and
+// counted rather than allocating unbounded memory or losing all UDP startup
+// datagrams. TCP reliability is still owned by its protocol's FrameMgr.
+type pendingICMP struct{
+ raw []byte
+ peer *net.IPAddr
+ id,seq,proto int
+ arrival time.Time
+}
+const (
+ pendingMaxFrames = 256
+ pendingMaxBytes = 2 * 1024 * 1024
+ pendingLifetime = 12 * time.Second
+)
+func (s *secureSession) queuePacket(msg pendingICMP) {
+ s.mu.Lock()
+ defer s.mu.Unlock()
+ if len(msg.raw)==0 || len(msg.raw)>10240 {s.queueDrops++;return}
+ msg.raw=append([]byte(nil),msg.raw...)
+ if msg.peer!=nil {
+  ip:=append(net.IP(nil),msg.peer.IP...)
+  msg.peer=&net.IPAddr{IP:ip,Zone:msg.peer.Zone}
+ }
+ if msg.arrival.IsZero(){msg.arrival=time.Now()}
+ for len(s.queued)>0 && (len(s.queued)>=pendingMaxFrames || s.queueBytes+len(msg.raw)>pendingMaxBytes) {
+  s.queueBytes-=len(s.queued[0].raw)
+  s.queued[0]=pendingICMP{}
+  s.queued=s.queued[1:]
+  s.queueDrops++
+ }
+ s.queueBytes+=len(msg.raw)
+ s.queued=append(s.queued,msg)
+}
+func (s *secureSession) drainPending(now time.Time)[]pendingICMP{
+ s.mu.Lock()
+ defer s.mu.Unlock()
+ if s.state!=4{return nil}
+ pending:=s.queued
+ s.queued=nil
+ s.queueBytes=0
+ out:=pending[:0]
+ for _,p:=range pending {
+  if now.Sub(p.arrival)>pendingLifetime{s.queueDrops++;continue}
+  out=append(out,p)
+ }
+ return out
+}
+func (s *secureSession) pushBack(p pendingICMP) {
+ s.queuePacket(p)
+}
+
 type sessionStats struct{
  Secure bool
- ReplayDrops,AuthenticationFailures,Recoveries uint64
+ ReplayDrops,AuthenticationFailures,Recoveries,QueuedPackets,QueuedDrops uint64
 }
 func (s *secureSession) stats()sessionStats{
  s.mu.Lock();defer s.mu.Unlock()
  return sessionStats{Secure:s.state==4,ReplayDrops:s.replays,
-  AuthenticationFailures:s.errors,Recoveries:s.recoveries}
+  AuthenticationFailures:s.errors,Recoveries:s.recoveries,QueuedPackets:uint64(len(s.queued)),QueuedDrops:s.queueDrops}
+}
+
+type secureStatus struct{
+ ConfigSchema int `json:"config_schema"`
+ WireVersion int `json:"wire_version"`
+ Region string `json:"region"`
+ State string `json:"state"`
+ LastValidAgeSeconds int64 `json:"last_valid_age_seconds"`
+ PendingRekey bool `json:"pending_rekey"`
+ ReplayDrops uint64 `json:"replay_drops"`
+ AuthFailures uint64 `json:"authentication_failures"`
+ Recoveries uint64 `json:"recoveries"`
+ PendingPackets uint64 `json:"pending_packets"`
+ ExpiredOrOverflowPackets uint64 `json:"expired_or_overflow_packets"`
+}
+func (s *secureSession) status()secureStatus{
+ s.mu.Lock();defer s.mu.Unlock()
+ phase:="negotiating"
+ if s.state==4 {phase="authenticated"}
+ if s.state==0 {phase="not-started"}
+ age:=int64(-1)
+ if !s.lastValid.IsZero(){age=int64(time.Since(s.lastValid).Seconds())}
+ return secureStatus{
+  ConfigSchema:3,WireVersion:4,Region:s.region,State:phase,
+  LastValidAgeSeconds:age,PendingRekey:s.pending!=nil,
+  ReplayDrops:s.replays,AuthFailures:s.errors,
+  Recoveries:s.recoveries,PendingPackets:uint64(len(s.queued)),
+  ExpiredOrOverflowPackets:s.queueDrops,
+ }
+}
+func (s *secureSession) writeStatus(path string) {
+ encoded,err:=json.Marshal(s.status())
+ if err!=nil{return}
+ tmp:=path+".pending"
+ if err=os.WriteFile(tmp,encoded,0600);err!=nil{return}
+ if err=os.Rename(tmp,path);err!=nil{_ = os.Remove(tmp)}
 }
