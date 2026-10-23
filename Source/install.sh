@@ -62,8 +62,8 @@ fi
 # Do not install stale rolling assets when removing legacy HA.
 chmod 755 "$work/manager"
 manager_version="$("$work/manager" --version)"
-if [[ "$manager_version" != "2.6.0" ]]; then
-  echo "Expected Pingtunnel Manager 2.6.0 (auto performance + AEAD), got: $manager_version" >&2
+if [[ "$manager_version" != "3.0.0" ]]; then
+  echo "Expected Pingtunnel Manager 3.0.0 (strict pairing configuration), got: $manager_version" >&2
   echo "Check the current rust-latest release assets before retrying." >&2
   exit 1
 fi
@@ -71,7 +71,7 @@ chmod 755 "$work/manager"
 echo "[2/4] Download matching authenticated Go core and check configuration..."
 # Do not install the upstream Go binary: it does not support the auto-AEAD
 # authenticated frame and would silently break encrypted two-peer sessions.
-# Both manager and Go core MUST come from the same 2.5 release.
+# Both manager and Go core MUST come from the same v3 release.
 curl -fsSL --retry 3 "$CORE_RELEASE/pingtunnel-core-linux-$release_arch" -o "$work/core"
 curl -fsSL --retry 3 "$CORE_RELEASE/pingtunnel-core-linux-$release_arch.sha256" -o "$work/core.sha"
 core_digest="$(awk '{print $1; exit}' "$work/core.sha")"
@@ -85,14 +85,22 @@ if ! "$work/core" -version >/dev/null; then
   exit 1
 fi
 
+# Fail before touching an existing service or its stored secrets.
+# Old configurations are intentionally unsupported. Operator must make an
+# explicit fresh v3 pairing choice on both VPSs.
+if [[ -f "$CONFIG" ]] && ! "$work/manager" validate; then
+  echo "Existing configuration is not v3-compatible. No files or running services were changed." >&2
+  echo "Backup then manually move $CONFIG outside the config directory; rerun installer and unified setup on BOTH VPSs." >&2
+  exit 1
+fi
 configured=0
 if [[ -f "$CONFIG" ]]; then
-  # Legacy multi-route JSON is validated only AFTER the 2.4 migration.
+  # No legacy settings migration: keep old config unchanged and fail safely.
   chmod 600 "$CONFIG"
   configured=1
 else
   echo "First install: the lightweight menu wizard is available after installation."
-  echo "No role/server address has been invented. Run 'pingtunnel' and select Easy setup."
+  echo "No peer identity has been invented. Run pingtunnel and choose Setup."
 fi
 
 echo "[3/4] Atomic manager installation..."
@@ -135,7 +143,6 @@ if [[ -f "$work/core" ]]; then
   core_new=""
 fi
 if (( configured )); then
-  "$MANAGER" migrate
   "$MANAGER" validate
   "$MANAGER" service-install
   if (( previously_active )) || systemctl is-enabled --quiet pingtunnel.service; then
@@ -148,4 +155,4 @@ fi
 trap - ERR
 echo "[4/4] Installed successfully."
 echo "Type: pingtunnel"
-echo "One Iran VPS + one foreign VPS. Choose Easy setup once in the menu."
+echo "One Iran VPS + one foreign VPS. Choose Setup on foreign first, then Iran."
