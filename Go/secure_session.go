@@ -84,6 +84,11 @@ type secureSession struct{
  errors uint64
  replays uint64
  recoveries uint64
+ // A verified new handshake is staged separately from the established
+ // session. Replayed (but MAC-valid) ClientHellos cannot tear it down.
+ pending *secureSession
+ recent map[[16]byte]time.Time
+ lastCandidate time.Time
 }
 func newSecureSession(root []byte, region string, preferred byte)*secureSession{
  s:=&secureSession{region:region,preferred:preferred}
@@ -108,6 +113,7 @@ func (s *secureSession) ready()bool{
  return s.state==4&&s.keys!=nil
 }
 func (s *secureSession) resetLocked() {
+ s.pending=nil
  s.state=0;s.keys=nil;s.confirmKey=nil;s.localPrivate=nil
  s.clientPublic=nil;s.serverPublic=nil
  s.clientID=[16]byte{};s.serverID=[16]byte{}
@@ -240,6 +246,63 @@ func (s *secureSession) handle(frame []byte,now time.Time)([]byte,error){
  s.mu.Lock();defer s.mu.Unlock()
  if len(frame)<5+16+32{return nil,errors.New("short handshake")}
  body,tag:=frame[:len(frame)-32],frame[len(frame)-32:]
+ // Protect established sessions from a valid-but-recorded old ClientHello.
+ // An authenticated reconnect is prepared using a *candidate* handshake.
+ // Switching keys happens only AFTER a fresh ephemeral Finish proof.
+ if s.region=="foreign" && s.state==4 {
+  if typ==helloClient {
+   if len(body)!=5+16+32 || !verifyMAC(s.authenticationKey(),body,tag) {
+    return nil,errors.New("unauthenticated reconnect hello")
+   }
+   var cid [16]byte
+   copy(cid[:],body[5:21])
+   if cid==s.clientID {return nil,nil}
+   if _,seen:=s.recent[cid];seen{return nil,nil}
+   if s.pending!=nil && s.pending.clientID==cid {
+    return s.pending.handle(frame,now)
+   }
+   // One candidate at a time, with a deadline and arrival rate limit.
+   if s.pending!=nil && now.Sub(s.pending.started)<5*time.Second{return nil,nil}
+   if !s.lastCandidate.IsZero() && now.Sub(s.lastCandidate)<time.Second{return nil,nil}
+   candidate:=newSecureSession(s.root[:],"foreign",s.preferred)
+   candidate.peer=append(net.IP(nil),s.peer...)
+   result,err:=candidate.handle(frame,now)
+   if err!=nil{return nil,err}
+   s.pending=candidate
+   s.lastCandidate=now
+   return result,nil
+  }
+  if typ==helloFinish && s.pending!=nil {
+   result,err:=s.pending.handle(frame,now)
+   if err!=nil{return nil,err}
+   if s.pending.state==4 {
+    // Keep only a bounded recent-ID memory; old HMACed hellos are rejected
+    // without allocating a candidate or disturbing the active data path.
+    if s.recent==nil{s.recent=make(map[[16]byte]time.Time)}
+    s.recent[s.clientID]=now
+    if len(s.recent)>256 {
+     for key,when:=range s.recent {
+      if now.Sub(when)>10*time.Minute {delete(s.recent,key)}
+     }
+     if len(s.recent)>256 {
+      // Retain at least the current/previous active IDs; older entries
+      // are still harmless because candidate keys are isolated.
+      for key:=range s.recent {if key!=s.clientID{delete(s.recent,key);break}}
+     }
+    }
+    s.keys=s.pending.keys
+    s.clientID=s.pending.clientID
+    s.serverID=s.pending.serverID
+    s.clientPublic=s.pending.clientPublic
+    s.serverPublic=s.pending.serverPublic
+    s.confirmKey=s.pending.confirmKey
+    s.state=4
+    s.lastValid=now
+    s.pending=nil
+   }
+   return result,nil
+  }
+ }
  if typ==helloClient{
   if s.region!="foreign"||len(body)!=5+16+32{return nil,errors.New("invalid client hello")}
   var cid [16]byte;copy(cid[:],body[5:21])
