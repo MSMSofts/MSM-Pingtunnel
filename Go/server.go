@@ -16,7 +16,6 @@ import (
 func NewServer(icmpAddr string, key int, maxconn int, maxprocessthread int, maxprocessbuffer int, connecttmeout int, cryptoConfig *CryptoConfig, forwardConfig *ForwardConfig, congestion string) (*Server, error) {
 	s := &Server{
 		icmpAddr:         icmpAddr,
-		exit:             false,
 		key:              key,
 		maxconn:          maxconn,
 		maxprocessthread: maxprocessthread,
@@ -38,7 +37,7 @@ func NewServer(icmpAddr string, key int, maxconn int, maxprocessthread int, maxp
 }
 
 type Server struct {
-	exit             bool
+	exit             atomic.Bool
 	key              int
 	workResultLock   sync.WaitGroup
 	maxconn          int
@@ -110,7 +109,7 @@ func (p *Server) Run() error {
 		p.workResultLock.Add(1)
 		defer p.workResultLock.Done()
 
-		for !p.exit {
+		for !p.exit.Load() {
 			p.checkTimeoutConn()
 			p.showNet()
 			p.updateConnError()
@@ -125,7 +124,7 @@ func (p *Server) Run() error {
 		p.workResultLock.Add(1)
 		defer p.workResultLock.Done()
 
-		for !p.exit {
+		for !p.exit.Load() {
 			select {
 			case <-p.recvcontrol:
 				return
@@ -139,7 +138,7 @@ func (p *Server) Run() error {
 }
 
 func (p *Server) Stop() {
-	p.exit = true
+	p.exit.Store(true)
 	p.recvcontrol <- 1
 	p.workResultLock.Wait()
 	p.processtp.Stop()
@@ -396,7 +395,7 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
 	loggo.Info("start wait remote connect tcp %s %s", conn.id, conn.tcpaddrTarget.String())
 	startConnectTime := common.GetNowUpdateInSecond()
 	connectWait := newAdaptiveLoopWait(2*time.Millisecond, 80*time.Millisecond)
-	for !p.exit && !conn.exit {
+	for !p.exit.Load() && !conn.exit {
 		if conn.fm.IsConnected() {
 			break
 		}
@@ -449,7 +448,7 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
 		defer common.CrashLog()
 
 		readWait := newAdaptiveLoopWait(2*time.Millisecond, 80*time.Millisecond)
-		for !p.exit && !conn.exit {
+		for !p.exit.Load() && !conn.exit {
 			left := common.MinOfInt(conn.fm.GetSendBufferLeft(), len(bytes))
 			if left <= 0 {
 				wait := readWait.miss()
@@ -491,7 +490,7 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
 	loopWait := newAdaptiveLoopWait(2*time.Millisecond, 250*time.Millisecond)
 
 mainLoop:
-	for !p.exit && !conn.exit {
+	for !p.exit.Load() && !conn.exit {
 		now := common.GetNowUpdateInSecond()
 		hadWork := false
 
@@ -585,7 +584,7 @@ mainLoop:
 	conn.fm.Close()
 
 	startCloseTime := common.GetNowUpdateInSecond()
-	for !p.exit && !conn.exit {
+	for !p.exit.Load() && !conn.exit {
 		now := common.GetNowUpdateInSecond()
 
 		conn.fm.Update()
@@ -645,7 +644,7 @@ func (p *Server) Recv(conn *ServerConn, id string, src *net.IPAddr) {
 
 	bytes := make([]byte, 2000)
 
-	for !p.exit {
+	for !p.exit.Load() {
 
 		conn.conn.SetReadDeadline(time.Now().Add(time.Millisecond * 100))
 		n, srcAddr, err := conn.conn.ReadFromUDP(bytes)
