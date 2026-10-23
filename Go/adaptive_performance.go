@@ -17,7 +17,7 @@ type AdaptiveFrameSettings struct {
 }
 type AdaptivePerformance struct {
  mu sync.Mutex
- pending time.Time
+ outstanding []time.Time
  samples uint64
  srttMs, jitterMs, baseMs float64
  lossScore float64
@@ -28,14 +28,24 @@ func NewAdaptivePerformance() *AdaptivePerformance { return &AdaptivePerformance
 func (a *AdaptivePerformance) OnPing(sent time.Time) {
  a.mu.Lock()
  defer a.mu.Unlock()
- if !a.pending.IsZero() && sent.Sub(a.pending)>=a.timeoutLocked() { a.noteLossLocked() }
- a.pending=sent
+ a.expireProbesLocked(sent)
+ // Each probe is tracked independently: a one-second cadence must not
+ // erase older unanswered probes before their 5-15 second deadline.
+ a.outstanding=append(a.outstanding,sent)
+ if len(a.outstanding)>64 {
+  a.noteLossLocked()
+  a.outstanding=a.outstanding[1:]
+ }
 }
 func (a *AdaptivePerformance) OnPong(sent, received time.Time) {
  a.mu.Lock()
  defer a.mu.Unlock()
- if a.pending.IsZero() || !a.pending.Equal(sent) {return}
- a.pending=time.Time{}
+ index:=-1
+ for i,probe:=range a.outstanding {
+  if probe.Equal(sent){index=i;break}
+ }
+ if index<0{return}
+ a.outstanding=append(a.outstanding[:index],a.outstanding[index+1:]...)
  rtt:=float64(received.Sub(sent))/float64(time.Millisecond)
  if rtt<=0 || rtt>60000{return}
  if a.samples==0 {
@@ -61,9 +71,20 @@ func (a *AdaptivePerformance) OnPong(sent, received time.Time) {
 func (a *AdaptivePerformance) OnTick(now time.Time) {
  a.mu.Lock()
  defer a.mu.Unlock()
- if !a.pending.IsZero() && now.Sub(a.pending)>=a.timeoutLocked(){
-  a.noteLossLocked(); a.pending=time.Time{}
+ a.expireProbesLocked(now)
+}
+func (a *AdaptivePerformance) expireProbesLocked(now time.Time) {
+ if len(a.outstanding)==0{return}
+ cutoff:=a.timeoutLocked()
+ survivors:=a.outstanding[:0]
+ for _,sent:=range a.outstanding{
+  if !now.Before(sent) && now.Sub(sent)>=cutoff {
+   a.noteLossLocked()
+  }else{
+   survivors=append(survivors,sent)
+  }
  }
+ a.outstanding=survivors
 }
 func (a *AdaptivePerformance) timeoutLocked() time.Duration {
  ms:=5000.0
