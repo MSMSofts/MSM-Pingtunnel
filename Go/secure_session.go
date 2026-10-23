@@ -13,6 +13,8 @@ import (
  "crypto/rand"
  "crypto/sha256"
  "encoding/binary"
+ "encoding/json"
+ "os"
  "errors"
  "io"
  "math/big"
@@ -437,7 +439,7 @@ func (s *secureSession) queuePacket(msg pendingICMP) {
   ip:=append(net.IP(nil),msg.peer.IP...)
   msg.peer=&net.IPAddr{IP:ip,Zone:msg.peer.Zone}
  }
- msg.arrival=time.Now()
+ if msg.arrival.IsZero(){msg.arrival=time.Now()}
  for len(s.queued)>0 && (len(s.queued)>=pendingMaxFrames || s.queueBytes+len(msg.raw)>pendingMaxBytes) {
   s.queueBytes-=len(s.queued[0].raw)
   s.queued[0]=pendingICMP{}
@@ -473,4 +475,40 @@ func (s *secureSession) stats()sessionStats{
  s.mu.Lock();defer s.mu.Unlock()
  return sessionStats{Secure:s.state==4,ReplayDrops:s.replays,
   AuthenticationFailures:s.errors,Recoveries:s.recoveries,QueuedPackets:uint64(len(s.queued)),QueuedDrops:s.queueDrops}
+}
+
+type secureStatus struct{
+ ConfigSchema int `json:"config_schema"`
+ WireVersion int `json:"wire_version"`
+ Region string `json:"region"`
+ State string `json:"state"`
+ LastValidAgeSeconds int64 `json:"last_valid_age_seconds"`
+ PendingRekey bool `json:"pending_rekey"`
+ ReplayDrops uint64 `json:"replay_drops"`
+ AuthFailures uint64 `json:"authentication_failures"`
+ Recoveries uint64 `json:"recoveries"`
+ PendingPackets uint64 `json:"pending_packets"`
+ ExpiredOrOverflowPackets uint64 `json:"expired_or_overflow_packets"`
+}
+func (s *secureSession) status()secureStatus{
+ s.mu.Lock();defer s.mu.Unlock()
+ phase:="negotiating"
+ if s.state==4 {phase="authenticated"}
+ if s.state==0 {phase="not-started"}
+ age:=int64(-1)
+ if !s.lastValid.IsZero(){age=int64(time.Since(s.lastValid).Seconds())}
+ return secureStatus{
+  ConfigSchema:3,WireVersion:4,Region:s.region,State:phase,
+  LastValidAgeSeconds:age,PendingRekey:s.pending!=nil,
+  ReplayDrops:s.replays,AuthFailures:s.errors,
+  Recoveries:s.recoveries,PendingPackets:uint64(len(s.queued)),
+  ExpiredOrOverflowPackets:s.queueDrops,
+ }
+}
+func (s *secureSession) writeStatus(path string) {
+ encoded,err:=json.Marshal(s.status())
+ if err!=nil{return}
+ tmp:=path+".pending"
+ if err=os.WriteFile(tmp,encoded,0600);err!=nil{return}
+ if err=os.Rename(tmp,path);err!=nil{_ = os.Remove(tmp)}
 }
