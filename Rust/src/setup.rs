@@ -1,243 +1,151 @@
-//! One-time setup wizard. Only the actual peer and service identities require
-//! input; systemd and restart policy are automatic.
-
-use crate::{
-    apply_config, as_string, config_path, failure, get_string, prompt, root_required,
-    store_config, Result,
-};
-use serde_json::{json, Value};
+//! One setup for each VPS; region is identity, not an encryption key owner.
+//! The root pairing key is independent of client/server roles and survives
+//! re-running setup or a future reversal of the ICMP initiation direction.
+use crate::{apply_config, config_path, failure, get_string, prompt, root_required, store_config, validate, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use std::fs;
-use std::io::Read;
+use serde_json::{json, Value};
+use std::{fs, io::Read, net::Ipv4Addr};
 
-fn new_key() -> Result<String> {
-    let mut input = fs::File::open("/dev/urandom")?;
-    let mut bytes = [0u8; 4];
-    input.read_exact(&mut bytes)?;
-    // Pingtunnel upstream limits the authentication key to 31 bits.
-    // Never reuse the insecure 123456 example default.
-    let value = u32::from_le_bytes(bytes) & 0x7fff_ffff;
-    Ok(value.to_string())
+pub(crate) const SCHEMA: u64 = 3;
+
+pub(crate) fn default_port(transport: &str) -> u16 {
+    if transport == "udp" { 444 } else { 443 }
 }
 
-fn new_crypto_key() -> Result<String> {
-    let mut input = fs::File::open("/dev/urandom")?;
-    let mut bytes = [0u8;32];
-    input.read_exact(&mut bytes)?;
+fn random_pair_key() -> Result<String> {
+    let mut file = fs::File::open("/dev/urandom")?;
+    let mut bytes = [0u8; 32];
+    file.read_exact(&mut bytes)?;
     Ok(STANDARD.encode(bytes))
 }
 
-pub(crate) fn default_listen_port(tcp: u64) -> u16 {
-    if tcp == 0 { 444 } else { 443 }
+fn valid_pair_key(candidate: &str) -> bool {
+    STANDARD.decode(candidate).map(|data| data.len() == 32 && STANDARD.encode(data) == candidate).unwrap_or(false)
 }
 
-// Only update the listen port when it was a known protocol default.
-// Never overwrite an arbitrary user-configured port.
-pub(crate) fn switched_listen_port(current: u64, previous_tcp: u64, next_tcp: u64) -> u64 {
-    if previous_tcp != next_tcp && current == u64::from(default_listen_port(previous_tcp)) {
-        u64::from(default_listen_port(next_tcp))
-    } else { current }
-}
-
-fn valid_peer(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 253 &&
-    !s.starts_with('-') &&
-    !s.chars().any(|c| c.is_control() || c.is_whitespace() || c == '/')
-}
-
-fn valid_destination(s: &str) -> bool {
-    let Some((host, port)) = s.rsplit_once(':') else { return false };
-    valid_peer(host) && port.parse::<u16>().map(|p| p != 0).unwrap_or(false)
-}
-
-fn choose_role(current: &str) -> Result<&'static str> {
-    println!("Choose this VPS role (only once, or when switching roles):");
-    println!("  1) Foreign server / Pingtunnel Server");
-    println!("  2) Iran server / Pingtunnel Client");
-    let default = if current == "client" { "2" } else { "1" };
-    let chosen = prompt("Role", default)?;
-    match chosen.as_str() {
-        "1" => Ok("server"),
-        "2" => Ok("client"),
-        _ => Err(failure("Choose 1 or 2.")),
+fn existing_v3() -> Result<Option<Value>> {
+    if !config_path().exists() { return Ok(None); }
+    let cfg: Value = serde_json::from_slice(&fs::read(config_path())?)?;
+    if cfg.get("schema_version").and_then(Value::as_u64) != Some(SCHEMA) {
+        return Err(failure("Old configuration is incompatible with v3. Back it up and remove it manually, then run 'pingtunnel setup'. No old key or port is imported."));
     }
-}
-
-fn existing_config() -> Result<Option<Value>> {
-    if !config_path().exists() {
-        return Ok(None);
-    }
-    let old: Value = serde_json::from_slice(&fs::read(config_path())?)?;
-    if !old.is_object() {
-        return Err(failure("Existing configuration is invalid, not overwriting it."));
-    }
-    Ok(Some(old))
+    validate(&cfg)?;
+    Ok(Some(cfg))
 }
 
 pub(crate) fn wizard() -> Result<()> {
     root_required()?;
-    let old = existing_config()?;
-    let initial = old.is_none();
-    let mut cfg = old.unwrap_or_else(|| json!({
-        "tcp": 1,
-        "memory_mb": 0,
-        "autostart": true
-    }));
-    println!("\n╔══════════════════════════════════════════════╗");
-    println!("║       Pingtunnel — Automatic setup           ║");
-    println!("╚══════════════════════════════════════════════╝");
-    println!("Service setup, autostart and restart recovery are automatic.");
-    println!("The server generates a 256-bit encryption key. No algorithm choice is needed.");
+    let previous = existing_v3()?;
+    println!("\nPingtunnel — Unified Pair Setup (v3)");
+    println!("Only two VPSs: Iran and Foreign. Direct ICMP tunnel; all tuning is automatic.");
+    println!("The shared 256-bit pairing key is NEVER bound to Client/Server roles.");
 
-    let previous_role = get_string(&cfg, "type").unwrap_or("").to_owned();
-    let role = choose_role(&previous_role)?;
-    cfg["type"] = json!(role);
-    if role == "server" {
-        let key = if previous_role == "server" {
-            cfg.get("key").and_then(as_string).filter(|v| !v.is_empty())
-        } else {
-            None // Never reuse a former client key as a new server identity.
-        }.unwrap_or(new_key()?);
-        cfg["key"] = json!(key);
-        let secret = if previous_role == "server" {
-            get_string(&cfg,"crypto_key").map(str::to_owned)
-        } else { None }.unwrap_or(new_crypto_key()?);
-        cfg["crypto_key"] = json!(secret);
-        cfg["autostart"] = json!(true);
-        println!("\nServer configuration ready.");
-        println!("Share these details securely with the Iran-side client:");
-        println!("  Authentication key: {key}");
-        println!("  Strong encryption key: {}", get_string(&cfg,"crypto_key").unwrap_or(""));
-        println!("  Cipher: auto-benchmarked AES-256-GCM / XChaCha20-Poly1305");
-        println!("  Server public IP/DNS: use the address assigned by your VPS provider.");
-        println!("Do not publish the key in GitHub or logs.");
-    } else {
-        let existing_host = get_string(&cfg, "server").unwrap_or("");
-        let host = prompt("Foreign Pingtunnel Server IP/DNS", existing_host)?;
-        if !valid_peer(&host) {
-            return Err(failure("A valid foreign server IP/DNS is required."));
-        }
-        cfg["server"] = json!(host);
+    // Q1: Physical identity (retained independently of ICMP client/server role).
+    println!("1) Where is this VPS? 1 = Iran, 2 = Foreign");
+    let previous_region = previous.as_ref().and_then(|v| get_string(v,"region")).unwrap_or("foreign");
+    let region_default = if previous_region == "iran" { "1" } else { "2" };
+    let region = match prompt("Region", region_default)?.as_str() {
+        "1" => "iran",
+        "2" => "foreign",
+        _ => return Err(failure("Choose 1 or 2.")),
+    };
 
-        let existing_key = if previous_role == "client" {
-            cfg.get("key").and_then(as_string)
-        } else {
-            None // A server key from a previous role is not the remote shared key.
-        };
-        println!("Use the authentication key shown by the FOREIGN server setup.");
-        let key = prompt(
-            "Shared numeric key (Enter keeps the existing key)",
-            ""
-        )?;
-        let key = if key.is_empty() {
-            existing_key.ok_or_else(|| failure("The client needs the shared key from its server."))?
-        } else {
+    // Q2: Peer IP is significant on both servers; the Go server enforces it.
+    let peer_default = previous.as_ref().and_then(|v| get_string(v,"peer_ip")).unwrap_or("");
+    let peer = prompt("2) Opposite VPS public IPv4 address", peer_default)?;
+    if peer.parse::<Ipv4Addr>().is_err() {return Err(failure("Enter the other VPS public IPv4 address (ICMPv4)."));}
+
+    // Q3: Foreign host creates a 32-byte random key on FIRST setup, never
+    // regenerates it on role changes. Iran enters precisely the same secret.
+    let saved_key = previous.as_ref().and_then(|v| get_string(v,"pair_key")).map(str::to_owned);
+    let pair_key = match (region, saved_key) {
+        ("foreign", Some(key)) => {
+            println!("3) Existing shared pairing key retained; no regeneration.");
+            println!("Pairing key for your Iran setup (keep private): {key}");
             key
-        };
-        let numeric: u64 = key.parse().map_err(|_| failure("The shared key must be numeric."))?;
-        if numeric > 2_147_483_647 {
-            return Err(failure("Key must be <= 2147483647."));
         }
-        cfg["key"] = json!(key);
-        println!("Paste the 256-bit encryption key generated by the foreign server.");
-        let entered = rpassword::prompt_password("Encryption key (hidden; Enter keeps existing): ")?;
-        let crypto_key = if entered.trim().is_empty() && previous_role == "client" {
-            get_string(&cfg,"crypto_key").map(str::to_owned)
-                .ok_or_else(|| failure("Encryption key required; run setup on FOREIGN server first"))?
-        } else {
-            entered.trim().to_owned()
-        };
-        let bytes = STANDARD.decode(&crypto_key)
-            .map_err(|_| failure("Encryption key must be base64."))?;
-        if bytes.len() != 32 || STANDARD.encode(bytes) != crypto_key {
-            return Err(failure("Encryption key must encode exactly 32 random bytes."));
+        ("foreign", None) => {
+            let key = random_pair_key()?;
+            println!("3) Generated strong 256-bit pairing key.");
+            println!("Transfer this secret securely to the Iran VPS: {key}");
+            key
         }
-        cfg["crypto_key"] = json!(crypto_key);
-
-        let target = prompt(
-            "Destination host:port on foreign network",
-            get_string(&cfg, "target").unwrap_or("127.0.0.1:443")
-        )?;
-        if !valid_destination(&target) {
-            return Err(failure("Destination must be host:port (e.g. 127.0.0.1:443)."));
+        ("iran", Some(key)) => {
+            println!("3) Existing shared pairing key retained.");
+            key
         }
-        cfg["target"] = json!(target);
-
-        if !cfg.get("l_port").and_then(Value::as_u64)
-            .map(|n| (1..=65535).contains(&n)).unwrap_or(false)
-        {
-            cfg["l_port"] = json!(default_listen_port(cfg.get("tcp").and_then(Value::as_u64).unwrap_or(1)));
+        ("iran", None) => {
+            println!("3) Enter the key generated by the FOREIGN VPS (input hidden).");
+            let key = rpassword::prompt_password("Pairing key: ")?.trim().to_owned();
+            if !valid_pair_key(&key) {return Err(failure("Pairing key must be canonical base64 for exactly 32 bytes."));}
+            key
         }
-        // TCP is the default transport of the forwarded service; UDP can be
-        // selected later from the main menu without editing JSON by hand.
-        if initial { cfg["tcp"] = json!(1); }
-        cfg["autostart"] = json!(true);
+        _ => unreachable!(),
+    };
 
-        // Only one foreign server. No backup endpoint is requested or created.
+    // Q4: Both sides MUST select the same encapsulated transport. Not ICMP.
+    let default_transport = previous.as_ref().and_then(|v| get_string(v,"transport")).unwrap_or("tcp");
+    let current = if default_transport == "udp" { "2" } else { "1" };
+    println!("4) Forwarded transport: 1 = TCP, 2 = UDP (ICMP stays the tunnel).");
+    let transport = match prompt("Transport", current)?.as_str() {
+        "1" => "tcp",
+        "2" => "udp",
+        _ => return Err(failure("Choose 1 (TCP) or 2 (UDP).")),
+    };
 
-    }
+    // Q5: A port always belongs to THIS VPS. Iran: local user listener;
+    // foreign: strictly enforced loopback target service port.
+    let prior_port = previous.as_ref().and_then(|v| v.get("port")).and_then(Value::as_u64);
+    let old_transport = previous.as_ref().and_then(|v| get_string(v,"transport")).unwrap_or(transport);
+    let suggested = match prior_port {
+        Some(port) if old_transport != transport && port == u64::from(default_port(old_transport)) => u64::from(default_port(transport)),
+        Some(port) => port,
+        None => u64::from(default_port(transport)),
+    };
+    let label = if region == "iran" { "5) Iran listener port" } else { "5) Foreign local VPN service port" };
+    let port: u16 = prompt(label, &suggested.to_string())?.parse().map_err(|_| failure("Port must be numeric."))?;
+    if port == 0 {return Err(failure("Port must be in 1..65535."));}
 
-    // Never mutate the existing configuration if any input is invalid.
+    let cfg = json!({
+        "schema_version":SCHEMA,
+        "region":region,
+        "peer_ip":peer,
+        "pair_key":pair_key,
+        "transport":transport,
+        "port":port,
+        "memory_mb":0,
+        "autostart":true
+    });
+    validate(&cfg)?;
+    println!("\nSummary:");
+    println!("  This server: {region} | Peer: {peer}");
+    println!("  Forwarding: {}:{} ({transport})", if region=="iran" { "Iran listen" } else { "Foreign loopback target" }, port);
+    println!("  Security: mandatory authenticated auto-AEAD; no plaintext fallback.");
+    println!("  ICMP direction: Iran -> Foreign (future reversal will reuse this pairing key).");
+    println!("  Auto performance: enabled on Iran; BB congestion in Go.");
+    // Always save only after all five answers passed validation.
     store_config(&cfg)?;
-    println!("Configuration saved. Applying systemd and starting automatically...");
     apply_config()?;
-    println!("Ready. Open the full menu any time by typing: pingtunnel");
+    println!("Configuration saved and service applied.");
     Ok(())
-}
-
-pub(crate) fn protocol_menu() -> Result<()> {
-    root_required()?;
-    let mut cfg: Value = serde_json::from_slice(&fs::read(config_path())?)?;
-    if get_string(&cfg, "type") != Some("client") {
-        return Err(failure("TCP/UDP forwarding selection applies to client role."));
-    }
-    println!("Forwarded traffic: 1 = TCP; 0 = UDP. ICMP remains the tunnel transport.");
-    let current = if cfg.get("tcp").and_then(Value::as_u64) == Some(0) { "0" } else { "1" };
-    let choice = prompt("Protocol", current)?;
-    if choice != "0" && choice != "1" {
-        return Err(failure("Choose 0 or 1."));
-    }
-    let next_tcp = choice.parse::<u8>()?;
-    let previous_tcp = cfg.get("tcp").and_then(Value::as_u64).unwrap_or(1);
-    let listen = cfg.get("l_port").and_then(Value::as_u64)
-        .unwrap_or(u64::from(default_listen_port(previous_tcp)));
-    cfg["l_port"] = json!(switched_listen_port(listen, previous_tcp, next_tcp as u64));
-    cfg["tcp"] = json!(next_tcp);
-    store_config(&cfg)?;
-    apply_config()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn new_random_encryption_key_is_256_bits() {
-        let secret=new_crypto_key().unwrap();
-        let decoded=STANDARD.decode(secret).unwrap();
-        assert_eq!(decoded.len(),32);
-    }
-
-    #[test]
-    fn default_ports_tcp_443_and_udp_444() {
-        assert_eq!(default_listen_port(1), 443);
-        assert_eq!(default_listen_port(0), 444);
-        assert_eq!(switched_listen_port(443, 1, 0), 444);
-        assert_eq!(switched_listen_port(444, 0, 1), 443);
-        assert_eq!(switched_listen_port(7070, 1, 0), 7070);
-        assert_eq!(switched_listen_port(4455, 1, 0), 4455);
-    }
-
-    #[test]
-    fn key_generation_respects_upstream_limit() {
-        for _ in 0..20 {
-            let k: u64 = new_key().unwrap().parse().unwrap();
-            assert!(k <= 2147483647);
-        }
+    fn ports_are_role_local() {
+        assert_eq!(default_port("tcp"),443);
+        assert_eq!(default_port("udp"),444);
     }
     #[test]
-    fn only_actual_destinations_are_accepted() {
-        assert!(valid_destination("127.0.0.1:443"));
-        assert!(!valid_destination("127.0.0.1:0"));
-        assert!(!valid_destination("example.org"));
+    fn strong_keys_are_canonical_and_random() {
+        let first=random_pair_key().unwrap();
+        let second=random_pair_key().unwrap();
+        assert!(valid_pair_key(&first));
+        assert!(valid_pair_key(&second));
+        assert_ne!(first,second);
+        assert!(!valid_pair_key("password"));
+        assert!(!valid_pair_key("123456"));
     }
 }

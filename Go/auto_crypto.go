@@ -29,6 +29,8 @@ var autoMagic = [4]byte{'P','T','A','1'}
 type autoCrypto struct {
  aes cipher.AEAD
  xchacha cipher.AEAD
+ recvAES cipher.AEAD
+ recvXChaCha cipher.AEAD
  preferred byte
  prefix [8]byte
  counter atomic.Uint64
@@ -56,10 +58,52 @@ func newAutoCryptoConfig(input string) (*CryptoConfig, error) {
  if err!=nil{return nil,err}
  x,err:=chacha20poly1305.NewX(xkey)
  if err!=nil{return nil,err}
- c:=&autoCrypto{aes:aead,xchacha:x}
+ c:=&autoCrypto{aes:aead,xchacha:x,recvAES:aead,recvXChaCha:x}
  if _,err=rand.Read(c.prefix[:]);err!=nil{return nil,err}
  c.preferred=autoBenchmark(aead,x)
  return &CryptoConfig{Mode:AUTO,Key:raw,auto:c},nil
+}
+
+// BindRegion separates encryption keys by physical direction, not the Go
+// client/server role. Switching future ICMP initiation direction must never
+// require a fresh pairing key. Both peers derive the same direction labels.
+func (c *CryptoConfig) BindRegion(region string) error {
+ if c.Mode!=AUTO || c.auto==nil || len(c.Key)!=32 {
+  return errors.New("BindRegion requires authenticated v3 AUTO crypto")
+ }
+ if region!="iran" && region!="foreign" {
+  return errors.New("unknown physical VPS region")
+ }
+ build:=func(direction,label string)(cipher.AEAD,error){
+  key:=make([]byte,32)
+  _,err:=io.ReadFull(hkdf.New(sha256.New,c.Key,nil,[]byte("pingtunnel-v3/"+direction+"/"+label)),key)
+  if err!=nil{return nil,err}
+  if label=="aes256gcm"{
+   block,err:=aes.NewCipher(key)
+   if err!=nil{return nil,err}
+   return cipher.NewGCM(block)
+  }
+  return chacha20poly1305.NewX(key)
+ }
+ tx:="iran-to-foreign"
+ rx:="foreign-to-iran"
+ if region=="foreign"{tx,rx=rx,tx}
+ txAES,err:=build(tx,"aes256gcm")
+ if err!=nil{return err}
+ txX,err:=build(tx,"xchacha20poly1305")
+ if err!=nil{return err}
+ rxAES,err:=build(rx,"aes256gcm")
+ if err!=nil{return err}
+ rxX,err:=build(rx,"xchacha20poly1305")
+ if err!=nil{return err}
+ c.auto.aes=txAES
+ c.auto.xchacha=txX
+ c.auto.recvAES=rxAES
+ c.auto.recvXChaCha=rxX
+ c.auto.counter.Store(0)
+ if _,err=rand.Read(c.auto.prefix[:]);err!=nil{return err}
+ c.auto.preferred=autoBenchmark(txAES,txX)
+ return nil
 }
 
 // One-time startup measurement on the actual host CPU. The selected mode
@@ -126,8 +170,8 @@ func (c *autoCrypto) decrypt(packet []byte) ([]byte,error) {
  }
  var a cipher.AEAD
  switch packet[4] {
- case autoAES:a=c.aes
- case autoXChaCha:a=c.xchacha
+ case autoAES:a=c.recvAES
+ case autoXChaCha:a=c.recvXChaCha
  default:return nil,errors.New("unknown cipher identifier")
  }
  if len(packet)<5+a.NonceSize()+a.Overhead(){
