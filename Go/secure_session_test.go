@@ -26,7 +26,7 @@ func TestReplayWindowExactDuplicateAndOutOfOrder(t *testing.T){
   if e!=nil{t.Fatal(e)}
   frames=append(frames,f)
  }
- if out,e:=b.Decrypt(frames[1099]);e!=nil||out[0]!=byte(1099){t.Fatalf("newest invalid: %v",e)}
+ if out,e:=b.Decrypt(frames[1099]);e!=nil||out[0]!=byte(1099%256){t.Fatalf("newest invalid: %v",e)}
  if _,e:=b.Decrypt(frames[1099]);e==nil{t.Fatal("identical ciphertext was replayed")}
  if _,e:=b.Decrypt(frames[1097]);e!=nil{t.Fatal("out of order fresh packet rejected: ",e)}
  if _,e:=b.Decrypt(frames[1097]);e==nil{t.Fatal("out-of-order duplicate accepted")}
