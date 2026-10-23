@@ -9,12 +9,20 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use tokio::time::{interval, MissedTickBehavior};
+
+const QUEUE_BYTES_LIMIT: usize = 16 * 1024 * 1024;
+
+struct QueuedDatagram {
+    data: Vec<u8>,
+    // A global permit caps RAM used by all client send queues to 16 MiB.
+    _permit: OwnedSemaphorePermit,
+}
 
 struct FlowEntry {
     generation: u64,
-    sender: mpsc::Sender<Vec<u8>>,
+    sender: mpsc::Sender<QueuedDatagram>,
 }
 
 fn active_route(state: &RouterState) -> Option<usize> {
@@ -46,7 +54,7 @@ async fn handle_flow(
     settings: Settings,
     state: Arc<Mutex<RouterState>>,
     public: Arc<UdpSocket>,
-    mut incoming: mpsc::Receiver<Vec<u8>>,
+    mut incoming: mpsc::Receiver<QueuedDatagram>,
 ) {
     let mut pinned = original_route;
     let mut backend = match connect_backend(settings.routes[pinned].data_port).await {
@@ -67,7 +75,7 @@ async fn handle_flow(
                     // Do not reshuffle a healthy existing flow just because a
                     // different endpoint becomes the preferred route.
                     last_activity = Instant::now();
-                    if let Err(error) = backend.send(&datagram).await {
+                    if let Err(error) = backend.send(&datagram.data).await {
                         eprintln!("HA UDP: backend send to {} failed: {error}", settings.routes[pinned].name);
                     }
                 }
@@ -119,6 +127,7 @@ pub(super) async fn serve(settings: Settings, state: Arc<Mutex<RouterState>>) ->
     let mut sessions: HashMap<SocketAddr, FlowEntry> = HashMap::new();
     let mut next_generation: u64 = 0;
     let mut datagram = vec![0u8; 65535];
+    let queue_budget = Arc::new(Semaphore::new(QUEUE_BYTES_LIMIT));
     eprintln!(
         "HA UDP: listening on {} with {} warm Go UDP endpoints; {}s idle expiration",
         settings.listen, settings.routes.len(), settings.udp_idle_seconds
@@ -146,7 +155,7 @@ pub(super) async fn serve(settings: Settings, state: Arc<Mutex<RouterState>>) ->
                     };
                     next_generation = next_generation.wrapping_add(1);
                     let generation = next_generation;
-                    let (tx, rx) = mpsc::channel::<Vec<u8>>(64);
+                    let (tx, rx) = mpsc::channel::<QueuedDatagram>(64);
                     sessions.insert(peer, FlowEntry { generation, sender: tx });
                     let settings = settings.clone();
                     let state = state.clone();
@@ -158,9 +167,18 @@ pub(super) async fn serve(settings: Settings, state: Arc<Mutex<RouterState>>) ->
                     });
                 }
                 if let Some(entry) = sessions.get(&peer) {
-                    // Nonblocking admission: overflowing clients drop datagrams,
-                    // never block other peers or allocate an unbounded queue.
-                    let _ = entry.sender.try_send(datagram[..size].to_vec());
+                    // Admission is capped by BOTH per-flow packet count and
+                    // one global 16 MiB memory budget (including queued data).
+                    // This protects a small VPS from high-volume UDP senders.
+                    if let Ok(permit) = queue_budget.clone()
+                        .try_acquire_many_owned(size.max(1) as u32)
+                    {
+                        let packet = QueuedDatagram {
+                            data: datagram[..size].to_vec(),
+                            _permit: permit,
+                        };
+                        let _ = entry.sender.try_send(packet);
+                    }
                 }
             },
             Some((peer, generation)) = cleanup_rx.recv() => {
