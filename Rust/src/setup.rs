@@ -1,5 +1,5 @@
 //! One-time setup wizard. Only the actual peer and service identities require
-//! input; service tuning, systemd, restart and HA policy are automatic.
+//! input; systemd and restart policy are automatic.
 
 use crate::{
     apply_config, as_string, config_path, failure, get_string, prompt, root_required,
@@ -66,7 +66,7 @@ pub(crate) fn wizard() -> Result<()> {
     println!("\n╔══════════════════════════════════════════════╗");
     println!("║       Pingtunnel — Automatic setup           ║");
     println!("╚══════════════════════════════════════════════╝");
-    println!("TCP tuning, systemd, health checks and restart are automatic.");
+    println!("Service setup, autostart and restart recovery are automatic.");
     println!("Only the remote address, shared key and actual destination are needed.");
 
     let previous_role = get_string(&cfg, "type").unwrap_or("").to_owned();
@@ -80,9 +80,6 @@ pub(crate) fn wizard() -> Result<()> {
         }.unwrap_or(new_key()?);
         cfg["key"] = json!(key);
         cfg["autostart"] = json!(true);
-        if let Some(map) = cfg.as_object_mut() {
-            map.remove("ha"); // HA is client-side only.
-        }
         println!("\nServer configuration ready.");
         println!("Share these details securely with the Iran-side client:");
         println!("  Authentication key: {key}");
@@ -136,46 +133,8 @@ pub(crate) fn wizard() -> Result<()> {
         if initial { cfg["tcp"] = json!(1); }
         cfg["autostart"] = json!(true);
 
-        let backup = prompt("Second foreign Server IP/DNS (optional; Enter = single route)", "")?;
-        if !backup.is_empty() {
-            if !valid_peer(&backup) || backup == host {
-                return Err(failure("The backup must be a different valid server IP/DNS."));
-            }
-            // HA becomes automatic only if a second endpoint REALLY exists;
-            // neither discovery nor guessing another VPS is safe.
-            cfg["ha"] = json!({
-                "enabled": true,
-                "listen_host": "0.0.0.0",
-                "endpoints":[
-                    {"name":"primary", "server":host},
-                    {"name":"backup", "server":backup}
-                ],
-                "data_port_base":36000,
-                "probe_port_base":37000,
-                "probe_enabled":true,
-                "probe_target":"1.1.1.1:443",
-                "probe_domain":"one.one.one.one",
-                "check_seconds":10,
-                "failure_threshold":2,
-                "success_threshold":2,
-                "switch_streak":3,
-                "cooldown_seconds":120,
-                "max_connections":256,
-                "udp_idle_seconds":90
-            });
-            println!("Automatic HA enabled: both remote servers must use the same key.");
-        } else if initial || previous_role != "client" {
-            cfg.as_object_mut().unwrap().remove("ha");
-            println!("Single-endpoint mode. Add a second server in the menu to enable HA.");
-        } else if let Some(endpoints) = cfg.get_mut("ha")
-            .and_then(|v| v.get_mut("endpoints"))
-            .and_then(Value::as_array_mut)
-        {
-            // A changed primary endpoint must also update the HA route list.
-            if let Some(first) = endpoints.first_mut() {
-                first["server"] = json!(host);
-            }
-        }
+        // Only one foreign server. No backup endpoint is requested or created.
+
     }
 
     // Never mutate the existing configuration if any input is invalid.
@@ -199,16 +158,6 @@ pub(crate) fn protocol_menu() -> Result<()> {
         return Err(failure("Choose 0 or 1."));
     }
     cfg["tcp"] = json!(choice.parse::<u8>()?);
-    store_config(&cfg)?;
-    apply_config()
-}
-
-pub(crate) fn ha_disable() -> Result<()> {
-    root_required()?;
-    let mut cfg: Value = serde_json::from_slice(&fs::read(config_path())?)?;
-    if let Some(ha) = cfg.get_mut("ha") {
-        ha["enabled"] = json!(false);
-    }
     store_config(&cfg)?;
     apply_config()
 }
