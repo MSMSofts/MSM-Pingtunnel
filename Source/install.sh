@@ -60,9 +60,12 @@ if (( ! prebuilt )); then
   cargo build --release --manifest-path "$work/source/Pingtunnel_manager-main/Rust/Cargo.toml"
   cp "$work/source/Pingtunnel_manager-main/Rust/target/release/pingtunnel" "$work/manager"
 fi
-# Refuse stale rolling-release assets that predate HA manager 2.1.
-if ! "$work/manager" --help 2>/dev/null | grep -q 'ha-setup'; then
-  echo "Downloaded manager is older than HA 2.1; cannot safely install this version." >&2
+# Refuse stale rolling-release assets from the previous 2.1 release.
+# Do not silently install a TCP-only HA manager when the user requested UDP HA.
+manager_version="$("$work/manager" --version)"
+if [[ "$manager_version" != "2.2.0" ]]; then
+  echo "Expected Pingtunnel Manager 2.2.0 with UDP HA, got: $manager_version" >&2
+  echo "Check the current rust-latest release assets before retrying." >&2
   exit 1
 fi
 chmod 755 "$work/manager"
