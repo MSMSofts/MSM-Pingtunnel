@@ -8,7 +8,6 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command, Stdio};
 
-mod ha;
 mod setup;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -102,7 +101,6 @@ fn validate(cfg: &Value) -> Result<()> {
             }
         }
     }
-    ha::validate(cfg)?;
     Ok(())
 }
 
@@ -191,9 +189,6 @@ fn core_args(cfg: &Value) -> Result<Vec<String>> {
 
 fn run_core(dry_run: bool) -> Result<()> {
     let cfg = load_config()?;
-    if ha::is_enabled(&cfg) && !dry_run {
-        return Err(failure("HA mode requires 'pingtunnel ha-run' (systemd service)."));
-    }
     let bin = core_binary(&cfg);
     if !bin.is_file() {
         return Err(failure(format!("Core binary is missing: {}", bin.display())));
@@ -305,6 +300,7 @@ fn configure() -> Result<()> {
 
 fn service_install() -> Result<()> {
     root_required()?;
+    migrate_legacy_multi_route()?;
     let cfg = load_config()?;
     if !Path::new("/run/systemd/system").exists() {
         return Err(failure("systemd is not running on this host."));
@@ -335,10 +331,8 @@ SyslogIdentifier=pingtunnel
 [Install]
 WantedBy=multi-user.target
 "#;
-    let run_command = if ha::is_enabled(&cfg) { "ha-run" } else { "run" };
-    let unit = service.replace("ExecStart=/usr/local/bin/pingtunnel run",
-        &format!("ExecStart=/usr/local/bin/pingtunnel {run_command}"));
-    atomic_save(Path::new(UNIT), unit.as_bytes(), 0o644)?;
+    // One direct ICMP route only; systemd supervises the Go core.
+    atomic_save(Path::new(UNIT), service.as_bytes(), 0o644)?;
     let memory = get_number(&cfg, "memory_mb", 0)?;
     if memory > 0 {
         let contents = format!("[Service]\nMemoryMax={memory}M\n");
@@ -353,11 +347,7 @@ WantedBy=multi-user.target
         // Preserve explicit start/stop choice. Do not auto-start a disabled service.
         run_systemctl(&["disable", "pingtunnel.service"])?;
     }
-    if ha::is_enabled(&cfg) {
-        println!("HA systemd unit installed; Rust controls TCP/UDP forwarding and health checks.");
-    } else {
-        println!("Native systemd unit installed; no resident manager process.");
-    }
+    println!("Single-route Go service installed; no resident Rust manager.");
     Ok(())
 }
 
@@ -453,10 +443,7 @@ fn help() {
     println!("  pingtunnel setup             First-run automatic wizard (minimum peer details)");
     println!("  pingtunnel configure         Advanced config in menu; applies immediately");
     println!("  pingtunnel protocol          Choose TCP/UDP in menu; applies immediately");
-    println!("  pingtunnel ha-off            Disable HA and apply immediately");
     println!("  pingtunnel service-install   Write a native systemd unit");
-    println!("  pingtunnel ha-setup          Add foreign backup endpoint (TCP or UDP)");
-    println!("  pingtunnel ha-status         Show real end-to-end route health and selection");
     println!("  pingtunnel validate          Validate configuration");
     println!("  pingtunnel dry-run           Show the generated core command with key redacted");
     println!("  pingtunnel start|stop|restart|status");
@@ -566,13 +553,10 @@ fn main_inner() -> Result<()> {
     let sub = args.first().map(String::as_str).unwrap_or("menu");
     match sub {
         "menu" => menu(),
+        "migrate" => { migrate_legacy_multi_route()?; Ok(()) },
         "setup" | "quick-setup" => setup::wizard(),
         "configure" | "config" => configure(),
         "protocol" => setup::protocol_menu(),
-        "ha-off" | "ha-disable" => setup::ha_disable(),
-        "ha-setup" => ha_setup_apply(),
-        "ha-status" => ha::show_status(),
-        "ha-run" => ha::run(load_config()?),
         "service-install" => service_install(),
         "validate" => {
             load_config()?;
