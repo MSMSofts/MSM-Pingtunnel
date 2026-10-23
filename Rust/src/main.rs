@@ -143,6 +143,46 @@ fn store_config(cfg: &Value) -> Result<()> {
     atomic_save(&config_path(), &json, 0o600)
 }
 
+// Compatibility-only: convert legacy HA configurations to the sole direct route.
+// Keep the original authentication key, forwarding port, target and TCP/UDP mode.
+fn strip_legacy_multi_route(cfg: &mut Value) -> bool {
+    let previous_primary = cfg.get("ha")
+        .and_then(|v| v.get("endpoints"))
+        .and_then(Value::as_array)
+        .and_then(|v| v.first())
+        .and_then(|v| v.get("server"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let Some(obj) = cfg.as_object_mut() else { return false };
+    if obj.remove("ha").is_none() { return false; }
+    let missing_server = obj.get("server").and_then(Value::as_str)
+        .map(|v| v.trim().is_empty()).unwrap_or(true);
+    if missing_server && obj.get("type").and_then(Value::as_str) == Some("client") {
+        if let Some(server) = previous_primary {
+            obj.insert("server".into(), Value::String(server));
+        }
+    }
+    true
+}
+
+fn migrate_legacy_multi_route() -> Result<bool> {
+    root_required()?;
+    if !config_path().exists() { return Ok(false); }
+    let original = fs::read(config_path())?;
+    let mut cfg: Value = serde_json::from_slice(&original)?;
+    if !strip_legacy_multi_route(&mut cfg) { return Ok(false); }
+    validate(&cfg)?;
+    // Safe one-time snapshot with restrictive permissions.
+    let backup = PathBuf::from(format!("{CONFIG}.before-single-route.bak"));
+    if !backup.exists() {
+        atomic_save(&backup, &original, 0o600)?;
+    }
+    store_config(&cfg)?;
+    println!("Legacy multi-route settings converted to a single direct tunnel.");
+    println!("Backup: {}", backup.display());
+    Ok(true)
+}
+
 fn core_binary(cfg: &Value) -> PathBuf {
     // Legacy "binary" is respected to avoid unexpectedly changing custom installs.
     if let Some(p) = get_string(cfg, "binary") {
@@ -591,6 +631,45 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn migration_keeps_primary_endpoint_and_forwarding_protocol() {
+        let mut cfg = json!({
+            "type":"client", "server":"foreign.example", "key":"1234",
+            "l_port":4455, "target":"127.0.0.1:443", "tcp":0,
+            "ha":{"enabled":true,"endpoints":[
+                {"name":"primary","server":"foreign.example"},
+                {"name":"backup","server":"another.example"}
+            ]}
+        });
+        assert!(strip_legacy_multi_route(&mut cfg));
+        assert!(cfg.get("ha").is_none());
+        assert_eq!(cfg["server"], "foreign.example");
+        assert_eq!(cfg["tcp"], 0);
+        assert_eq!(cfg["l_port"], 4455);
+        assert_eq!(cfg["target"], "127.0.0.1:443");
+        assert!(validate(&cfg).is_ok());
+        assert!(!strip_legacy_multi_route(&mut cfg));
+    }
+
+    #[test]
+    fn migration_recovers_missing_client_address_from_old_primary() {
+        let mut cfg = json!({
+            "type":"client", "key":"1234", "l_port":4455,
+            "ha":{"enabled":true,"endpoints":[{"server":"foreign.example"}]}
+        });
+        assert!(strip_legacy_multi_route(&mut cfg));
+        assert_eq!(cfg["server"], "foreign.example");
+        assert!(validate(&cfg).is_ok());
+    }
+
+    #[test]
+    fn direct_mode_supports_tcp_and_udp() {
+        let mut cfg = json!({"type":"client","key":"1234","server":"foreign.example","l_port":4455,"tcp":1});
+        assert!(validate(&cfg).is_ok());
+        cfg["tcp"] = json!(0);
+        assert!(validate(&cfg).is_ok());
+    }
 
     #[test]
     fn legacy_server_configuration() {
