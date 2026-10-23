@@ -193,7 +193,7 @@ func main() {
 		cfg, err := pingtunnel.LoadConfig(*configFile)
 		if err != nil {
 			fmt.Printf("Failed to load config file: %v\n", err)
-			return
+			os.Exit(1)
 		}
 
 		region = cfg.Region
@@ -288,16 +288,16 @@ func main() {
 
 	if *t != "client" && *t != "server" {
 		flag.Usage()
-		return
+		os.Exit(1)
 	}
 	if *t == "client" {
 		if len(*listen) == 0 || len(*server) == 0 {
 			flag.Usage()
-			return
+			os.Exit(1)
 		}
 		if *open_sock5 == 0 && len(*target) == 0 {
 			flag.Usage()
-			return
+			os.Exit(1)
 		}
 		if *open_sock5 != 0 {
 			*tcpmode = 1
@@ -305,19 +305,19 @@ func main() {
 	}
 	if *tcpmode_maxwin*10 > pingtunnel.FRAME_MAX_ID {
 		fmt.Println("set tcp win to big, max = " + strconv.Itoa(pingtunnel.FRAME_MAX_ID/10))
-		return
+		os.Exit(1)
 	}
 
 	// Validate encryption parameters
 	encryptionMode, err := pingtunnel.ParseEncryptionMode(*encryption)
 	if err != nil {
 		fmt.Printf("Invalid encryption mode: %v\n", err)
-		return
+		os.Exit(1)
 	}
 
 	if encryptionMode != pingtunnel.NoEncryption && *encryptionKey == "" {
 		fmt.Println("Encryption key is required when encryption mode is specified")
-		return
+		os.Exit(1)
 	}
 
 	// Create crypto configuration
@@ -326,7 +326,7 @@ func main() {
 		cryptoConfig, err = pingtunnel.NewCryptoConfig(encryptionMode, *encryptionKey)
 		if err != nil {
 			fmt.Printf("Failed to create crypto config: %v\n", err)
-			return
+			os.Exit(1)
 		}
 	}
 
@@ -367,7 +367,7 @@ func main() {
 			forwardConfig, err = pingtunnel.ParseForwardURL(*forward)
 			if err != nil {
 				fmt.Printf("Invalid forward URL: %v\n", err)
-				return
+				os.Exit(1)
 			}
 			loggo.Info("Forward proxy configured: %s", *forward)
 		}
@@ -375,7 +375,8 @@ func main() {
 		s, err := pingtunnel.NewServer(*icmpListen, *key, *maxconn, *max_process_thread, *max_process_buffer, *conntt, cryptoConfig, forwardConfig, *congestion)
 		if err != nil {
 			loggo.Error("ERROR: %s", err.Error())
-			return
+            fmt.Fprintln(os.Stderr, "Pingtunnel configuration failed:", err)
+			os.Exit(1)
 		}
         if fixedTarget=="" || peerIP=="" || cryptoConfig==nil || encryptionMode!=pingtunnel.AUTO {
             fmt.Fprintln(os.Stderr,"v3 foreign server requires fixed_target, peer_ip and auto AEAD encryption")
@@ -389,7 +390,8 @@ func main() {
 		err = s.Run()
 		if err != nil {
 			loggo.Error("Run ERROR: %s", err.Error())
-			return
+            fmt.Fprintln(os.Stderr, "Pingtunnel startup failed:", err)
+			os.Exit(1)
 		}
 	} else if *t == "client" {
 
@@ -411,17 +413,17 @@ func main() {
 			*tcpmode_stat, *open_sock5, *maxconn, cryptoConfig, *sock5_user, *sock5_pass, *congestion)
 		if err != nil {
 			loggo.Error("ERROR: %s", err.Error())
-			return
+			os.Exit(1)
 		}
 		loggo.Info("Client Listen %s (%s) Server %s (%s) TargetPort %s ICMP Listen %s", c.Addr(), c.IPAddr(),
 			c.ServerAddr(), c.ServerIPAddr(), c.TargetAddr(), c.ICMPAddr())
 		err = c.Run()
 		if err != nil {
 			loggo.Error("Run ERROR: %s", err.Error())
-			return
+			os.Exit(1)
 		}
 	} else {
-		return
+		os.Exit(1)
 	}
 
 	if *profile > 0 {
