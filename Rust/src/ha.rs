@@ -14,6 +14,7 @@ use tokio::io::{copy_bidirectional, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Command;
 use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 use tokio::time::{interval, sleep, timeout, MissedTickBehavior};
 
 const RUNTIME: &str = "/run/pingtunnel-ha";
@@ -197,6 +198,8 @@ pub(crate) fn setup(cfg: &mut Value) -> Result<()> {
     println!("HA warm-standby setup: direct ICMP with two foreign server endpoints.");
     println!("Both foreign endpoints MUST be running the Go Pingtunnel server with the same numeric key.");
     println!("Original destination and config are preserved. An HA controller adds RAM overhead.");
+    println!("WARNING: the HA listener uses 0.0.0.0 (same as the previous :port binding).");
+    println!("Restrict access with the firewall or set ha.listen_host=127.0.0.1.");
     println!("Primary endpoint: {primary}");
     print!("Backup Pingtunnel server IP/domain: ");
     use std::io::Write;
@@ -208,7 +211,7 @@ pub(crate) fn setup(cfg: &mut Value) -> Result<()> {
     }
     cfg["ha"] = json!({
         "enabled": true,
-        "listen_host": "127.0.0.1",
+        "listen_host": "0.0.0.0",
         "endpoints": [
             {"name":"primary","server": primary},
             {"name":"backup","server": backup}
@@ -386,17 +389,25 @@ async fn monitor(settings: Settings, state: Arc<Mutex<RouterState>>) {
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
     loop {
         ticker.tick().await;
-        for (i, route) in settings.routes.iter().enumerate() {
-            let latency = probe_route(&settings, route).await;
-            let now = Instant::now();
-            let snapshot = {
-                let mut guard = state.lock().unwrap();
-                update_health(&mut guard, i, latency, &settings, now);
-                status_json(&settings, &guard)
-            };
-            if let Ok(data) = serde_json::to_vec_pretty(&snapshot) {
-                if let Err(error) = atomic_save(Path::new(STATUS), &data, 0o600) {
-                    eprintln!("HA: status write error: {error}");
+        // Run all independent path probes concurrently. A stalled foreign
+        // route must not block failure detection for the other routes.
+        let mut probes = JoinSet::new();
+        for (i, route) in settings.routes.iter().cloned().enumerate() {
+            let config = settings.clone();
+            probes.spawn(async move { (i, probe_route(&config, &route).await) });
+        }
+        while let Some(result) = probes.join_next().await {
+            if let Ok((i, latency)) = result {
+                let now = Instant::now();
+                let snapshot = {
+                    let mut guard = state.lock().unwrap();
+                    update_health(&mut guard, i, latency, &settings, now);
+                    status_json(&settings, &guard)
+                };
+                if let Ok(data) = serde_json::to_vec_pretty(&snapshot) {
+                    if let Err(error) = atomic_save(Path::new(STATUS), &data, 0o600) {
+                        eprintln!("HA: status write error: {error}");
+                    }
                 }
             }
         }
@@ -454,6 +465,8 @@ pub(crate) fn run(cfg: Value) -> Result<()> {
         .build()?;
     rt.block_on(async move {
         fs::create_dir_all(RUNTIME)?;
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(RUNTIME, fs::Permissions::from_mode(0o700))?;
         let mut paths = Vec::new();
         for route in &settings.routes {
             paths.push((route.name.clone(), write_core_config(&settings, route, false)?, false));
