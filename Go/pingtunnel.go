@@ -55,8 +55,8 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
 
 	// Encrypt the marshaled data if encryption is enabled
 	if cryptoConfig != nil {
-        mb, err = cryptoConfig.Encrypt(mb)
-        if errors.Is(err,ErrSecureNegotiation) {
+        ciphertext, encryptErr := cryptoConfig.Encrypt(mb)
+        if errors.Is(encryptErr,ErrSecureNegotiation) {
             if msgType==uint32(MyMsg_DATA) && cryptoConfig.sec!=nil {
                 cryptoConfig.sec.queuePacket(pendingICMP{raw:mb,peer:server,id:id,seq:sequence,proto:sproto})
             }
@@ -64,10 +64,11 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
             if e==nil&&len(control)>0{sendSecureControl(id,sequence,conn,server,sproto,control)}
             return
         }
-		if err != nil {
-			loggo.Error("sendICMP Encrypt error %s %s", server.String(), err)
+		if encryptErr != nil {
+			loggo.Error("sendICMP Encrypt error %s %s", server.String(), encryptErr)
 			return
 		}
+        mb=ciphertext
 	}
 
 	sendEncryptedICMP(id,sequence,conn,server,sproto,mb)
