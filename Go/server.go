@@ -101,10 +101,14 @@ func (p *Server) Run() error {
 
 	recv := make(chan *Packet, 10000)
 	p.recvcontrol = make(chan int, 1)
-	go recvICMP(&p.workResultLock, &p.exit, *p.conn, recv, p.cryptoConfig)
+	go func(){
+  defer failOnUnexpectedWorkerExit("ICMP receiver",&p.exit)
+  recvICMP(&p.workResultLock,&p.exit,*p.conn,recv,p.cryptoConfig)
+ }()
 
 	go func() {
-		defer common.CrashLog()
+        defer common.CrashLog()
+        defer failOnUnexpectedWorkerExit("health ticker",&p.exit)
 
 		p.workResultLock.Add(1)
 		defer p.workResultLock.Done()
@@ -119,7 +123,8 @@ func (p *Server) Run() error {
 	}()
 
 	go func() {
-		defer common.CrashLog()
+        defer common.CrashLog()
+        defer failOnUnexpectedWorkerExit("ICMP dispatcher",&p.exit)
 
 		p.workResultLock.Add(1)
 		defer p.workResultLock.Done()
