@@ -372,13 +372,14 @@ fn menu()->Result<()>{
     root_required()?;
     loop{
         let cfg=load_config().ok();
+        let service_state=current_service_state();
         let view=menu_ui::MenuView {
             version: env!("CARGO_PKG_VERSION"),
             region:cfg.as_ref().and_then(|v|get_string(v,"region")).unwrap_or("unknown"),
             peer:cfg.as_ref().and_then(|v|get_string(v,"peer_ip")).unwrap_or("-"),
             transport:cfg.as_ref().and_then(|v|get_string(v,"transport")).unwrap_or("-"),
             port:cfg.as_ref().and_then(|v|v.get("port")).and_then(Value::as_u64).and_then(|n|u16::try_from(n).ok()),
-            service:&current_service_state(),
+            service:&service_state,
             configured:cfg.is_some(),
         };
         // No terminal control codes for pipes, logs, dumb terminals, or NO_COLOR.
