@@ -88,3 +88,29 @@ func TestAdaptiveStatusIsSecretFreeAndPrivate(t *testing.T) {
  if err=json.Unmarshal(raw,&value);err!=nil{t.Fatal(err)}
  if value["rtt_samples"]!=float64(1) || value["profile"]!="stable" {t.Fatalf("unexpected status: %s",raw)}
 }
+
+func TestContinuousPingsWithoutPongsRegistersLoss(t *testing.T){
+ a:=NewAdaptivePerformance()
+ base:=time.Now()
+ for i:=0;i<20;i++ {
+  at:=base.Add(time.Duration(i)*time.Second)
+  a.OnPing(at)
+  a.OnTick(at)
+ }
+ st:=a.Status(1<<20,20000,400)
+ if st.Profile!="degraded" || st.LossEstimate<=0 {
+  t.Fatalf("continuous unanswered probes were incorrectly healthy: %+v",st)
+ }
+ if len(a.outstanding)>16{t.Fatalf("old probes still retained: %d",len(a.outstanding))}
+}
+
+func TestReorderedPongsForSeparateOutstandingPings(t *testing.T){
+ a:=NewAdaptivePerformance()
+ base:=time.Now()
+ a.OnPing(base)
+ a.OnPing(base.Add(time.Second))
+ a.OnPong(base,base.Add(120*time.Millisecond))
+ a.OnPong(base.Add(time.Second),base.Add(time.Second+80*time.Millisecond))
+ st:=a.Status(1<<20,20000,400)
+ if st.Samples!=2||st.LossEstimate!=0{t.Fatalf("valid reordered pong ignored: %+v",st)}
+}
