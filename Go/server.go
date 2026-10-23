@@ -69,7 +69,7 @@ type Server struct {
 }
 
 type ServerConn struct {
-	exit           bool
+	exit atomic.Bool
 	timeout        int
 	ipaddrTarget   *net.UDPAddr
 	conn           *net.UDPConn
@@ -79,9 +79,9 @@ type ServerConn struct {
 	tcpaddrTarget  *net.TCPAddr
 	tcpconn        net.Conn // Changed from *net.TCPConn to support proxy connections
 	id             string
-	activeRecvTime time.Time
-	activeSendTime time.Time
-	close          bool
+	activeRecvUnixNano atomic.Int64
+	activeSendUnixNano atomic.Int64
+	close atomic.Bool
 	rproto         int
 	fm             *network.FrameMgr
 	tcpmode        int
@@ -239,8 +239,7 @@ func (p *Server) processDataPacketNewConn(id string, packet *Packet) *ServerConn
 			fm.SetCongestion(&network.BBCongestion{})
 		}
 
-		localConn := &ServerConn{exit: false, timeout: (int)(packet.my.Timeout), tcpconn: c, tcpaddrTarget: ipaddrTarget, id: id, activeRecvTime: now, activeSendTime: now, close: false,
-			rproto: (int)(packet.my.Rproto), fm: fm, tcpmode: (int)(packet.my.Tcpmode), activity: make(chan struct{}, 1)}
+		localConn := &ServerConn{timeout: (int)(packet.my.Timeout), tcpconn: c, tcpaddrTarget: ipaddrTarget, id: id, rproto: (int)(packet.my.Rproto), fm: fm, tcpmode: (int)(packet.my.Tcpmode), activity: make(chan struct{}, 1)}
 
 		p.addServerConn(id, localConn)
 
@@ -265,7 +264,6 @@ func (p *Server) processDataPacketNewConn(id string, packet *Packet) *ServerConn
 			}
 
 			localConn := &ServerConn{
-				exit:           false,
 				timeout:        (int)(packet.my.Timeout),
 				conn:           association.UDPConn,
 				udpTargetAddr:  addr,
@@ -273,9 +271,6 @@ func (p *Server) processDataPacketNewConn(id string, packet *Packet) *ServerConn
 				udpViaProxy:    true,
 				tcpconn:        association.ControlConn,
 				id:             id,
-				activeRecvTime: now,
-				activeSendTime: now,
-				close:          false,
 				rproto:         (int)(packet.my.Rproto),
 				tcpmode:        (int)(packet.my.Tcpmode),
 			}
@@ -297,8 +292,7 @@ func (p *Server) processDataPacketNewConn(id string, packet *Packet) *ServerConn
 		targetConn := c.(*net.UDPConn)
 		ipaddrTarget := targetConn.RemoteAddr().(*net.UDPAddr)
 
-		localConn := &ServerConn{exit: false, timeout: (int)(packet.my.Timeout), conn: targetConn, ipaddrTarget: ipaddrTarget, id: id, activeRecvTime: now, activeSendTime: now, close: false,
-			rproto: (int)(packet.my.Rproto), tcpmode: (int)(packet.my.Tcpmode), udpTargetAddr: addr}
+		localConn := &ServerConn{timeout: (int)(packet.my.Timeout), conn: targetConn, ipaddrTarget: ipaddrTarget, id: id, rproto: (int)(packet.my.Rproto), tcpmode: (int)(packet.my.Tcpmode), udpTargetAddr: addr}
 
 		p.addServerConn(id, localConn)
 
@@ -323,7 +317,7 @@ func (p *Server) processDataPacket(packet *Packet) {
 		}
 	}
 
-	localConn.activeRecvTime = now
+	localConn.activeRecvUnixNano.Store(now.UnixNano())
 	localConn.echoId = packet.echoId
 	localConn.echoSeq = packet.echoSeq
 
@@ -353,18 +347,18 @@ func (p *Server) processDataPacket(packet *Packet) {
 				}
 				if targetAddr == "" {
 					loggo.Info("missing udp target for proxied udp conn %s", id)
-					localConn.close = true
+					localConn.close.Store(true)
 					return
 				}
 				udpPacket, packetErr := buildSocks5UDPDatagram(targetAddr, packet.my.Data)
 				if packetErr != nil {
 					loggo.Info("build socks5 udp datagram error %s", packetErr)
-					localConn.close = true
+					localConn.close.Store(true)
 					return
 				}
 				if localConn.udpRelayAddr == nil {
 					loggo.Info("missing udp relay addr for proxied udp conn %s", id)
-					localConn.close = true
+					localConn.close.Store(true)
 					return
 				}
 				_, err = localConn.conn.WriteToUDP(udpPacket, localConn.udpRelayAddr)
@@ -373,7 +367,7 @@ func (p *Server) processDataPacket(packet *Packet) {
 			}
 			if err != nil {
 				loggo.Info("WriteToUDP Error %s", err)
-				localConn.close = true
+				localConn.close.Store(true)
 				return
 			}
 		}
@@ -395,7 +389,7 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
 	loggo.Info("start wait remote connect tcp %s %s", conn.id, conn.tcpaddrTarget.String())
 	startConnectTime := common.GetNowUpdateInSecond()
 	connectWait := newAdaptiveLoopWait(2*time.Millisecond, 80*time.Millisecond)
-	for !p.exit.Load() && !conn.exit {
+	for !p.exit.Load() && !conn.exit.Load() {
 		if conn.fm.IsConnected() {
 			break
 		}
@@ -432,7 +426,7 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
 		}
 	}
 
-	if !conn.exit {
+	if !conn.exit.Load() {
 		loggo.Info("remote connected tcp %s %s", conn.id, conn.tcpaddrTarget.String())
 	}
 
@@ -448,7 +442,7 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
 		defer common.CrashLog()
 
 		readWait := newAdaptiveLoopWait(2*time.Millisecond, 80*time.Millisecond)
-		for !p.exit.Load() && !conn.exit {
+		for !p.exit.Load() && !conn.exit.Load() {
 			left := common.MinOfInt(conn.fm.GetSendBufferLeft(), len(bytes))
 			if left <= 0 {
 				wait := readWait.miss()
@@ -490,7 +484,7 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
 	loopWait := newAdaptiveLoopWait(2*time.Millisecond, 250*time.Millisecond)
 
 mainLoop:
-	for !p.exit.Load() && !conn.exit {
+	for !p.exit.Load() && !conn.exit.Load() {
 		now := common.GetNowUpdateInSecond()
 		hadWork := false
 
@@ -499,7 +493,7 @@ mainLoop:
 		sendlist := conn.fm.GetSendList()
 		if sendlist.Len() > 0 {
 			hadWork = true
-			conn.activeSendTime = now
+			conn.activeSendUnixNano.Store(now.UnixNano())
 			for e := sendlist.Front(); e != nil; e = e.Next() {
 				f := e.Value.(*network.Frame)
 				mb, err := conn.fm.MarshalFrame(f)
@@ -545,8 +539,8 @@ mainLoop:
 		default:
 		}
 
-		diffrecv := now.Sub(conn.activeRecvTime)
-		diffsend := now.Sub(conn.activeSendTime)
+		diffrecv := now.Sub(time.Unix(0,conn.activeRecvUnixNano.Load()))
+		diffsend := now.Sub(time.Unix(0,conn.activeSendUnixNano.Load()))
 		tcpdiffrecv := now.Sub(time.Unix(0, tcpActiveRecvUnix.Load()))
 		tcpdiffsend := now.Sub(tcpActiveSendTime)
 		if (diffrecv > time.Second*(time.Duration(conn.timeout)) && diffsend > time.Second*(time.Duration(conn.timeout))) ||
@@ -584,7 +578,7 @@ mainLoop:
 	conn.fm.Close()
 
 	startCloseTime := common.GetNowUpdateInSecond()
-	for !p.exit.Load() && !conn.exit {
+	for !p.exit.Load() && !conn.exit.Load() {
 		now := common.GetNowUpdateInSecond()
 
 		conn.fm.Update()
@@ -652,7 +646,7 @@ func (p *Server) Recv(conn *ServerConn, id string, src *net.IPAddr) {
 			nerr, ok := err.(net.Error)
 			if !ok || !nerr.Timeout() {
 				loggo.Info("ReadFromUDP Error read udp %s", err)
-				conn.close = true
+				conn.close.Store(true)
 				return
 			}
 		}
@@ -661,7 +655,7 @@ func (p *Server) Recv(conn *ServerConn, id string, src *net.IPAddr) {
 		}
 
 		now := common.GetNowUpdateInSecond()
-		conn.activeSendTime = now
+		conn.activeSendUnixNano.Store(now.UnixNano())
 
 		targetAddr := conn.udpTargetString()
 		payload := bytes[:n]
@@ -691,7 +685,7 @@ func (p *Server) Recv(conn *ServerConn, id string, src *net.IPAddr) {
 
 func (p *Server) close(conn *ServerConn) {
 	if p.getServerConnById(conn.id) != nil {
-		conn.exit = true
+		conn.exit.Store(true)
 		if conn.conn != nil {
 			conn.conn.Close()
 		}
@@ -717,10 +711,10 @@ func (p *Server) checkTimeoutConn() {
 		if conn.tcpmode > 0 {
 			continue
 		}
-		diffrecv := now.Sub(conn.activeRecvTime)
-		diffsend := now.Sub(conn.activeSendTime)
+		diffrecv := now.Sub(time.Unix(0,conn.activeRecvUnixNano.Load()))
+		diffsend := now.Sub(time.Unix(0,conn.activeSendUnixNano.Load()))
 		if diffrecv > time.Second*(time.Duration(conn.timeout)) && diffsend > time.Second*(time.Duration(conn.timeout)) {
-			conn.close = true
+			conn.close.Store(true)
 		}
 	}
 
@@ -728,7 +722,7 @@ func (p *Server) checkTimeoutConn() {
 		if conn.tcpmode > 0 {
 			continue
 		}
-		if conn.close {
+		if conn.close.Load() {
 			loggo.Info("close inactive conn %s %s", id, conn.udpTargetString())
 			p.close(conn)
 		}
@@ -776,6 +770,9 @@ func (p *Server) showNet() {
 }
 
 func (p *Server) addServerConn(uuid string, serverConn *ServerConn) {
+ now:=time.Now().UnixNano()
+ serverConn.activeRecvUnixNano.Store(now)
+ serverConn.activeSendUnixNano.Store(now)
 	p.localConnMap.Store(uuid, serverConn)
 }
 
