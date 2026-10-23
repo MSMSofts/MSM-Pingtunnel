@@ -100,7 +100,7 @@ func FlushPendingICMP(conn icmp.PacketConn, crypto *CryptoConfig) {
   }
   sendEncryptedICMP(p.id,p.seq,conn,p.peer,p.proto,encrypted)
  }
-
+}
 
 func recvICMP(workResultLock *sync.WaitGroup, exit *bool, conn icmp.PacketConn, recv chan<- *Packet, cryptoConfig *CryptoConfig) {
 
