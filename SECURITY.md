@@ -4,13 +4,13 @@
 
 ## سیاست امنیتی
 
-**Pingtunnel Manager 3.2.4** یک پروتکل انتقال ICMP با رمزنگاری احرازشده و توافق کلید موقت دارد. این پیاده‌سازی **ممیزی رمزنگاری مستقل عمومی نشده است** و ادعای ناشناس‌بودن ICMP، عبور قطعی از فیلترینگ یا مقاومت کامل در برابر حملات حجمی ندارد.
+**Pingtunnel Manager 3.2.5** یک پروتکل انتقال ICMP با رمزنگاری احرازشده و توافق کلید موقت دارد. این پیاده‌سازی **ممیزی رمزنگاری مستقل عمومی نشده است** و ادعای ناشناس‌بودن ICMP، عبور قطعی از فیلترینگ یا مقاومت کامل در برابر حملات حجمی ندارد.
 
 ### نسخه‌های پشتیبانی‌شده
 
 | نسخه | وضعیت |
 | --- | --- |
-| **3.2.4** | نسخه فعلی؛ اصلاح منو و CRLF ترمینال |
+| **3.2.5** | نسخه فعلی؛ گیرنده و watchdog بازیابی |\n| **3.2.4** | اصلاح منو و CRLF ترمینال |
 | **3.2.3** | پایش منابع و Restart بعد از Update |
 | **3.2.2** | بهبود نمایش منو؛ همان Wire v4 |
 | **3.2.1** | نسخه قبلی؛ اصلاح Data Race و سلامت سرویس |
@@ -49,7 +49,7 @@
 
 ### گزارش آسیب‌پذیری
 
-برای مواردی مانند دورزدن رمزنگاری، افشای کلید، دورزدن محدودیت مقصد یا اشکال Anti-Replay، **جزئیات قابل سوءاستفاده و اسرار را عمومی منتشر نکن**. اگر گزینهٔ *Private vulnerability reporting* در GitHub مخزن فعال باشد از همان استفاده کن؛ در غیر این صورت ابتدا از یک راه ارتباط خصوصی که نگهدارنده تأیید کرده هماهنگ شو. برای خطاهای غیرحساس از [Issues](https://github.com/MSMSofts/Pingtunnel_manager/issues) استفاده کن.
+برای مواردی مانند دورزدن رمزنگاری، افشای کلید، دورزدن محدودیت مقصد یا اشکال Anti-Replay، **جزئیات قابل سوءاستفاده و اسرار را عمومی منتشر نکن**. اگر گزینهٔ *Private vulnerability reporting* در GitHub مخزن فعال باشد از همان استفاده کن؛ در غیر این صورت ابتدا از یک راه ارتباط خصوصی که نگهدارنده تأیید کرده هماهنگ شو. برای خطاهای غیرحساس از [Issues](https://github.com/MSMSofts/MSM-Pingtunnel/issues) استفاده کن.
 
 در گزارش خود نسخه Manager، نسخه Go Core، نسخه Wire، نقش VPS و مراحل بازتولید را بدون IP محرمانه، کلید واقعی یا دادهٔ خصوصی وارد کن. آزمون تهاجمی روی سرور دیگران بدون مجوز انجام نده.
 
@@ -57,7 +57,7 @@
 
 ## English security notes
 
-Pingtunnel Manager uses a **custom authenticated ICMP transport**. Version **3.2.4** is the documented release. This project has **not been independently audited**, and encryption does **not** guarantee resistance to traffic analysis, ICMP blocking, denial of service, or endpoint compromise.
+Pingtunnel Manager uses a **custom authenticated ICMP transport**. Version **3.2.5** is the documented release. This project has **not been independently audited**, and encryption does **not** guarantee resistance to traffic analysis, ICMP blocking, denial of service, or endpoint compromise.
 
 **Supported security properties:** a random 256-bit pairing root, PSK-authenticated ephemeral X25519 agreement, HKDF-SHA256 directional session keys, auto-selected AES-256-GCM/XChaCha20-Poly1305, authenticated 64-bit sequence numbers, a 1,024-packet replay window, and an overseas server policy restricting ingress peer IPv4 and the forwarding target to local loopback.
 
@@ -65,6 +65,6 @@ Pingtunnel Manager uses a **custom authenticated ICMP transport**. Version **3.2
 
 **Compatibility:** config schema 3 persists across versions 3.0–3.2. Wire v4 is shared by 3.1 and 3.2, while 3.0 uses an incompatible earlier wire format; there is no silent downgrade.
 
-**Responsible reporting:** Do not disclose exploit details or keys in public issues. Use private GitHub vulnerability reporting if enabled, or coordinate privately with the maintainer before sharing details. Non-sensitive bugs can be filed in [Issues](https://github.com/MSMSofts/Pingtunnel_manager/issues).
+**Responsible reporting:** Do not disclose exploit details or keys in public issues. Use private GitHub vulnerability reporting if enabled, or coordinate privately with the maintainer before sharing details. Non-sensitive bugs can be filed in [Issues](https://github.com/MSMSofts/MSM-Pingtunnel/issues).
 
 Evaluate security and real two-VPS ICMP reliability independently before high-assurance deployment.
