@@ -64,9 +64,9 @@ func TestReverseFailedWritePreservesFIFOAndOriginalDeadline(t *testing.T) {
     if r.diagnostics(now).Pending!=0{t.Fatal("queue not drained")}
     if !r.enqueue([]byte("expiring"),now){t.Fatal("could not enqueue expiration case")}
     if !sendQueuedReverse(r,now.Add(13*time.Second),func(body []byte)bool{
-        if len(body)!=0{t.Fatal("expired frame was emitted")}
-        return true
-    }){t.Fatal("empty poll acknowledgement failed")}
+        t.Fatalf("userspace must not emit an empty poll reply: %q",body)
+        return false
+    }){t.Fatal("expired frame cleanup failed")}
     if d:=r.diagnostics(now.Add(13*time.Second));d.QueueDrops!=1{
         t.Fatalf("expired frame not counted: %+v",d)
     }
