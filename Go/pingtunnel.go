@@ -152,6 +152,7 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
             if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="iran" &&
                 int(bytes[0])==8 && stdbytes.HasPrefix(payloadData,reverseProbeMagic[:]) {
                 if cryptoConfig.reverse.authenticateProbe(payloadData,now) {
+                    if useReverse(cryptoConfig){cryptoConfig.sec.noteAuthenticatedPoll(now)}
                     startReverseHandshake(conn,peer,echoId,echoSeq,cryptoConfig,now)
                 }
                 continue
