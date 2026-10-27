@@ -135,6 +135,7 @@ type Client struct {
 
 	lastPongUnixNano     atomic.Int64
 	lastActivityUnixNano atomic.Int64
+    hasLocalDemand atomic.Bool
 	nextResolveAt        time.Time
 	resolveRetryBackoff  time.Duration
 }
@@ -213,6 +214,7 @@ func (p *Client) LocalAddrToConnMapSize() int {
 }
 
 func (p *Client) touchActivity() {
+    p.hasLocalDemand.Store(true)
 	p.lastActivityUnixNano.Store(time.Now().UnixNano())
 }
 
@@ -347,7 +349,7 @@ func (p *Client) Run() error {
             p.adaptive.OnTick(now)
             if p.cryptoConfig!=nil && p.cryptoConfig.reverse!=nil {
                 r:=p.cryptoConfig.reverse
-                r.noteDemand(now,p.activeConnCount()>0||now.Sub(p.lastActivity())<30*time.Second)
+                r.noteDemand(now,p.activeConnCount()>0||(p.hasLocalDemand.Load()&&now.Sub(p.lastActivity())<30*time.Second))
                 if r.fallbackDirect(now,p.cryptoConfig.SecureReady(),p.cryptoConfig.sec.lastPeerTraffic()) {
                     p.cryptoConfig.sec.resetForTransportChange()
                     nextPingAt=now
