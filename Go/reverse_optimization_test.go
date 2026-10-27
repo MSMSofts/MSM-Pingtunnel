@@ -18,11 +18,11 @@ func TestReverseAdaptivePollCadence(t *testing.T) {
         t.Fatalf("idle interval %s",got)
     }
     r.noteUsefulFrame(now)
-    if got:=r.pollPeriod(now.Add(50*time.Millisecond),1,true);got!=40*time.Millisecond{
-        t.Fatalf("isolated data caused too many polls: %s",got)
+    if got:=r.pollPeriod(now.Add(50*time.Millisecond),1,true);got!=16*time.Millisecond{
+        t.Fatalf("isolated inbound data interval: %s",got)
     }
     r.noteUsefulFrame(now.Add(100*time.Millisecond))
-    if got:=r.pollPeriod(now.Add(150*time.Millisecond),1,true);got!=12*time.Millisecond{
+    if got:=r.pollPeriod(now.Add(150*time.Millisecond),1,true);got!=8*time.Millisecond{
         t.Fatalf("warm reverse interval %s",got)
     }
     r.noteUsefulFrame(now.Add(160*time.Millisecond))
@@ -30,11 +30,11 @@ func TestReverseAdaptivePollCadence(t *testing.T) {
     if got:=r.pollPeriod(now.Add(250*time.Millisecond),1,true);got!=2*time.Millisecond{
         t.Fatalf("sustained reverse throughput capped at %s",got)
     }
-    if got:=r.pollPeriod(now.Add(2*time.Second),1,true);got!=80*time.Millisecond{
-        t.Fatalf("stale reverse traffic should cool: %s",got)
+    if got:=r.pollPeriod(now.Add(2*time.Second),1,true);got!=8*time.Millisecond{
+        t.Fatalf("recent reverse traffic cooled prematurely: %s",got)
     }
-    if got:=r.pollPeriod(now.Add(10*time.Second),1,true);got!=80*time.Millisecond{
-        t.Fatalf("quiet but connected reverse interval %s",got)
+    if got:=r.pollPeriod(now.Add(10*time.Second),1,true);got!=25*time.Millisecond{
+        t.Fatalf("open QUIC return path must not wait 80ms: %s",got)
     }
     if got:=r.pollPeriod(now.Add(10*time.Second),0,true);got!=250*time.Millisecond{
         t.Fatalf("idle reverse interval %s",got)
@@ -121,5 +121,74 @@ func TestAuthenticatedReverseReceiptsOnlyForRealData(t *testing.T) {
     }
     if r.shouldSendReceiveAck(now.Add(20*time.Second)){
         t.Fatal("stale traffic kept producing encrypted receipts")
+    }
+}
+
+func TestReverseVideoOutboundAcceleratesReturnACKPolling(t *testing.T) {
+    start:=time.Unix(1830000000,0)
+    r,_:=newReverseTransport(ICMPAuto,bytes.Repeat([]byte{5},32),start)
+    if got:=r.pollPeriod(start,2,true);got!=25*time.Millisecond {
+        t.Fatalf("active baseline should be 25ms, got %s",got)
+    }
+    r.noteOutboundFrame(start)
+    if got:=r.pollPeriod(start.Add(100*time.Millisecond),2,true);got!=12*time.Millisecond {
+        t.Fatalf("first video response did not accelerate ACK polling: %s",got)
+    }
+    for n:=1;n<=4;n++ {r.noteOutboundFrame(start.Add(time.Duration(n*30)*time.Millisecond))}
+    if got:=r.pollPeriod(start.Add(140*time.Millisecond),2,true);got!=4*time.Millisecond {
+        t.Fatalf("sustained video frames should keep ACK polling responsive: %s",got)
+    }
+    if got:=r.pollPeriod(start.Add(3*time.Second),2,true);got!=12*time.Millisecond {
+        t.Fatalf("short video pause must retain warm ACK cadence: %s",got)
+    }
+    if got:=r.pollPeriod(start.Add(6*time.Second),2,true);got!=25*time.Millisecond {
+        t.Fatalf("stale outbound traffic must cool: %s",got)
+    }
+    if got:=r.pollPeriod(start.Add(10*time.Second),0,true);got!=250*time.Millisecond {
+        t.Fatalf("no active application must return to idle: %s",got)
+    }
+    if got:=r.pollPeriod(start.Add(11*time.Second),0,false);got!=200*time.Millisecond {
+        t.Fatalf("handshake traffic must preserve startup pacing: %s",got)
+    }
+    d:=r.diagnostics(start.Add(10*time.Second))
+    if d.LastOutboundDataAgeMs!=9880 {
+        t.Fatalf("outbound data age inaccurate: %d",d.LastOutboundDataAgeMs)
+    }
+}
+func TestReverseQueueLatencyMeasuresSuccessfulWritesOnly(t *testing.T) {
+    start:=time.Unix(1830000000,0)
+    r,_:=newReverseTransport(ICMPAuto,bytes.Repeat([]byte{13},32),start)
+    if !r.enqueue([]byte("first"),start)||!r.enqueue([]byte("second"),start.Add(40*time.Millisecond)){
+        t.Fatal("could not queue encrypted frames")
+    }
+    d:=r.diagnostics(start.Add(200*time.Millisecond))
+    if d.OldestQueueAgeMs!=200||d.DeliveredFrames!=0 {
+        t.Fatalf("missing true head queue age: %+v",d)
+    }
+    if sendQueuedReverse(r,start.Add(250*time.Millisecond),func([]byte)bool{return false}){
+        t.Fatal("failed socket write returned success")
+    }
+    if d=r.diagnostics(start.Add(250*time.Millisecond));d.DeliveredFrames!=0||d.OldestQueueAgeMs!=250 {
+        t.Fatalf("failed write counted as successful delivery: %+v",d)
+    }
+    if !sendQueuedReverse(r,start.Add(300*time.Millisecond),func([]byte)bool{return true}){
+        t.Fatal("retry failed")
+    }
+    if !sendQueuedReverse(r,start.Add(310*time.Millisecond),func([]byte)bool{return true}){
+        t.Fatal("second delivery failed")
+    }
+    d=r.diagnostics(start.Add(310*time.Millisecond))
+    if d.DeliveredFrames!=2||d.DelayedFrames!=2||d.LastQueueDelayMs!=270||
+        d.MaxQueueDelayMs!=300||d.OldestQueueAgeMs!=0 {
+        t.Fatalf("queue residence telemetry wrong: %+v",d)
+    }
+    if !sendQueuedReverse(r,start.Add(330*time.Millisecond),func([]byte)bool{
+        t.Fatal("empty poll must not be emitted by userspace")
+        return false
+    }) {
+        t.Fatal("empty queue ack failed")
+    }
+    if d=r.diagnostics(start.Add(330*time.Millisecond));d.DeliveredFrames!=2{
+        t.Fatalf("empty poll counted as delivered DATA: %+v",d)
     }
 }
