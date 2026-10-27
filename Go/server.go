@@ -841,24 +841,31 @@ func (p *Server) updateConnError() {
 // The foreign VPS always owns Echo Requests; Iran replies to those requests.
 func (p *Server) runReversePoller() {
     defer failOnUnexpectedWorkerExit("reverse ICMP poller",&p.exit)
-    ticker:=time.NewTicker(2*time.Millisecond)
-    defer ticker.Stop()
+    // One adaptive timer instead of a permanent high-frequency ticker:
+    // a quiet VPS no longer wakes up 500 times/second to do nothing.
+    timer:=time.NewTimer(0)
+    defer timer.Stop()
     peer:=&net.IPAddr{IP:append(net.IP(nil),p.allowedPeer...)}
-    last:=time.Time{}
     for !p.exit.Load() {
-        now:=<-ticker.C
+        <-timer.C
         if p.exit.Load(){return}
+        now:=time.Now()
         recent:=false
-        if p.cryptoConfig.SecureReady(){
+        ready:=p.cryptoConfig.SecureReady()
+        if ready {
             last:=p.cryptoConfig.sec.lastPeerTraffic()
             recent=!last.IsZero() && now.Sub(last)<90*time.Second
         }
-        if !p.cryptoConfig.reverse.needsProbe(now,recent){continue}
-        period:=p.cryptoConfig.reverse.pollPeriod(now,int(p.localConnMapSize.Load()),p.cryptoConfig.SecureReady())
-        if !useReverse(p.cryptoConfig){period=10*time.Second}
-        if !last.IsZero() && now.Sub(last)<period{continue}
+        period:=p.cryptoConfig.reverse.pollPeriod(now,int(p.localConnMapSize.Load()),ready)
+        if !useReverse(p.cryptoConfig) {period=10*time.Second}
+        if !p.cryptoConfig.reverse.needsProbe(now,recent) {
+            // Recheck liveness periodically but avoid unnecessary probes on
+            // a healthy Direct connection.
+            timer.Reset(time.Second)
+            continue
+        }
         sequence:=int(p.reverseSequence.Add(1)&0xffff)
         sendForeignPoll(*p.conn,peer,0x42A5,sequence,p.cryptoConfig,now,recent)
-        last=now
+        timer.Reset(period)
     }
 }
