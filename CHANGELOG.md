@@ -1,5 +1,18 @@
 # Changelog / تاریخچه تغییرات
 
+## [3.3.4](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.4) — Reduce Hysteria/QUIC reverse-path ACK latency
+
+**Config schema: 3 · Secure wire: 4 · No packet-format or encryption change**
+
+- Addressed a bidirectional scheduling mismatch: high-volume **Foreign→Iran** video DATA did not previously accelerate the foreign-origin polling needed to return **Iran→Foreign** QUIC ACKs. The scheduler now reacts to both successfully written Foreign→Iran DATA and authenticated Iran→Foreign DATA.
+- Responsive but bounded target poll intervals: 25 ms for an open quiet session, 12 ms after video activity begins and during short breaks, 4 ms during sustained Foreign→Iran video streaming, 2 ms for sustained authenticated incoming return traffic, 250 ms idle, and 200 ms while negotiating. Polling cools gradually after bursts instead of immediately falling back to the previous 80 ms active-session cadence.
+- Iran's bounded outgoing queue now reports the *oldest waiting frame age*, last and maximum successful queue delivery delay, the number of successfully sent frames, and successful frames that waited >=250 ms. A failed raw socket write or empty poll never counts as a successful delivery.
+- The overseas status reports how long ago it successfully sent video/application DATA to Iran. These new metrics make it possible to distinguish buffering due to return ACK starvation from ICMP packet loss, MTU fragmentation or Hysteria's own congestion control.
+- Existing Reverse-first priority, emergency Direct fallback thresholds, authenticated PTR4 reflection filtering, queue limits, X25519/AEAD and wire v4 remain unchanged.
+- Go tests cover video-driven poll acceleration/cooling and precise delay accounting, including failure and empty-queue cases. Go race tests and Rust builds run on both amd64/arm64.
+- **No throughput claim:** The reported 1–3 second recurring playback stalls are the motivation, not a measured result of this release. Confirm on real VPSs by comparing playback and queue age/delay before and after installation.
+
+
 ## [3.3.3](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.3) — Separate kernel Echo reflections from authenticated DATA
 
 **Config schema: 3 · Wire version: 4 · No packet-layout, crypto or direction changes**
