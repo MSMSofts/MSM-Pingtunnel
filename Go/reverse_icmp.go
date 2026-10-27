@@ -63,6 +63,7 @@ type reverseTransport struct {
     lastPrune time.Time
     lastValidProbe time.Time
     lastUsefulFrame time.Time
+    usefulBurst int
     failedReplies uint64
     pollPeriodMillis int
     queuePeak int
@@ -260,24 +261,32 @@ func (r *reverseTransport) recordPollInterval(period time.Duration) {
 }
 func (r *reverseTransport) noteUsefulFrame(now time.Time) {
     r.mu.Lock();defer r.mu.Unlock()
+    if !r.lastUsefulFrame.IsZero() && now.Sub(r.lastUsefulFrame)>=0 &&
+        now.Sub(r.lastUsefulFrame)<350*time.Millisecond {
+        if r.usefulBurst<1024{r.usefulBurst++}
+    }else{
+        r.usefulBurst=1
+    }
     r.lastUsefulFrame=now
 }
 func (r *reverseTransport) pollPeriod(now time.Time,activeConns int,ready bool) time.Duration {
     r.mu.Lock();defer r.mu.Unlock()
-    // 200ms during negotiation, minimizing expensive speculative packets.
-    // When encrypted data is flowing, accelerate to 500 polls/s; during
-    // active but quiet sessions retain a low-rate 80ms keep-alive.
+    // Fast polling requires a sustained burst of useful authenticated
+    // payloads. One isolated datagram must never trigger 500 empty polls/s.
     period:=250*time.Millisecond
+    age:=now.Sub(r.lastUsefulFrame)
     if !ready {
         period=200*time.Millisecond
-    } else if !r.lastUsefulFrame.IsZero() && now.Sub(r.lastUsefulFrame)<1500*time.Millisecond {
-        period=2*time.Millisecond
-    } else if activeConns>0 {
-        if !r.lastUsefulFrame.IsZero() && now.Sub(r.lastUsefulFrame)<5*time.Second {
+    } else if !r.lastUsefulFrame.IsZero() && age>=0 && age<1500*time.Millisecond {
+        if r.usefulBurst>=4 && age<350*time.Millisecond {
+            period=2*time.Millisecond
+        }else if r.usefulBurst>=2{
             period=12*time.Millisecond
         }else{
-            period=80*time.Millisecond
+            period=40*time.Millisecond
         }
+    } else if activeConns>0 {
+        period=80*time.Millisecond
     }
     r.pollPeriodMillis=int(period/time.Millisecond)
     return period
