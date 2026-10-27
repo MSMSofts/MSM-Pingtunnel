@@ -64,8 +64,12 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
             if msgType==uint32(MyMsg_DATA) && cryptoConfig.sec!=nil {
                 cryptoConfig.sec.queuePacket(pendingICMP{raw:mb,peer:server,id:id,seq:sequence,proto:sproto})
             }
+            // The reverse leg has to respond to a real peer Echo Request.
+            // Do NOT consume retransmission state on a local ticker and drop
+            // the resulting Hello; that can starve the entire handshake.
+            if useReverse(cryptoConfig)&&cryptoConfig.sec.region=="iran"{return}
             control,e:=cryptoConfig.SecureControl(time.Now())
-            if e==nil&&len(control)>0 && !(useReverse(cryptoConfig)&&cryptoConfig.sec.region=="iran") {
+            if e==nil&&len(control)>0 {
                  sendSecureControl(id,sequence,conn,server,sproto,control,cryptoConfig)
              }
             return
