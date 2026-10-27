@@ -506,10 +506,16 @@ fn show_security_status() -> Result<()> {
     if report["icmp_direction"].as_str()==Some("reverse") {
         println!("  Reverse queued frames / bytes: {} / {}",report["reverse_queue_packets"],report["reverse_queue_bytes"]);
         println!("  Reverse queue peak / drops: {} / {}",report["reverse_queue_peak"],report["reverse_queue_drops"]);
+        println!("  Reverse oldest waiting frame: {} ms",report["reverse_oldest_queue_age_ms"]);
+        println!("  Reverse last/max send queue delay: {} / {} ms",report["reverse_last_delivery_delay_ms"],report["reverse_max_delivery_delay_ms"]);
+        println!("  Reverse delivered/slow (>250ms) frames: {} / {}",report["reverse_delivered_frames"],report["reverse_delayed_frames"]);
         println!("  Reverse ICMP reply write failures: {}",report["reverse_write_failures"]);
         println!("  Filtered kernel PTR4 Echo reflections: {}",report["reverse_poll_echo_reflections"]);
         if let Some(ms)=report["reverse_poll_interval_ms"].as_u64().filter(|v|*v>0) {
             println!("  Adaptive reverse polling interval: {ms} ms");
+        }
+        if let Some(ms)=report["reverse_last_outbound_data_age_ms"].as_i64().filter(|v|*v>=0) {
+            println!("  Last successful Foreign->Iran DATA send: {ms} ms ago");
         }
         if let Some(age)=report["reverse_last_data_age_seconds"].as_i64().filter(|v|*v>=0) {
             println!("  Last authenticated reverse data frame: {age}s ago");
