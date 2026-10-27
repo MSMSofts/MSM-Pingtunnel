@@ -32,6 +32,7 @@ type CryptoConfig struct {
 	Cipher cipher.AEAD
 	auto *autoCrypto
 	sec *secureSession
+	reverse *reverseTransport
 }
 
 // NewCryptoConfig creates a new crypto configuration
@@ -100,6 +101,15 @@ func (c *CryptoConfig) BindSecurePeer(address string) error {
 }
 func (c *CryptoConfig) SecurePeerAllowed(address net.IP) bool {
  return c.sec!=nil && c.sec.acceptsPeer(address)
+}
+func (c *CryptoConfig) BindICMPDirection(direction string) error {
+ if c.sec==nil{return errors.New("authenticated session required for reverse ICMP")}
+ mode,err:=ParseICMPDirection(direction)
+ if err!=nil{return err}
+ r,err:=newReverseTransport(mode,c.Key,time.Now())
+ if err!=nil{return err}
+ c.reverse=r
+ return nil
 }
 func (c *CryptoConfig) SecureReady() bool {
  return c.sec!=nil && c.sec.ready()
