@@ -83,7 +83,7 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
         mb=ciphertext
 	}
 
-	sendEncryptedICMP(id,sequence,conn,server,sproto,mb,cryptoConfig)
+	sendEncryptedICMP(id,sequence,conn,server,sproto,mb,cryptoConfig,msgType==uint32(MyMsg_DATA))
 }
 
 // isReflectedReversePoll detects a Linux Echo Reply that copies the 36-byte
@@ -98,7 +98,7 @@ func isReflectedReversePoll(crypto *CryptoConfig, icmpType byte, data []byte) bo
 
 // Send an already-encrypted payload without re-wrapping MyMsg or allocating
 // a second session sequence. Used for draining authenticated pending packets.
-func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr, proto int, encrypted []byte, crypto *CryptoConfig) {
+func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr, proto int, encrypted []byte, crypto *CryptoConfig, isData bool) {
  if peer==nil||len(encrypted)==0{return}
  if useReverse(crypto) {
   if crypto.sec.region=="iran" {
@@ -107,7 +107,12 @@ func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr,
   }
   proto=8
  }
- _=emitEcho(conn,peer,proto,id,sequence,encrypted)
+ if emitEcho(conn,peer,proto,id,sequence,encrypted) && isData &&
+    useReverse(crypto) && crypto.sec.region=="foreign" {
+    // Foreign->Iran video DATA must accelerate Iran->Foreign polls carrying
+    // QUIC acknowledgements; inbound-only activity detection causes stalls.
+    crypto.reverse.noteOutboundFrame(time.Now())
+ }
 }
 
 // Flush only when both peers finished their authenticated ephemeral exchange.
@@ -123,7 +128,7 @@ func FlushPendingICMP(conn icmp.PacketConn, crypto *CryptoConfig) {
    for _,unsent:=range packets[i:] {crypto.sec.pushBack(unsent)}
    return
   }
-  sendEncryptedICMP(p.id,p.seq,conn,p.peer,p.proto,encrypted,crypto)
+  sendEncryptedICMP(p.id,p.seq,conn,p.peer,p.proto,encrypted,crypto,true)
  }
 }
 
