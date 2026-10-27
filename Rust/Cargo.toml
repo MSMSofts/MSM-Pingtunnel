@@ -1,6 +1,6 @@
 [package]
 name = "pingtunnel-manager"
-version = "3.2.6"
+version = "3.3.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "Lightweight Rust control CLI for the Go Pingtunnel core"
