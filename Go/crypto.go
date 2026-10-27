@@ -129,11 +129,14 @@ func (c *CryptoConfig) WriteSecureStatus(path string){
  if c.sec==nil{return}
  direction:="direct"
  reverseProbeAge:=int64(-1)
+ diag:=reverseDiagnostics{LastUsefulFrameAgeSeconds:-1}
  if c.reverse!=nil{
+  now:=time.Now()
   direction=string(c.reverse.direction())
-  reverseProbeAge=c.reverse.probeAge(time.Now())
+  reverseProbeAge=c.reverse.probeAge(now)
+  diag=c.reverse.diagnostics(now)
  }
- c.sec.writeStatusWithDirection(path,direction,reverseProbeAge)
+ c.sec.writeStatusWithDirection(path,direction,reverseProbeAge,diag)
 }
 func (c *CryptoConfig) SecureStats()sessionStats{
  if c.sec==nil{return sessionStats{}}
