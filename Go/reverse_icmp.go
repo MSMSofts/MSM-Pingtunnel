@@ -127,6 +127,9 @@ func (r *reverseTransport) choose(direction ICMPDirection, now time.Time) bool {
     if !r.lastSwitch.IsZero() && now.Sub(r.lastSwitch)<reverseMinDwell{return false}
     r.selected=direction
     r.lastSwitch=now
+    // Queued ciphertext cannot survive a transport/session change. Account
+    // for discarded frames explicitly instead of silently losing them.
+    r.drops+=uint64(len(r.pending))
     r.pending=nil
     r.pendingBytes=0
     return true
