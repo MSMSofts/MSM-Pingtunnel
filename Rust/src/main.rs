@@ -25,7 +25,7 @@ const SECURITY_STATUS: &str = "/run/pingtunnel-security.json";
 const UNIT: &str = "/etc/systemd/system/pingtunnel.service";
 const DROPIN: &str = "/etc/systemd/system/pingtunnel.service.d/memory.conf";
 const UPDATE_URL: &str =
-    "https://raw.githubusercontent.com/MSMSofts/Pingtunnel_manager/main/Source/install.sh";
+    "https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/main/Source/install.sh";
 
 fn failure(message: impl Into<String>) -> Box<dyn Error> {
     io::Error::new(io::ErrorKind::Other, message.into()).into()
@@ -153,7 +153,7 @@ fn go_core_config(cfg:&Value)->Result<Value>{
         "type":if region=="iran"{"client"}else{"server"},
         "key":numeric_auth_code(key)?,
         "encrypt":"auto", "encrypt_key":key, "region":region,
-        "tcp":protocol,"noprint":1,"nolog":1
+        "tcp":protocol,"noprint":0,"nolog":1,"loglevel":"error"
     });
     if region=="iran"{
         config["listen"]=json!(format!(":{port}"));
@@ -223,15 +223,14 @@ fn service_install() -> Result<()> {
 Description=Pingtunnel ICMP tunnel (Rust-managed, Go core)
 Wants=network-online.target
 After=network-online.target
-StartLimitIntervalSec=60
-StartLimitBurst=6
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/pingtunnel run
 WorkingDirectory=/opt/pingtunnel
-Restart=on-failure
-RestartSec=3
+Restart=always
+RestartSec=5
 UMask=0077
 LimitNOFILE=65535
 NoNewPrivileges=true
@@ -417,6 +416,14 @@ fn menu()->Result<()>{
             _=>{println!("Invalid choice: use 1..14.");continue}
         };
         if let Err(e)=action{eprintln!("Operation failed: {e}");}
+        // Hold command output until confirmed; otherwise the alternate-screen
+        // menu instantly erases status, logs and diagnostics.
+        if menu_ui::interactive_available() {
+            println!("\nPress Enter to return to the menu...");
+            io::stdout().flush()?;
+            let mut ignored = String::new();
+            if io::stdin().read_line(&mut ignored)? == 0 {return Ok(());}
+        }
         monitor.refresh();
     }
 }
@@ -439,7 +446,15 @@ fn show_health() -> Result<()> {
     }
     println!("Service active and Go workers reporting (heartbeat {}s ago).",age);
     println!("Security session state: {}",status["state"].as_str().unwrap_or("unknown"));
-    println!("Last authenticated peer traffic: {} seconds ago (may be idle).",status["last_valid_age_seconds"]);
+    println!("Last authenticated peer traffic: {} seconds ago.",status["last_valid_age_seconds"]);
+    if status["region"].as_str()==Some("iran") {
+        let age=status["last_valid_age_seconds"].as_i64().unwrap_or(-1);
+        if status["state"].as_str()!=Some("authenticated") {
+            println!("WARNING: opposite VPS has not completed the authenticated ICMP handshake.");
+        } else if age<0 || age>35 {
+            println!("WARNING: no recent authenticated ICMP response; service active does NOT mean tunnel online.");
+        }
+    }
     Ok(())
 }
 
