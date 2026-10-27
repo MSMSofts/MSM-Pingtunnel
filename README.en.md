@@ -12,6 +12,15 @@ Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** betwe
 
 **Current release: 3.3.0** · Rust manager and modified Go core · Config schema **3** · Secure wire **4** · **Reverse-first Auto:** Foreign-initiated ICMP Echo Requests, with Direct fallback after reverse negotiation fails. Live VPS validation is still required.
 
+
+## ICMP direction in v3.3.0
+
+- **Auto (default):** start with **Reverse** foreign-origin ICMP Echo Requests. If initial authentication has not completed within 25 seconds, attempt **Direct** initiation from Iran. Selection has a 60-second minimum dwell to reduce flapping.
+- **Reverse:** foreign-origin Echo Requests only.
+- **Direct:** Iran-origin Echo Requests only.
+
+The physical roles are fixed regardless of direction: users connect to Iran, and the overseas endpoint forwards to its pinned local loopback service. `icmp_direction` is optional in persistent config; omitting it selects Auto. Real VPS field testing is required before relying on automatic recovery in production.
+
 ## Highlights
 
 | Feature | How it works |
@@ -308,7 +317,7 @@ Upgrading both VPSs is recommended during a maintenance window. The manager pres
 
 ## Scope & limitations
 
-**Not provided in v3.3.0:** high availability, multiple VPSs, simultaneous TCP+UDP forwarding through one tunnel, guaranteed filtering resistance, or independent security audit. Reverse/Auto passed CI tests but requires a real two-VPS integration test. Previously, v3.2.4 did not support reverse forwarding; see the changelog. ouflage.
+**Not provided in v3.3.0:** high availability, multiple VPSs, simultaneous TCP+UDP forwarding through one tunnel, guaranteed filtering resistance, or independent security audit. Reverse/Auto passed CI tests but requires a real two-VPS integration test. Previously, v3.2.4 did not support reverse forwarding; see the changelog.
 
 **Still required before high-assurance deployment:** testing two real VPSs with ICMP packet loss/jitter, Hysteria 2 end-to-end testing, restart/upgrade interruption testing, and independent cryptographic review.
 
