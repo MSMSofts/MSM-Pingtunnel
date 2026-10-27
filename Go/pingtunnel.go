@@ -116,12 +116,12 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
 		n, srcaddr, err := conn.ReadFrom(bytes)
 
 		if err != nil {
-			nerr, ok := err.(net.Error)
-			if !ok || !nerr.Timeout() {
-				loggo.Info("Error read icmp message %s", err)
-				continue
-			}
-		}
+            if exit.Load() { return }
+            if nerr, ok := err.(net.Error); ok && nerr.Timeout() { continue }
+            // A permanently broken socket must not silently spin forever.
+            loggo.Error("fatal ICMP receive error: %v", err)
+            return
+        }
 
 		if n < 8 { continue }
 
@@ -168,9 +168,22 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
 			continue
 		}
 
-		recv <- &Packet{my: my,
-			src:    icmpSrcToIPAddr(srcaddr),
-			echoId: echoId, echoSeq: echoSeq}
+        packet := &Packet{my: my,
+            src: icmpSrcToIPAddr(srcaddr),
+            echoId: echoId, echoSeq: echoSeq}
+        // A blocked dispatcher must not trap the sole ICMP receiver.
+        select {
+        case recv <- packet:
+        default:
+            stalled := time.NewTimer(3 * time.Second)
+            select {
+            case recv <- packet:
+                stalled.Stop()
+            case <-stalled.C:
+                loggo.Error("ICMP dispatcher blocked for 3s; restarting receiver")
+                return
+            }
+        }
 	}
 }
 
