@@ -44,6 +44,9 @@ const (
     reverseFrameTTL = 12 * time.Second
     reverseQueueMaxFrames = 256
     reverseQueueMaxBytes = 2 * 1024 * 1024
+    // 500 polls/s * 20s replay window = 10,000 signed nonces.
+    // Allow scheduler jitter/bursts while keeping an explicit memory cap.
+    reverseReplayLimit = 16384
 )
 
 var reverseProbeMagic = [4]byte{'P','T','R','4'}
@@ -70,6 +73,7 @@ type reverseTransport struct {
     recent map[[8]byte]time.Time
     lastPrune time.Time
     lastValidProbe time.Time
+    probeCacheOverflows uint64
     lastUsefulFrame time.Time
     usefulBurst int
     lastDownstreamFrame time.Time
@@ -257,8 +261,12 @@ func (r *reverseTransport) authenticateProbe(frame []byte,now time.Time) bool {
         }
         r.lastPrune=now
     }
-    // 100 polls/second over 20 seconds plus generous network bursts.
-    if len(r.recent)>=4096{return false}
+    // 500 polls/second over 20 seconds is 10,000 valid requests. An
+    // undersized cache must not reject healthy polls during video streams.
+    if len(r.recent)>=reverseReplayLimit{
+        r.probeCacheOverflows++
+        return false
+    }
     r.recent[nonce]=now
     r.lastValidProbe=now
     return true
@@ -444,6 +452,8 @@ type reverseDiagnostics struct {
     QueueWaitMaxMs int64
     QueueOldestAgeMs int64
     QueueWaitSamples uint64
+    ProbeReplayEntries int
+    ProbeCacheOverflows uint64
 }
 func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
     r.mu.Lock();defer r.mu.Unlock()
@@ -461,7 +471,8 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         FallbackCount:r.fallbackCount,FallbackReason:r.lastFallbackReason,
         DownstreamFrames:r.downstreamFrames,
         QueueWaitEWMAms:int64(r.queueWaitAvgMs+0.5),QueueWaitMaxMs:r.queueWaitMaxMs,
-        QueueOldestAgeMs:oldest,QueueWaitSamples:r.queueWaitSamples}
+        QueueOldestAgeMs:oldest,QueueWaitSamples:r.queueWaitSamples,
+        ProbeReplayEntries:len(r.recent),ProbeCacheOverflows:r.probeCacheOverflows}
 }
 
 // Observed inbound authenticated reverse probes are separately reported.
