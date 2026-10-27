@@ -18,11 +18,20 @@ func TestReverseAdaptivePollCadence(t *testing.T) {
         t.Fatalf("idle interval %s",got)
     }
     r.noteUsefulFrame(now)
-    if got:=r.pollPeriod(now.Add(50*time.Millisecond),1,true);got!=2*time.Millisecond{
-        t.Fatalf("active reverse throughput capped at %s",got)
+    if got:=r.pollPeriod(now.Add(50*time.Millisecond),1,true);got!=40*time.Millisecond{
+        t.Fatalf("isolated data caused too many polls: %s",got)
     }
-    if got:=r.pollPeriod(now.Add(2*time.Second),1,true);got!=12*time.Millisecond{
+    r.noteUsefulFrame(now.Add(100*time.Millisecond))
+    if got:=r.pollPeriod(now.Add(150*time.Millisecond),1,true);got!=12*time.Millisecond{
         t.Fatalf("warm reverse interval %s",got)
+    }
+    r.noteUsefulFrame(now.Add(160*time.Millisecond))
+    r.noteUsefulFrame(now.Add(200*time.Millisecond))
+    if got:=r.pollPeriod(now.Add(250*time.Millisecond),1,true);got!=2*time.Millisecond{
+        t.Fatalf("sustained reverse throughput capped at %s",got)
+    }
+    if got:=r.pollPeriod(now.Add(2*time.Second),1,true);got!=80*time.Millisecond{
+        t.Fatalf("stale reverse traffic should cool: %s",got)
     }
     if got:=r.pollPeriod(now.Add(10*time.Second),1,true);got!=80*time.Millisecond{
         t.Fatalf("quiet but connected reverse interval %s",got)
