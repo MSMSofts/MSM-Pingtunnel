@@ -105,3 +105,21 @@ func TestReverseTransportQueueConcurrentLoadBounded(t *testing.T) {
     }
     if d.QueueDrops==0 {t.Fatal("overloaded bounded queue did not account for dropped frames")}
 }
+
+
+func TestAuthenticatedReverseReceiptsOnlyForRealData(t *testing.T) {
+    now:=time.Unix(1810000000,0)
+    r,_:=newReverseTransport(ICMPReverse,bytes.Repeat([]byte{9},32),now)
+    if r.shouldSendReceiveAck(now){t.Fatal("idle reverse tunnel sent synthetic receipt")}
+    r.noteUsefulFrame(now)
+    if !r.shouldSendReceiveAck(now){t.Fatal("valid remote data did not schedule receipt")}
+    if r.shouldSendReceiveAck(now.Add(100*time.Millisecond)){
+        t.Fatal("receipt loop emitted excessive acknowledgements")
+    }
+    if !r.shouldSendReceiveAck(now.Add(8*time.Second)){
+        t.Fatal("bounded receipt rate was too slow")
+    }
+    if r.shouldSendReceiveAck(now.Add(20*time.Second)){
+        t.Fatal("stale traffic kept producing encrypted receipts")
+    }
+}
