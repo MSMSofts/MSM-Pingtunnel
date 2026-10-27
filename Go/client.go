@@ -345,6 +345,14 @@ func (p *Client) Run() error {
 
 			now := time.Now()
             p.adaptive.OnTick(now)
+            if p.cryptoConfig!=nil && p.cryptoConfig.reverse!=nil {
+                r:=p.cryptoConfig.reverse
+                r.noteDemand(now,p.activeConnCount()>0||now.Sub(p.lastActivity())<30*time.Second)
+                if r.fallbackDirect(now,p.cryptoConfig.sec.lastPeerTraffic()) {
+                    p.cryptoConfig.sec.resetForTransportChange()
+                    nextPingAt=now
+                }
+            }
             if p.cryptoConfig!=nil {p.cryptoConfig.WriteSecureStatus("/run/pingtunnel-security.json")}
             if p.cryptoConfig!=nil {FlushPendingICMP(*p.conn,p.cryptoConfig)}
             if p.cryptoConfig != nil && p.cryptoConfig.RecoverSecureSession(now, p.activeConnCount()>0 || now.Sub(p.lastActivity())<30*time.Second) {
