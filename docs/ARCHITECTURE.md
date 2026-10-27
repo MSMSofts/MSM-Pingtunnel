@@ -2,10 +2,18 @@
 
 [README فارسی](../README.md) · [English README](../README.en.md) · [Security policy](../SECURITY.md)
 
-**Version:** Manager 3.3.3 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
+**Version:** Manager 3.3.4 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
 
 **خلاصه:** Pingtunnel Manager فقط دو VPS دارد. کاربر به پورت TCP/UDP سرور ایران وصل می‌شود؛ هسته Go ترافیک را در ICMP رمزنگاری‌شده به VPS خارج می‌رساند و سرور خارج آن را به پورت سرویس محلی خودش تحویل می‌دهد. Rust تنها کارهای راه‌اندازی، ذخیره تنظیمات و کنترل systemd را انجام می‌دهد.
 
+
+## Video/QUIC return-path scheduling and delay telemetry (v3.3.4)
+
+Hysteria/QUIC video traffic is often asymmetric: the overseas endpoint streams application DATA to Iran, then expects acknowledgements carried in the Iran→Foreign reverse reply queue. The previous poll scheduler accelerated only on inbound authenticated Iran→Foreign DATA, creating a feedback loop when delayed ACKs caused an outbound-video stall.
+
+The overseas sending path now records *successfully written* encrypted application DATA separately from inbound DATA. Its reverse poller uses both traffic directions, a decaying warm window, and active connection count. Target intervals: handshake 200 ms, no application 250 ms, active but quiet 25 ms, initial/warm outbound video 12 ms, sustained outbound video 4 ms, sustained authenticated inbound DATA 2 ms. A single idle Ping, reflected PTR4 Echo or HMAC poll does not count as video DATA.
+
+On Iran, the bounded FIFO measures actual age of its oldest waiting ciphertext and the delay on each **successful userspace Echo Reply write**; failed socket writes and expired entries are excluded from successful-delivery counters. Exported JSON: `reverse_oldest_queue_age_ms`, `reverse_last_delivery_delay_ms`, `reverse_max_delivery_delay_ms`, `reverse_delivered_frames`, `reverse_delayed_frames` (>=250 ms), and `reverse_last_outbound_data_age_ms`. These metrics are independent of retransmission, path loss and external Hysteria congestion. Do not claim bandwidth gains until on-host playback and loss are measured.
 
 ## Overseas PTR4 Echo reflection filtering (v3.3.3)
 
@@ -139,7 +147,7 @@ Rust CLI presents these through `pingtunnel security` and `pingtunnel performanc
 
 ~~~text
 Rust/
-  Cargo.toml             Rust manager package (3.3.3)
+  Cargo.toml             Rust manager package (3.3.4)
   src/main.rs            CLI, systemd and config generation
   src/setup.rs           Unified pairing wizard
 
@@ -182,7 +190,7 @@ cargo test --manifest-path Rust/Cargo.toml
 cargo build --release --manifest-path Rust/Cargo.toml
 ~~~
 
-Release builds are verified with SHA256 and a release manifest specifying **manager 3.3.3 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.3.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2); rolling assets may also exist for compatibility.
+Release builds are verified with SHA256 and a release manifest specifying **manager 3.3.4 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.3.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2); rolling assets may also exist for compatibility.
 
 ## 8. Compatibility contract and limitations
 
