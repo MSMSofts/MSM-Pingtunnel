@@ -2,15 +2,15 @@
 
 **یک تونل ICMP رمزنگاری‌شده، دو سرور، راه‌اندازی ساده و مدیریت سبک.**
 
-[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.2.6](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.2.6)
+[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.3.0](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.0)
 
-![Version](https://img.shields.io/badge/version-3.2.6-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.3.0-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
 
 **Pingtunnel Manager** ابزاری برای نصب، جفت‌سازی، مدیریت و پایش یک تونل مبتنی بر **ICMP** میان **یک VPS ایران و یک VPS خارج** است. ترافیک برنامه‌های TCP یا UDP ابتدا وارد سرور ایران می‌شود، از طریق ICMP رمزنگاری‌شده به سرور خارج می‌رسد و در نهایت به سرویس محلی موردنظر تحویل داده می‌شود.
 
 این پروژه **به‌تنهایی سرویس VPN یا جایگزین Hysteria 2، Xray و s-ui نیست**؛ بلکه لایهٔ انتقال میان دو سرور را فراهم می‌کند.
 
-> **نسخه فعلی: 3.2.6** — مدیریت با Rust، هستهٔ انتقال با Go، تنظیمات نسخه 3 و پروتکل رمزنگاری Wire v4. قابلیت تونل معکوس و تغییر خودکار جهت هنوز پیاده‌سازی نشده است.
+> **نسخه فعلی: 3.3.0** — مدیریت Rust و هسته Go، Config Schema 3 و Wire v4. جهت ICMP پیش‌فرض **Auto: ابتدا Reverse (خارج→ایران)، سپس Direct پس از عدم موفقیت مذاکره** است. تست دو VPS واقعی هنوز لازم است.
 
 ## چرا Pingtunnel Manager؟
 
@@ -19,7 +19,7 @@
 | **فقط دو سرور** | یک ایران و یک خارج؛ بدون HA، سرور واسط یا سرویس مدیریتی دائمی اضافه |
 | **راه‌اندازی پنج‌مرحله‌ای** | موقعیت VPS، IP مقابل، کلید جفت‌سازی، TCP/UDP و پورت همان سرور |
 | **پورت‌های مستقل** | مثلاً ورود UDP روی ایران: `444` و تحویل به سرویس خارج: `8443` |
-| **حامل ICMP** | انتقال داده بین VPSها با ICMP؛ بدون نیاز به پورت TCP/UDP برای *خود تونل* |
+| **حامل ICMP** | Reverse-first با درخواست Echo از خارج و پاسخ داده از ایران؛ بازگشت کنترل‌شده به Direct در صورت شکست؛ بدون پورت TCP/UDP برای خود تونل |
 | **رمزنگاری تطبیقی** | انتخاب خودکار AES-256-GCM یا XChaCha20-Poly1305 بر اساس سنجش عملکرد پردازنده |
 | **Forward Secrecy** | توافق کلید موقت X25519 و مشتق‌سازی کلیدهای مستقل هر نشست و هر جهت |
 | **Anti-Replay** | شماره توالی احرازشده و پنجرهٔ ۱۰۲۴ بسته‌ای؛ حفاظت اضافه برای مذاکره مجدد |
@@ -284,7 +284,7 @@ SECURITY & HEALTH
 
 > **نکته پس از انتقال مخزن:** برای به‌روزرسانی، فعلاً از دستور نصب با نشانی جدید `MSMSofts/MSM-Pingtunnel` در بخش «نصب سریع» استفاده کن. برخی باینری‌های منتشرشده پیش از انتقال، ممکن است در فرمان داخلی `pingtunnel update` هنوز به نشانی قدیمی مراجعه کنند.
 
-[جزئیات تغییرات](CHANGELOG.md) · [نسخه ثابت 3.2.6](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.2.6) · [نسخه rolling](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
+[جزئیات تغییرات](CHANGELOG.md) · [نسخه ثابت 3.3.0](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.0) · [نسخه rolling](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
 
 ## مسیر فایل‌ها
 
@@ -307,7 +307,7 @@ SECURITY & HEALTH
 
 ## محدودیت‌های فعلی و برنامه توسعه
 
-**در نسخه 3.2.4 وجود ندارند:** تونل معکوس واقعی (Reverse Forwarding)، انتخاب خودکار Direct/Reverse، HA، چند VPS، انتقال هم‌زمان TCP و UDP در یک نمونه تونل، تضمین مقابله با DoS حجمی، و Forward Secrecy فراتر از فرضیات امنیتی نشست‌های X25519.
+**محدودیت‌های نسخه 3.3.0:** چند VPS و HA، انتقال هم‌زمان TCP و UDP در یک نمونه، تضمین مقابله با DoS حجمی یا فیلترینگ و ممیزی مستقل رمزنگاری هنوز ارائه نشده‌اند. قابلیت Reverse/Auto در CI تست شده ولی تست میدانی دو VPS لازم است.ی X25519.
 
 **بررسی‌های ضروری پیش از استفاده گسترده:** آزمایش ICMP روی دو VPS واقعی، تست عملی Hysteria 2، تزریق Packet Loss/Jitter، آزمون Restart و ارتقای دوطرفه، و ممیزی مستقل پروتکل رمزنگاری.
 
