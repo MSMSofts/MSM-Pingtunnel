@@ -58,6 +58,19 @@ func TestReverseQueueBoundsAndTTL(t *testing.T){
     if r.enqueue(make([]byte,10241),now){t.Fatal("oversized frame accepted")}
 }
 
+func TestAutoReverseRequiresTrafficAndStaleAuthentication(t *testing.T){
+ now:=time.Unix(1800000000,0)
+ r,_:=newReverseTransport(ICMPAuto,bytes.Repeat([]byte{9},32),now)
+ if r.acceptReverseOnDemand(now,time.Time{}){t.Fatal("quiet transport reversed without demand")}
+ r.noteDemand(now.Add(40*time.Second),true)
+ if r.acceptReverseOnDemand(now.Add(40*time.Second),now.Add(20*time.Second)){t.Fatal("recent authenticated traffic should retain direct")}
+ if !r.acceptReverseOnDemand(now.Add(60*time.Second),now.Add(20*time.Second)){t.Fatal("stale demanded link did not allow reversal")}
+ if !r.choose(ICMPReverse,now.Add(60*time.Second)){t.Fatal("could not select reverse")}
+ if r.fallbackDirect(now.Add(100*time.Second),time.Time{}){t.Fatal("fallback ignored 90-second dwell")}
+ r.noteDemand(now.Add(170*time.Second),true)
+ if !r.fallbackDirect(now.Add(171*time.Second),time.Time{}){t.Fatal("reverse outage did not fall back to direct")}
+}
+
 func TestReverseModeParsing(t *testing.T){
     for _,mode:=range []string{"auto","direct","reverse"}{
         if _,err:=ParseICMPDirection(mode);err!=nil{t.Fatal(err)}
