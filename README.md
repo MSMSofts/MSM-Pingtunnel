@@ -269,7 +269,8 @@ SECURITY & HEALTH
 
 | نسخه | تنظیمات | پروتکل بین VPSها | سازگاری |
 | --- | --- | --- | --- |
-| **3.2.5** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | اصلاح مکث Status و بازیابی گیرنده و ارتباط بلندمدت |\n| **3.2.4** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | رفع نمایش منو؛ بدون تغییر شبکه |
+| **3.2.5** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | اصلاح مکث Status و بازیابی گیرنده و ارتباط بلندمدت |
+| **3.2.4** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | رفع نمایش منو؛ بدون تغییر شبکه |
 | **3.2.3** | `schema_version=3` | Wire v4 | نسخه قبل؛ پایش منابع و Restart پس از Update |
 | **3.2.2** | `schema_version=3` | Wire v4 | نسخه قبلی؛ سازگار با 3.2.4 |
 | **3.2.1** | `schema_version=3` | Wire v4 | نسخه قبلی؛ هم‌ساز با 3.2.4 |
