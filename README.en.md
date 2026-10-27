@@ -2,21 +2,31 @@
 
 **A lightweight, encrypted ICMP tunnel between exactly two Linux VPSs, with a five-question setup wizard.**
 
-[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.3.3](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.3)
+[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.3.4](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.4)
 
-![Version](https://img.shields.io/badge/version-3.3.3-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.3.4-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
 
 Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** between an **Iran-side VPS** and an **overseas VPS**. Local TCP or UDP traffic enters the Iran VPS, travels inside authenticated, encrypted ICMP packets, and is forwarded by the overseas VPS to its configured local service.
 
 **This is a transport layer—not a standalone VPN server.** Services such as Hysteria 2, s-ui or other TCP/UDP applications run and are configured separately.
 
-**Current release: 3.3.3** · Rust manager and modified Go core · Config schema **3** · Secure wire **4** · **Reverse-first Auto:** Foreign-initiated ICMP Echo Requests, with Direct fallback after reverse negotiation fails. Live VPS validation is still required.
+**Current release: 3.3.4** · Rust manager, Go core, schema **3**, secure wire **4** · **Reverse-first Auto:** Foreign starts ICMP polls; Direct is reserved for prolonged confirmed outages with client demand. Video latency improvements require measured live testing.
 
 
+
+## Reverse streaming and ACK latency — v3.3.4
+
+The previous reverse poll accelerator largely observed authenticated **Iran→Foreign** application data. With video over Hysteria 2, the larger stream often travels **Foreign→Iran**, while QUIC acknowledgements must travel back through the Reverse reply queue. When return ACK traffic temporarily dried up, the poll cadence could slow and delay subsequent ACK delivery.
+
+In v3.3.4, **successfully written, encrypted Foreign→Iran DATA** also drives ACK-return poll pacing. Nominal intervals are 25 ms for an open but quiet session, about 12 ms on initial outbound video data, 4 ms during sustained outbound video flow, and as low as 2 ms for bursts of authenticated inbound return DATA. Polling decays through warm intervals rather than immediately dropping to the old 80 ms active-session baseline. True idle remains at 250 ms. These are **target send intervals, not guaranteed latency, loss, or throughput**.
+
+On Iran, `sudo pingtunnel security` now reports oldest queued frame age, last/maximum successful queue delivery delays, and number of queued frames delayed at least 250 ms. On Foreign, `Last successful Foreign->Iran DATA send` indicates video-driven poll demand. These distinguish a real reverse-queue bottleneck from Hysteria congestion/MTU issues.
+
+No change to the ICMP packet layout, secure Wire v4, X25519/session authentication, or Reverse-first with emergency Direct-only fallback. Actual video playback improvements require real VPS testing.
 
 ## ICMP Echo reflection filtering (v3.3.3)
 
-On a real two-VPS path, the overseas host was observed receiving hundreds of 44-byte ICMP Echo Replies containing a 36-byte `PTR4` payload. These are automatic Linux kernel echoes of foreign-origin Reverse poll requests, **not authenticated application ciphertext**. v3.3.3 filters only these exact-size, exact-marker Echo Replies, *after verifying the pinned peer source IP and before attempting AEAD decrypt*. Genuine `PTD4` DATA and `PTH4` handshakes remain unaffected; neither the network packet format nor session cryptography changes.
+On a real two-VPS path, the overseas host was observed receiving hundreds of 44-byte ICMP Echo Replies containing a 36-byte `PTR4` payload. These are automatic Linux kernel echoes of foreign-origin Reverse poll requests, **not authenticated application ciphertext**. v3.3.4 filters only these exact-size, exact-marker Echo Replies, *after verifying the pinned peer source IP and before attempting AEAD decrypt*. Genuine `PTD4` DATA and `PTH4` handshakes remain unaffected; neither the network packet format nor session cryptography changes.
 
 The overseas `sudo pingtunnel security` output now includes `Filtered kernel PTR4 Echo reflections` separately from `Authentication failures`. This reduces pointless decrypt attempts and improves diagnostics, but **does not prove the Hysteria/Shorts stalling problem is solved**. Measure authenticated error deltas, Iran's reverse queue and playback performance separately after upgrading.
 
@@ -41,7 +51,7 @@ Run `sudo pingtunnel security` on either VPS to inspect reverse queue size/bytes
 
 **Validation:** v3.3.0 Reverse connectivity was reported working on a live pair. v3.3.1 builds, tests, and race checking are automated, but the actual bandwidth, VPS overhead, loss recovery, and resilience still require measured two-host testing.
 
-## ICMP direction in v3.3.3
+## ICMP direction in v3.3.4
 
 - **Auto (default):** start with **Reverse** foreign-origin ICMP Echo Requests. **Direct is an emergency-only fallback** after sustained local client demand and a prolonged failed Reverse: no authenticated polls for 90 seconds, unconfirmed negotiation for 150 seconds, or absence of both authenticated polls and encrypted peer traffic for 150 seconds on an established route. Selection has a 60-second minimum dwell to reduce flapping.
 - **Reverse:** foreign-origin Echo Requests only.
@@ -304,6 +314,7 @@ These features **do not guarantee uninterrupted VPN sessions**, live adaptation 
 
 | Version | Config schema | Wire format | Compatibility |
 | --- | --- | --- | --- |
+| **3.3.4** | 3 | **v4** (`PTH4/PTD4`) | Bidirectional DATA-aware poll pacing and queue wait telemetry |
 | **3.3.3** | 3 | **v4** (`PTH4/PTD4`) | Ignore kernel PTR4 Echo reflections before decrypt, count separately |
 | **3.3.2** | 3 | **v4** (`PTH4/PTD4`) | Reverse preferred, Direct only after sustained failure |
 | **3.3.1** | 3 | **v4** (`PTH4/PTD4`) | Adaptive Reverse polls, retry of failed Echo Reply writes, queue telemetry |
@@ -323,7 +334,7 @@ Upgrading both VPSs is recommended during a maintenance window. The manager pres
 
 > **Repository transfer note:** For updates, use the canonical installer URL under `MSMSofts/MSM-Pingtunnel` shown in the Install section. Earlier manager binaries may still use the former repository owner in the built-in `pingtunnel update` URL.
 
-[Version history](CHANGELOG.md) · [Pinned release](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.3) · [Rolling assets](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
+[Version history](CHANGELOG.md) · [Pinned release](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.4) · [Rolling assets](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
 
 ## Important paths
 
@@ -349,7 +360,7 @@ Upgrading both VPSs is recommended during a maintenance window. The manager pres
 
 ## Scope & limitations
 
-**Not provided in v3.3.3:** high availability, multiple VPSs, simultaneous TCP+UDP forwarding through one tunnel, guaranteed filtering resistance, or independent security audit. Reverse/Auto passed CI tests but requires a real two-VPS integration test. Previously, v3.2.4 did not support reverse forwarding; see the changelog.
+**Not provided in v3.3.4:** high availability, multiple VPSs, simultaneous TCP+UDP forwarding through one tunnel, guaranteed filtering resistance, or independent security audit. Reverse/Auto passed CI tests but requires a real two-VPS integration test. Previously, v3.2.4 did not support reverse forwarding; see the changelog.
 
 **Still required before high-assurance deployment:** testing two real VPSs with ICMP packet loss/jitter, Hysteria 2 end-to-end testing, restart/upgrade interruption testing, and independent cryptographic review.
 

@@ -34,7 +34,10 @@ func sendQueuedReverse(r *reverseTransport,now time.Time,write func([]byte)bool)
     // Ordinary idle polling receives the kernel's usual Echo Reply.
     // Avoid injecting a second empty response for every poll.
     if !ok {return true}
-    if write(f.data){return true}
+    if write(f.data){
+        r.noteDeliveredFrame(f.created,now)
+        return true
+    }
     r.restoreFront(f,now)
     return false
 }

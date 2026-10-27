@@ -72,6 +72,12 @@ type reverseTransport struct {
     lastValidProbe time.Time
     lastUsefulFrame time.Time
     usefulBurst int
+    lastOutboundData time.Time
+    outboundBurst int
+    lastDeliveredQueueDelayMs int64
+    maxDeliveredQueueDelayMs int64
+    deliveredFrames uint64
+    delayedFrames uint64
     lastReceiveAck time.Time
     failedReplies uint64
     reflectedPolls uint64
@@ -345,27 +351,64 @@ func (r *reverseTransport) noteUsefulFrame(now time.Time) {
     }
     r.lastUsefulFrame=now
 }
+// noteOutboundFrame records encrypted application DATA sent by the overseas
+// endpoint towards Iran. Streaming video is primarily Foreign -> Iran;
+// restricting fast polling to inbound ACKs otherwise creates an ACK starvation
+// feedback loop. Only genuine DATA, never empty polls, speeds up the poller.
+func (r *reverseTransport) noteOutboundFrame(now time.Time) {
+    r.mu.Lock();defer r.mu.Unlock()
+    if !r.lastOutboundData.IsZero() && now.Sub(r.lastOutboundData)>=0 &&
+        now.Sub(r.lastOutboundData)<400*time.Millisecond {
+        if r.outboundBurst<1024{r.outboundBurst++}
+    } else {
+        r.outboundBurst=1
+    }
+    r.lastOutboundData=now
+}
 func (r *reverseTransport) pollPeriod(now time.Time,activeConns int,ready bool) time.Duration {
     r.mu.Lock();defer r.mu.Unlock()
-    // Fast polling requires a sustained burst of useful authenticated
-    // payloads. One isolated datagram must never trigger 500 empty polls/s.
     period:=250*time.Millisecond
-    age:=now.Sub(r.lastUsefulFrame)
     if !ready {
         period=200*time.Millisecond
-    } else if !r.lastUsefulFrame.IsZero() && age>=0 && age<1500*time.Millisecond {
-        if r.usefulBurst>=4 && age<350*time.Millisecond {
-            period=2*time.Millisecond
-        }else if r.usefulBurst>=2{
-            period=12*time.Millisecond
-        }else{
-            period=40*time.Millisecond
+    } else {
+        // An open UDP session must not need to wait 80 ms for each return
+        // opportunity during QUIC handshake/congestion window recovery.
+        if activeConns>0 {period=25*time.Millisecond}
+        ageIn:=now.Sub(r.lastUsefulFrame)
+        if !r.lastUsefulFrame.IsZero() && ageIn>=0 {
+            switch {
+            case r.usefulBurst>=4 && ageIn<1200*time.Millisecond:
+                period=2*time.Millisecond
+            case r.usefulBurst>=2 && ageIn<3*time.Second:
+                if period>8*time.Millisecond {period=8*time.Millisecond}
+            case ageIn<3*time.Second:
+                if period>16*time.Millisecond {period=16*time.Millisecond}
+            }
         }
-    } else if activeConns>0 {
-        period=80*time.Millisecond
+        ageOut:=now.Sub(r.lastOutboundData)
+        if !r.lastOutboundData.IsZero() && ageOut>=0 {
+            switch {
+            case r.outboundBurst>=4 && ageOut<2500*time.Millisecond:
+                if period>4*time.Millisecond {period=4*time.Millisecond}
+            case ageOut<5*time.Second:
+                if period>12*time.Millisecond {period=12*time.Millisecond}
+            }
+        }
     }
     r.pollPeriodMillis=int(period/time.Millisecond)
     return period
+}
+// Record only a successful Echo Reply send; expired, dropped or failed writes
+// must not pretend to represent end-to-end queue progress.
+func (r *reverseTransport) noteDeliveredFrame(created,now time.Time) {
+    delay:=now.Sub(created)
+    if delay<0{delay=0}
+    ms:=int64(delay/time.Millisecond)
+    r.mu.Lock();defer r.mu.Unlock()
+    r.deliveredFrames++
+    r.lastDeliveredQueueDelayMs=ms
+    if ms>r.maxDeliveredQueueDelayMs {r.maxDeliveredQueueDelayMs=ms}
+    if delay>=250*time.Millisecond {r.delayedFrames++}
 }
 type reverseDiagnostics struct {
     Pending int
@@ -378,16 +421,36 @@ type reverseDiagnostics struct {
     LastUsefulFrameAgeSeconds int64
     FallbackCount uint64
     FallbackReason string
+    OldestQueueAgeMs int64
+    LastQueueDelayMs int64
+    MaxQueueDelayMs int64
+    DeliveredFrames uint64
+    DelayedFrames uint64
+    LastOutboundDataAgeMs int64
 }
 func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
     r.mu.Lock();defer r.mu.Unlock()
     age:=int64(-1)
     if !r.lastUsefulFrame.IsZero() {age=int64(now.Sub(r.lastUsefulFrame).Seconds());if age<0{age=0}}
+    oldest:=int64(0)
+    if len(r.pending)>0 {
+        d:=now.Sub(r.pending[0].created)
+        if d>0{oldest=int64(d/time.Millisecond)}
+    }
+    outboundAge:=int64(-1)
+    if !r.lastOutboundData.IsZero() {
+        d:=now.Sub(r.lastOutboundData)
+        if d<0{d=0}
+        outboundAge=int64(d/time.Millisecond)
+    }
     return reverseDiagnostics{Pending:len(r.pending),PendingBytes:r.pendingBytes,
         QueuePeak:r.queuePeak,QueueDrops:r.drops,FailedReplies:r.failedReplies,
         ReflectedPolls:r.reflectedPolls,
         PollIntervalMillis:r.pollPeriodMillis,LastUsefulFrameAgeSeconds:age,
-        FallbackCount:r.fallbackCount,FallbackReason:r.lastFallbackReason}
+        FallbackCount:r.fallbackCount,FallbackReason:r.lastFallbackReason,
+        OldestQueueAgeMs:oldest,LastQueueDelayMs:r.lastDeliveredQueueDelayMs,
+        MaxQueueDelayMs:r.maxDeliveredQueueDelayMs,DeliveredFrames:r.deliveredFrames,
+        DelayedFrames:r.delayedFrames,LastOutboundDataAgeMs:outboundAge}
 }
 
 // Observed inbound authenticated reverse probes are separately reported.
