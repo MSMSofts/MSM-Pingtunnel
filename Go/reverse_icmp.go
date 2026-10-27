@@ -108,6 +108,17 @@ func (r *reverseTransport) choose(direction ICMPDirection, now time.Time) bool {
 // The foreign VPS only begins probing in Auto after the ordinary client
 // initiation has had an opportunity to establish an authenticated session.
 // Direct mode never sends reverse probes.
+func (r *reverseTransport) fallbackDirect(now time.Time,lastAuthenticated time.Time) bool {
+ r.mu.Lock()
+ can:=r.preference==ICMPAuto && r.selected==ICMPReverse &&
+  now.Sub(r.lastSwitch)>90*time.Second &&
+  !r.lastDemand.IsZero() && now.Sub(r.lastDemand)<30*time.Second &&
+  (lastAuthenticated.IsZero()||now.Sub(lastAuthenticated)>75*time.Second)
+ r.mu.Unlock()
+ if !can{return false}
+ return r.choose(ICMPDirect,now)
+}
+
 func (r *reverseTransport) needsProbe(now time.Time, authenticated bool) bool {
     r.mu.Lock();defer r.mu.Unlock()
     if r.preference==ICMPDirect{return false}
