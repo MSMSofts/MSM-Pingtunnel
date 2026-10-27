@@ -82,7 +82,7 @@ curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/main/Source
 sudo bash /tmp/pingtunnel-install.sh
 ~~~
 
-پیشنهاد می‌شود پیش از اجرای هر اسکریپت نصب اینترنتی، محتوای فایل دانلودشده را بررسی کنی. نصب‌کننده باینری‌های منتشرشدهٔ [v3.2.4](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.2.6) را همراه با SHA256 و Manifest بررسی می‌کند و قبل از جایگزینی فایل‌های موجود، تطابق نسخهٔ Manager، هسته Go و Wire Protocol را کنترل می‌کند.
+پیشنهاد می‌شود پیش از اجرای هر اسکریپت نصب اینترنتی، محتوای فایل دانلودشده را بررسی کنی. نصب‌کننده باینری‌های منتشرشدهٔ [v3.3.0](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.0) را همراه با SHA256 و Manifest بررسی می‌کند و قبل از جایگزینی فایل‌های موجود، تطابق نسخهٔ Manager، هسته Go و Wire Protocol را کنترل می‌کند.
 
 ### راه‌اندازی: ابتدا خارج، سپس ایران
 
@@ -129,7 +129,7 @@ sudo pingtunnel logs 100
 ~~~text
 ================================================================
   PINGTUNNEL  /  CONTROL CENTER
-  v3.2.6   |   Encrypted ICMP   |   Wire v4
+  v3.3.0   |   Encrypted ICMP   |   Wire v4
 ----------------------------------------------------------------
 LIVE TUNNEL STATUS
   Location     Foreign (service)
@@ -307,7 +307,7 @@ SECURITY & HEALTH
 
 ## محدودیت‌های فعلی و برنامه توسعه
 
-**محدودیت‌های نسخه 3.3.0:** چند VPS و HA، انتقال هم‌زمان TCP و UDP در یک نمونه، تضمین مقابله با DoS حجمی یا فیلترینگ و ممیزی مستقل رمزنگاری هنوز ارائه نشده‌اند. قابلیت Reverse/Auto در CI تست شده ولی تست میدانی دو VPS لازم است.ی X25519.
+**محدودیت‌های نسخه 3.3.0:** چند VPS و HA، انتقال هم‌زمان TCP و UDP در یک نمونه، تضمین مقابله با DoS حجمی یا فیلترینگ و ممیزی مستقل رمزنگاری هنوز ارائه نشده‌اند. قابلیت Reverse/Auto در CI تست شده ولی تست میدانی دو VPS لازم است.
 
 **بررسی‌های ضروری پیش از استفاده گسترده:** آزمایش ICMP روی دو VPS واقعی، تست عملی Hysteria 2، تزریق Packet Loss/Jitter، آزمون Restart و ارتقای دوطرفه، و ممیزی مستقل پروتکل رمزنگاری.
 
