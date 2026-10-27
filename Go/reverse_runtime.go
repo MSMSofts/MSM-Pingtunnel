@@ -31,7 +31,9 @@ func emitEcho(conn icmp.PacketConn,peer *net.IPAddr,typ,id,seq int,body []byte) 
 // ahead of subsequent frames without refreshing its original 12s expiry.
 func sendQueuedReverse(r *reverseTransport,now time.Time,write func([]byte)bool) bool {
     f,ok:=r.takeFrame(now)
-    if !ok {return write(nil)}
+    // Ordinary idle polling receives the kernel's usual Echo Reply.
+    // Avoid injecting a second empty response for every poll.
+    if !ok {return true}
     if write(f.data){return true}
     r.restoreFront(f,now)
     return false
