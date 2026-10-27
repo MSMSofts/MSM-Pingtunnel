@@ -507,6 +507,10 @@ type secureStatus struct{
  ReversePollEchoReflections uint64 `json:"reverse_poll_echo_reflections"`
  ReversePollIntervalMs int `json:"reverse_poll_interval_ms"`
  ReverseLastDataAge int64 `json:"reverse_last_data_age_seconds"`
+ ReverseDownstreamAge int64 `json:"reverse_downstream_data_age_seconds"`
+ ReverseQueueMaxWaitMs int64 `json:"reverse_queue_max_wait_ms"`
+ ReverseQueueWaitEWMAMs int64 `json:"reverse_queue_wait_ewma_ms"`
+ ReverseQueueDequeueSamples uint64 `json:"reverse_queue_dequeue_samples"`
  AutoFallbackCount uint64 `json:"auto_direct_fallback_count"`
  AutoFallbackReason string `json:"auto_direct_fallback_reason,omitempty"`
  State string `json:"state"`
@@ -548,6 +552,10 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.ReversePollEchoReflections=diag.ReflectedPolls
  report.ReversePollIntervalMs=diag.PollIntervalMillis
  report.ReverseLastDataAge=diag.LastUsefulFrameAgeSeconds
+ report.ReverseDownstreamAge=diag.LastDownstreamAgeSeconds
+ report.ReverseQueueMaxWaitMs=diag.DequeueMaxWaitMs
+ report.ReverseQueueWaitEWMAMs=diag.DequeueWaitEWMAMs
+ report.ReverseQueueDequeueSamples=diag.DequeueSamples
  report.AutoFallbackCount=diag.FallbackCount
  report.AutoFallbackReason=diag.FallbackReason
  encoded,err:=json.Marshal(report)
