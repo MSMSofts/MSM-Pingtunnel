@@ -2,15 +2,15 @@
 
 **A lightweight, encrypted ICMP tunnel between exactly two Linux VPSs, with a five-question setup wizard.**
 
-[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.3.4](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.4)
+[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.3.5](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.5)
 
-![Version](https://img.shields.io/badge/version-3.3.4-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.3.5-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
 
 Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** between an **Iran-side VPS** and an **overseas VPS**. Local TCP or UDP traffic enters the Iran VPS, travels inside authenticated, encrypted ICMP packets, and is forwarded by the overseas VPS to its configured local service.
 
 **This is a transport layer—not a standalone VPN server.** Services such as Hysteria 2, s-ui or other TCP/UDP applications run and are configured separately.
 
-**Current release: 3.3.4** · Rust manager, Go core, schema **3**, secure wire **4** · **Reverse-first Auto:** Foreign starts ICMP polls; Direct is reserved for prolonged confirmed outages with client demand. Video latency improvements require measured live testing.
+**Current release: 3.3.5** · Rust manager, Go core, schema **3**, secure wire **4** · **Reverse-first Auto:** Foreign starts ICMP polls; Direct is reserved for prolonged confirmed outages with client demand. Video latency improvements require measured live testing.
 
 
 
@@ -334,7 +334,7 @@ Upgrading both VPSs is recommended during a maintenance window. The manager pres
 
 > **Repository transfer note:** For updates, use the canonical installer URL under `MSMSofts/MSM-Pingtunnel` shown in the Install section. Earlier manager binaries may still use the former repository owner in the built-in `pingtunnel update` URL.
 
-[Version history](CHANGELOG.md) · [Pinned release](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.4) · [Rolling assets](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
+[Version history](CHANGELOG.md) · [Pinned release](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.5) · [Rolling assets](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
 
 ## Important paths
 
