@@ -179,7 +179,7 @@ func main() {
 	flag.Parse()
 
     if *protocolInfo {
-        fmt.Println("pingtunnel-go-core=3.2.4 config-schema=3 wire=4")
+        fmt.Println("pingtunnel-go-core=3.2.5 config-schema=3 wire=4")
         return
     }
 	if *showVersion || *showVersionLong {
