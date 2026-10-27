@@ -515,6 +515,10 @@ fn show_security_status() -> Result<()> {
         }
         println!("  Reverse ICMP reply write failures: {}",report["reverse_write_failures"]);
         println!("  Filtered kernel PTR4 Echo reflections: {}",report["reverse_poll_echo_reflections"]);
+        if report["region"].as_str()==Some("iran") {
+            println!("  Reverse signed-poll replay entries: {}",report["reverse_probe_replay_entries"]);
+            println!("  Reverse signed-poll cache overflows: {}",report["reverse_probe_replay_overflows"]);
+        }
         if let Some(ms)=report["reverse_poll_interval_ms"].as_u64().filter(|v|*v>0) {
             println!("  Adaptive reverse polling interval: {ms} ms");
         }
