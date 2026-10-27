@@ -498,6 +498,7 @@ type secureStatus struct{
  WireVersion int `json:"wire_version"`
  Region string `json:"region"`
  ICMPDirection string `json:"icmp_direction,omitempty"`
+ ReverseProbeAgeSeconds int64 `json:"reverse_probe_age_seconds"`
  State string `json:"state"`
  LastValidAgeSeconds int64 `json:"last_valid_age_seconds"`
  PendingRekey bool `json:"pending_rekey"`
@@ -523,11 +524,12 @@ func (s *secureSession) status()secureStatus{
  }
 }
 func (s *secureSession) writeStatus(path string) {
- s.writeStatusWithDirection(path,"direct")
+ s.writeStatusWithDirection(path,"direct",-1)
 }
-func (s *secureSession) writeStatusWithDirection(path string,direction string) {
+func (s *secureSession) writeStatusWithDirection(path string,direction string,reverseProbeAge int64) {
  report:=s.status()
  report.ICMPDirection=direction
+ report.ReverseProbeAgeSeconds=reverseProbeAge
  encoded,err:=json.Marshal(report)
  if err!=nil{return}
  tmp:=path+".pending"
