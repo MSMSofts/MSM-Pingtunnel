@@ -81,6 +81,8 @@ fn validate(cfg: &Value) -> Result<()> {
     }
     let transport=get_string(cfg,"transport").ok_or_else(||failure("missing transport"))?;
     if transport!="tcp"&&transport!="udp"{return Err(failure("transport must be tcp or udp"));}
+    let direction=cfg.get("icmp_direction").and_then(Value::as_str).unwrap_or("auto");
+    if !matches!(direction,"auto"|"direct"|"reverse"){return Err(failure("icmp_direction must be auto, direct or reverse"));}
     if !(1..=65535).contains(&get_number(cfg,"port",0)?){return Err(failure("invalid local port"));}
     let secret=get_string(cfg,"pair_key").ok_or_else(||failure("missing pairing key"))?;
     let bytes=STANDARD.decode(secret).map_err(|_|failure("pairing key not base64"))?;
@@ -153,7 +155,8 @@ fn go_core_config(cfg:&Value)->Result<Value>{
         "type":if region=="iran"{"client"}else{"server"},
         "key":numeric_auth_code(key)?,
         "encrypt":"auto", "encrypt_key":key, "region":region,
-        "tcp":protocol,"noprint":0,"nolog":1,"loglevel":"error"
+        "tcp":protocol,"noprint":0,"nolog":1,"loglevel":"error",
+        "icmp_direction":cfg.get("icmp_direction").and_then(Value::as_str).unwrap_or("auto")
     });
     if region=="iran"{
         config["listen"]=json!(format!(":{port}"));
@@ -446,6 +449,7 @@ fn show_health() -> Result<()> {
     }
     println!("Service active and Go workers reporting (heartbeat {}s ago).",age);
     println!("Security session state: {}",status["state"].as_str().unwrap_or("unknown"));
+    if let Some(direction)=status["icmp_direction"].as_str(){println!("ICMP initiation: {direction}");}
     println!("Last authenticated peer traffic: {} seconds ago.",status["last_valid_age_seconds"]);
     if status["region"].as_str()==Some("iran") {
         let age=status["last_valid_age_seconds"].as_i64().unwrap_or(-1);
@@ -476,6 +480,7 @@ fn show_security_status() -> Result<()> {
     println!("Authenticated session: {}",report["state"].as_str().unwrap_or("unknown"));
     println!("  Config schema: {} | Wire version: {}",report["config_schema"],report["wire_version"]);
     println!("  Region: {}",report["region"].as_str().unwrap_or("unknown"));
+    if let Some(direction)=report["icmp_direction"].as_str(){println!("  ICMP initiation: {direction}");}
     println!("  Last valid message age: {} seconds",report["last_valid_age_seconds"]);
     println!("  Pending key renegotiation: {}",report["pending_rekey"]);
     println!("  Replays rejected: {}",report["replay_drops"]);
