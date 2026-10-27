@@ -10,7 +10,7 @@ Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** betwe
 
 **This is a transport layer—not a standalone VPN server.** Services such as Hysteria 2, s-ui or other TCP/UDP applications run and are configured separately.
 
-**Current release: 3.3.4** · Rust manager and modified Go core · Config schema **3** · Secure wire **4** · **Reverse-first Auto:** Foreign-initiated ICMP Echo Requests, with Direct fallback after reverse negotiation fails. Live VPS validation is still required.
+**Current release: 3.3.4** · Rust manager and modified Go core · Config schema **3** · Secure wire **4** · **Reverse-first Auto:** Foreign-initiated ICMP Echo Requests, with emergency Direct fallback only after sustained failure and real local demand. Live VPS validation is still required.
 
 
 
@@ -22,9 +22,9 @@ Target intervals still range from 2 to 250 ms; sustained Foreign-to-Iran DATA wa
 
 On the Iran host, `sudo pingtunnel security` now reports **maximum and exponentially smoothed FIFO dequeue wait** alongside existing queue depth/drops. Compare these values while a video buffers to distinguish queueing delay from Hysteria/QUIC congestion and genuine packet loss. Reverse-first defaults, session AEAD, ICMP framing and wire v4 remain unchanged.
 
-## ICMP Echo reflection filtering (v3.3.4)
+## ICMP Echo reflection filtering (v3.3.3)
 
-On a real two-VPS path, the overseas host was observed receiving hundreds of 44-byte ICMP Echo Replies containing a 36-byte `PTR4` payload. These are automatic Linux kernel echoes of foreign-origin Reverse poll requests, **not authenticated application ciphertext**. v3.3.4 filters only these exact-size, exact-marker Echo Replies, *after verifying the pinned peer source IP and before attempting AEAD decrypt*. Genuine `PTD4` DATA and `PTH4` handshakes remain unaffected; neither the network packet format nor session cryptography changes.
+On a real two-VPS path, the overseas host was observed receiving hundreds of 44-byte ICMP Echo Replies containing a 36-byte `PTR4` payload. These are automatic Linux kernel echoes of foreign-origin Reverse poll requests, **not authenticated application ciphertext**. v3.3.3 filters only these exact-size, exact-marker Echo Replies, *after verifying the pinned peer source IP and before attempting AEAD decrypt*. Genuine `PTD4` DATA and `PTH4` handshakes remain unaffected; neither the network packet format nor session cryptography changes.
 
 The overseas `sudo pingtunnel security` output now includes `Filtered kernel PTR4 Echo reflections` separately from `Authentication failures`. This reduces pointless decrypt attempts and improves diagnostics, but **does not prove the Hysteria/Shorts stalling problem is solved**. Measure authenticated error deltas, Iran's reverse queue and playback performance separately after upgrading.
 
