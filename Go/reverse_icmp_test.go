@@ -141,3 +141,70 @@ func TestReverseAutoRejectsShortDemandAndIntermittentProbeLoss(t *testing.T) {
         }
     }
 }
+
+func TestReverseReplayWindowAcceptsFiveHundredPollsPerSecond(t *testing.T) {
+    start:=time.Unix(1835000000,0)
+    key:=bytes.Repeat([]byte{0x34},32)
+    sender,_:=newReverseTransport(ICMPAuto,key,start)
+    receiver,_:=newReverseTransport(ICMPAuto,key,start)
+    const polls=10000
+    var mostRecent []byte
+    for i:=0;i<polls;i++{
+        now:=start.Add(time.Duration(i)*2*time.Millisecond)
+        probe,err:=sender.makeProbe(now)
+        if err!=nil{t.Fatal(err)}
+        if !receiver.authenticateProbe(probe,now){
+            t.Fatalf("valid probe %d/%d denied after %s; replay capacity must cover the 20s window",
+                i,polls,now.Sub(start))
+        }
+        mostRecent=probe
+    }
+    if receiver.authenticateProbe(mostRecent,start.Add(19999*time.Millisecond)){
+        t.Fatal("duplicate nonce replay passed after sustained high-frequency polling")
+    }
+    d:=receiver.diagnostics(start.Add(20*time.Second))
+    if d.ReplayCapacityRejects!=0 {
+        t.Fatalf("legitimate peak stream hit capacity limit: %+v",d)
+    }
+    // Clearing only expired entries must bound memory even as the endpoint
+    // continues to poll after the replay window moves forward.
+    for i:=polls;i<polls+1000;i++{
+        now:=start.Add(time.Duration(i)*2*time.Millisecond)
+        probe,err:=sender.makeProbe(now)
+        if err!=nil || !receiver.authenticateProbe(probe,now){
+            t.Fatalf("fresh poll %d denied after replay window advanced: %v",i,err)
+        }
+    }
+    if n:=len(receiver.recent);n>reverseReplayCacheLimit {
+        t.Fatalf("nonce cache not bounded: %d",n)
+    }
+}
+
+func TestReverseReplayCacheCapacityRejectsAreVisible(t *testing.T) {
+    now:=time.Unix(1835000000,0)
+    key:=bytes.Repeat([]byte{0x56},32)
+    sender,_:=newReverseTransport(ICMPAuto,key,now)
+    receiver,_:=newReverseTransport(ICMPAuto,key,now)
+    receiver.recent=make(map[[8]byte]time.Time,reverseReplayCacheLimit)
+    // Simulate a maliciously high burst that fills the bounded table.
+    for i:=0;i<reverseReplayCacheLimit;i++{
+        var nonce [8]byte
+        nonce[0]=byte(i)
+        nonce[1]=byte(i>>8)
+        receiver.recent[nonce]=now
+    }
+    probe,err:=sender.makeProbe(now)
+    if err!=nil{t.Fatal(err)}
+    if receiver.authenticateProbe(probe,now){
+        t.Fatal("full replay table must not silently bypass replay protection")
+    }
+    if d:=receiver.diagnostics(now);d.ReplayCapacityRejects!=1{
+        t.Fatalf("capacity rejection not surfaced: %+v",d)
+    }
+    if receiver.authenticateProbe(probe,now){
+        t.Fatal("probe accepted during unchanged full replay window")
+    }
+    if d:=receiver.diagnostics(now);d.ReplayCapacityRejects!=2{
+        t.Fatalf("rejection count is inconsistent: %+v",d)
+    }
+}

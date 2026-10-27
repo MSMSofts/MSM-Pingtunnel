@@ -2,16 +2,22 @@
 
 **A lightweight, encrypted ICMP tunnel between exactly two Linux VPSs, with a five-question setup wizard.**
 
-[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.3.4](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.4)
+[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.3.5](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.5)
 
-![Version](https://img.shields.io/badge/version-3.3.4-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.3.5-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
 
 Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** between an **Iran-side VPS** and an **overseas VPS**. Local TCP or UDP traffic enters the Iran VPS, travels inside authenticated, encrypted ICMP packets, and is forwarded by the overseas VPS to its configured local service.
 
 **This is a transport layer—not a standalone VPN server.** Services such as Hysteria 2, s-ui or other TCP/UDP applications run and are configured separately.
 
-**Current release: 3.3.4** · Rust manager, Go core, schema **3**, secure wire **4** · **Reverse-first Auto:** Foreign starts ICMP polls; Direct is reserved for prolonged confirmed outages with client demand. Video latency improvements require measured live testing.
+**Current release: 3.3.5** · Rust manager, Go core, schema **3**, secure wire **4** · **Reverse-first Auto:** Foreign starts ICMP polls; Direct is reserved for prolonged confirmed outages with client demand. Video latency improvements require measured live testing.
 
+
+## High-rate Reverse replay cache correction (v3.3.5)
+
+At 500 signed polls/sec, the 20-second anti-replay window can contain roughly **10,000 distinct valid nonces**. The previous 4,096-entry replay cache was too small, temporarily rejecting legitimate poll requests during sustained traffic. This can delay the Iran-to-Foreign reply opportunities required by QUIC acknowledgements even when ping and encrypted sessions appear healthy.
+
+v3.3.5 increases the bounded cache to **16,384** with unchanged HMAC verification, replay uniqueness and expiration rules. `sudo pingtunnel security` now reports `Reverse poll replay-cache capacity rejections`; the expected normal value is zero. Duplex-aware polling and queue telemetry from v3.3.4 remain enabled. Field playback, queueing and rate-limit effects still require measurement.
 
 
 ## Reverse streaming and ACK latency — v3.3.4
@@ -314,6 +320,7 @@ These features **do not guarantee uninterrupted VPN sessions**, live adaptation 
 
 | Version | Config schema | Wire format | Compatibility |
 | --- | --- | --- | --- |
+| **3.3.5** | 3 | **v4** (`PTH4/PTD4`) | Correct sustained 500/s Reverse poll replay-cache capacity; bounded authentication nonce memory |
 | **3.3.4** | 3 | **v4** (`PTH4/PTD4`) | Bidirectional DATA-aware poll pacing and queue wait telemetry |
 | **3.3.3** | 3 | **v4** (`PTH4/PTD4`) | Ignore kernel PTR4 Echo reflections before decrypt, count separately |
 | **3.3.2** | 3 | **v4** (`PTH4/PTD4`) | Reverse preferred, Direct only after sustained failure |
@@ -334,7 +341,7 @@ Upgrading both VPSs is recommended during a maintenance window. The manager pres
 
 > **Repository transfer note:** For updates, use the canonical installer URL under `MSMSofts/MSM-Pingtunnel` shown in the Install section. Earlier manager binaries may still use the former repository owner in the built-in `pingtunnel update` URL.
 
-[Version history](CHANGELOG.md) · [Pinned release](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.4) · [Rolling assets](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
+[Version history](CHANGELOG.md) · [Pinned release](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.5) · [Rolling assets](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
 
 ## Important paths
 
@@ -360,7 +367,7 @@ Upgrading both VPSs is recommended during a maintenance window. The manager pres
 
 ## Scope & limitations
 
-**Not provided in v3.3.4:** high availability, multiple VPSs, simultaneous TCP+UDP forwarding through one tunnel, guaranteed filtering resistance, or independent security audit. Reverse/Auto passed CI tests but requires a real two-VPS integration test. Previously, v3.2.4 did not support reverse forwarding; see the changelog.
+**Not provided in v3.3.5:** high availability, multiple VPSs, simultaneous TCP+UDP forwarding through one tunnel, guaranteed filtering resistance, or independent security audit. Reverse/Auto passed CI tests but requires a real two-VPS integration test. Previously, v3.2.4 did not support reverse forwarding; see the changelog.
 
 **Still required before high-assurance deployment:** testing two real VPSs with ICMP packet loss/jitter, Hysteria 2 end-to-end testing, restart/upgrade interruption testing, and independent cryptographic review.
 

@@ -1,5 +1,29 @@
 # Changelog / تاریخچه تغییرات
 
+## [3.3.5](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.5) — Prevent Reverse poll replay-cache saturation
+
+**Config schema: 3 · Secure wire: 4 · No external packet layout or cryptographic changes**
+
+- Corrected a capacity mismatch: a 500Hz authenticated Reverse poller with 20-second replay protection can maintain roughly **10,000** valid nonces concurrently, but the existing cache rejected fresh requests once it reached **4,096**.
+- Increased the bounded Iran-side cache to **16,384** while retaining HMAC checks, the 20-second validity window, nonce replay rejection and periodic pruning. Overflow remains rejected rather than disabling security.
+- Exposed `reverse_replay_capacity_rejections` in local security JSON and in `pingtunnel security`. It distinguishes cache exhaustion from replay or authentication errors.
+- Added regression tests for 10,000 valid signed polls over a 20-second simulated 500pps interval and explicit overflow/replay rejection.
+- Preserves the successfully written downlink DATA-driven scheduling and measured queue delays introduced in 3.3.4; maintains Reverse-first with emergency-only Direct.
+- **Validation limitation:** this corrects a demonstrable polling-capacity bug; improvement to the user's intermittent 1–3-second video stalls still requires paired VPS playback measurements.
+
+
+## [3.3.5](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.5) — Fix signed reverse poll replay cache saturation under continuous video load
+
+**Secure wire v4 and config schema 3 unchanged.**
+
+- The Reverse ICMP poller can send up to 500 authenticated Echo Requests per second. Its 20-second replay-prevention window may therefore contain about 10,000 legitimate nonces. The old hard limit of 4,096 could reject healthy polling traffic after several seconds of sustained maximum-rate video activity.
+- The bounded replay cache now permits 16,384 recent nonces. HMAC authentication, timestamp freshness checks, nonces and duplicate rejection stay enabled; expired entries remain pruned.
+- `reverse_replay_capacity_rejections` is now reported separately in runtime security status and the terminal diagnostics. High values indicate rejected signed polls due to an exhausted cache, not a valid authentication failure.
+- Added a regression covering 10,000 individually authenticated 2-ms interval polls over 20 seconds, rejection of a replayed nonce and memory reclamation after expiration.
+- Builds on the existing v3.3.4 bidirectional Hysteria ACK-aware polling changes, with no change to packet framing, Reverse-first priority or Direct emergency fallback.
+- Field playback and throughput still need measurement: the absence of replay saturation cannot by itself prove a specific video-stall reduction.
+
+
 ## [3.3.4](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.4) — Reduce Hysteria/QUIC reverse-path ACK latency
 
 **Config schema: 3 · Secure wire: 4 · No packet-format or encryption change**

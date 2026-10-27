@@ -2,10 +2,16 @@
 
 [README فارسی](../README.md) · [English README](../README.en.md) · [Security policy](../SECURITY.md)
 
-**Version:** Manager 3.3.4 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
+**Version:** Manager 3.3.5 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
 
 **خلاصه:** Pingtunnel Manager فقط دو VPS دارد. کاربر به پورت TCP/UDP سرور ایران وصل می‌شود؛ هسته Go ترافیک را در ICMP رمزنگاری‌شده به VPS خارج می‌رساند و سرور خارج آن را به پورت سرویس محلی خودش تحویل می‌دهد. Rust تنها کارهای راه‌اندازی، ذخیره تنظیمات و کنترل systemd را انجام می‌دهد.
 
+
+## Replay nonce cache capacity during high-rate Reverse polling (v3.3.5)
+
+The overseas poller may send about 500 authenticated ICMP Echo Requests per second. The Iran-side replay cache previously allowed only 4,096 live nonces under a 20-second replay window. That is smaller than the roughly 10,000 legitimate nonces simultaneously in flight at maximum rate. Exhaustion could reject valid polls and delay the return path for QUIC acknowledgements.
+
+v3.3.5 uses a **16,384-entry bounded replay cache**, retains HMAC validation, the 20-second timestamp window and nonce uniqueness checks, and exposes `reverse_replay_capacity_rejections` separately. Expired entries are pruned periodically. The new Go test sends 10,000 distinct valid polls at a simulated 500Hz over 20 seconds, ensures they authenticate, then checks replay rejection and bounded memory. The secure wire v4 and Reverse-first Auto remain unchanged.
 
 ## Video/QUIC return-path scheduling and delay telemetry (v3.3.4)
 
@@ -147,7 +153,7 @@ Rust CLI presents these through `pingtunnel security` and `pingtunnel performanc
 
 ~~~text
 Rust/
-  Cargo.toml             Rust manager package (3.3.4)
+  Cargo.toml             Rust manager package (3.3.5)
   src/main.rs            CLI, systemd and config generation
   src/setup.rs           Unified pairing wizard
 
@@ -190,7 +196,7 @@ cargo test --manifest-path Rust/Cargo.toml
 cargo build --release --manifest-path Rust/Cargo.toml
 ~~~
 
-Release builds are verified with SHA256 and a release manifest specifying **manager 3.3.4 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.3.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2); rolling assets may also exist for compatibility.
+Release builds are verified with SHA256 and a release manifest specifying **manager 3.3.5 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.3.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2); rolling assets may also exist for compatibility.
 
 ## 8. Compatibility contract and limitations
 
