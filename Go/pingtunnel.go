@@ -152,7 +152,8 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
             if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="iran" &&
                 int(bytes[0])==8 && stdbytes.HasPrefix(payloadData,reverseProbeMagic[:]) {
                 if cryptoConfig.reverse.authenticateProbe(payloadData,now) {
-                    if useReverse(cryptoConfig){cryptoConfig.sec.noteAuthenticatedPoll(now)}
+                    // A valid incoming probe only proves the inbound leg.
+                    // Count the link alive only after authenticated two-way data.
                     startReverseHandshake(conn,peer,echoId,echoSeq,cryptoConfig,now)
                 }
                 continue
