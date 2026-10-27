@@ -13,6 +13,26 @@ Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** betwe
 **Current release: 3.3.1** · Rust manager and modified Go core · Config schema **3** · Secure wire **4** · **Reverse-first Auto:** Foreign-initiated ICMP Echo Requests, with Direct fallback after reverse negotiation fails. Live VPS validation is still required.
 
 
+
+## Reverse throughput and stability in 3.3.1
+
+The foreign Go core uses an **event-driven adaptive timer** instead of a permanently fast polling loop. The following are target program intervals, **not guaranteed end-to-end latencies**:
+
+| Authenticated reverse traffic | Target poll interval |
+| --- | ---: |
+| Session handshake | 200 ms |
+| No active connections | 250 ms |
+| Open but quiet connection | 80 ms |
+| One valid application data frame | 40 ms |
+| Small burst of frames | 12 ms |
+| Sustained useful data stream | 2 ms |
+
+One isolated packet cannot trigger a long 500-polls/s burst. Failed ICMP Echo Reply writes put the encrypted frame back at the queue head while retaining the original 12-second expiry. Empty userspace replies are skipped, avoiding duplication of the Linux kernel's normal echo response behavior where enabled. The externally visible ICMP Echo structure and the authenticated wire v4 protocol remain unchanged.
+
+Run `sudo pingtunnel security` on either VPS to inspect reverse queue size/bytes, peak depth, overflow/expiry drops, reply write failures, last authenticated reverse data age, and active polling interval. A persistent rise in drops is evidence of queue pressure or network loss; an aggressive poll interval does **not** imply guaranteed throughput.
+
+**Validation:** v3.3.0 Reverse connectivity was reported working on a live pair. v3.3.1 builds, tests, and race checking are automated, but the actual bandwidth, VPS overhead, loss recovery, and resilience still require measured two-host testing.
+
 ## ICMP direction in v3.3.1
 
 - **Auto (default):** start with **Reverse** foreign-origin ICMP Echo Requests. If initial authentication has not completed within 25 seconds, attempt **Direct** initiation from Iran. Selection has a 60-second minimum dwell to reduce flapping.
