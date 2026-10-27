@@ -157,7 +157,7 @@ cargo test --manifest-path Rust/Cargo.toml
 cargo build --release --manifest-path Rust/Cargo.toml
 ~~~
 
-Release builds are verified with SHA256 and a release manifest specifying **manager 3.2.1 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.2.1](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.2.1); rolling assets may also exist for compatibility.
+Release builds are verified with SHA256 and a release manifest specifying **manager 3.2.5 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.2.5](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.2.5); rolling assets may also exist for compatibility.
 
 ## 8. Compatibility contract and limitations
 
