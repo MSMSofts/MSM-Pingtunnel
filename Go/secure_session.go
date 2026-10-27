@@ -511,6 +511,8 @@ type secureStatus struct{
  ReverseQueueWaitMaxMs int64 `json:"reverse_queue_wait_max_ms"`
  ReverseQueueOldestAgeMs int64 `json:"reverse_queue_oldest_age_ms"`
  ReverseQueueWaitSamples uint64 `json:"reverse_queue_wait_samples"`
+ ReverseProbeReplayEntries int `json:"reverse_probe_replay_entries"`
+ ReverseProbeReplayOverflows uint64 `json:"reverse_probe_replay_overflows"`
  ReverseLastDataAge int64 `json:"reverse_last_data_age_seconds"`
  AutoFallbackCount uint64 `json:"auto_direct_fallback_count"`
  AutoFallbackReason string `json:"auto_direct_fallback_reason,omitempty"`
@@ -557,6 +559,8 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.ReverseQueueWaitMaxMs=diag.QueueWaitMaxMs
  report.ReverseQueueOldestAgeMs=diag.QueueOldestAgeMs
  report.ReverseQueueWaitSamples=diag.QueueWaitSamples
+ report.ReverseProbeReplayEntries=diag.ProbeReplayEntries
+ report.ReverseProbeReplayOverflows=diag.ProbeCacheOverflows
  report.ReverseLastDataAge=diag.LastUsefulFrameAgeSeconds
  report.AutoFallbackCount=diag.FallbackCount
  report.AutoFallbackReason=diag.FallbackReason
