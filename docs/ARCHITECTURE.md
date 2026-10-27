@@ -13,6 +13,8 @@ The overseas Go transport sends authenticated foreign-initiated Echo Requests. A
 
 On Iran, encrypted frames are held in a FIFO queue bounded by **256 frames, 2 MiB, 12 seconds**. One authenticated poll can retrieve one queued encrypted frame in a matching Echo Reply. If the raw socket reports a write failure, the unsent frame is restored to the front without refreshing its lifetime; under pressure the queue drops the newest tail first to preserve the failed older frame. Normal empty polls do not cause an extra userspace reply; system-generated ICMP Echo behavior is controlled by Linux. Direction switching retains the existing reverse-first Auto selection and Direct fallback rules.
 
+For predominantly Iran→Foreign flows, Foreign sends an encrypted delivery receipt at most every eight seconds **only** while genuine authenticated incoming DATA has arrived within the previous ten seconds. Iran validates it using the existing session AEAD, which is useful evidence that Foreign received data and helps avoid an accidental reverse-to-direct switch during one-way traffic. Unsigned Echo Replies are not delivery evidence.
+
 Runtime JSON at `/run/pingtunnel-security.json` now reports `reverse_queue_packets`, `reverse_queue_bytes`, `reverse_queue_peak`, `reverse_queue_drops`, `reverse_write_failures`, `reverse_poll_interval_ms` and `reverse_last_data_age_seconds` along with the existing handshake and replay data. Do not treat incoming HMAC-verified polls alone as proof of a functioning reverse return path.
 
 ## 1. Responsibilities and boundaries
