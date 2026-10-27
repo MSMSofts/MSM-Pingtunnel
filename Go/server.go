@@ -868,6 +868,15 @@ func (p *Server) runReversePoller() {
         p.cryptoConfig.reverse.recordPollInterval(period)
         sequence:=int(p.reverseSequence.Add(1)&0xffff)
         sendForeignPoll(*p.conn,peer,0x42A5,sequence,p.cryptoConfig,now,recent)
+        if useReverse(p.cryptoConfig) && ready &&
+            p.cryptoConfig.reverse.shouldSendReceiveAck(now) {
+            // The client deliberately ignores this application-level Ping
+            // (Rproto=0) after AEAD validation. Its secureSession freshness
+            // is updated by Decrypt only when foreign has actually received
+            // and authenticated Iran->foreign data recently.
+            sendICMP(0x42A5,sequence,*p.conn,peer,"","",uint32(MyMsg_PING),nil,
+                8,0,p.key,0,0,0,0,0,0,0,p.cryptoConfig)
+        }
         timer.Reset(period)
     }
 }
