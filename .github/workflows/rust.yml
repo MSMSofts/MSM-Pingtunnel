@@ -16,6 +16,9 @@ on:
       - "Source/update.sh"
       - ".github/workflows/rust.yml"
   workflow_dispatch:
+concurrency:
+  group: manager-ci-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
