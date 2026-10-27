@@ -7,6 +7,14 @@
 **خلاصه:** Pingtunnel Manager فقط دو VPS دارد. کاربر به پورت TCP/UDP سرور ایران وصل می‌شود؛ هسته Go ترافیک را در ICMP رمزنگاری‌شده به VPS خارج می‌رساند و سرور خارج آن را به پورت سرویس محلی خودش تحویل می‌دهد. Rust تنها کارهای راه‌اندازی، ذخیره تنظیمات و کنترل systemd را انجام می‌دهد.
 
 
+## Reverse-first Auto failover safety (v3.3.2)
+
+Auto starts with Reverse on both peers. The Iran endpoint alone decides when sustained failure merits emergency Direct; the overseas peer follows authenticated ICMP negotiation. This prevents short packet-loss bursts, an idle VPN, or the previous unconditional 25-second handshake deadline from preempting a functioning Reverse tunnel.
+
+The Iran transport records sustained local client demand separately from the last authenticated peer data and last verified reverse poll timestamp. Direct is eligible only if real client demand continues and one of three conditions holds: (1) no signed Reverse polls at all for at least 90 seconds, (2) signed polls arrive but the authenticated four-step handshake remains incomplete for 150 seconds, or (3) an established reverse path has seen neither authenticated polls nor decrypted authenticated peer frames for at least 150 seconds. Direction dwell and later recovery opportunities remain bounded. A mode switch reports its reason and accounts for queued ciphertext that cannot be replayed across sessions.
+
+Authenticated inbound polls prove that the foreign-origin ICMP request arrived in Iran; they do not independently prove that Iran's Echo Reply reached Foreign. For complete reachability, use authenticated handshake/data receipts and application throughput statistics. Avoid inferring transport availability from process liveness or generic Ping.
+
 ## Reverse throughput scheduling (v3.3.1)
 
 The overseas Go transport sends authenticated foreign-initiated Echo Requests. An event-driven timer selects nominal inter-poll delays of **200 ms negotiating / 250 ms idle / 80 ms quiet with active connections / 40 ms one useful frame / 12 ms moderate burst / 2 ms sustained burst**. All acceleration is gated on successfully authenticated incoming application DATA, never on untrusted ICMP packets. The resulting schedule is demand-aware, not congestion-aware: middlebox rate limits, ICMP loss and scheduling jitter may still reduce performance.
