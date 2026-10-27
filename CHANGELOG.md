@@ -1,5 +1,17 @@
 # Changelog / تاریخچه تغییرات
 
+## [3.3.4](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.4) — Downstream-aware reverse pacing and replay-cache capacity
+
+**Config schema 3 · Wire 4 · Reverse-first Auto unchanged**
+
+- Reverse polling now reacts to successful encrypted **Foreign→Iran DATA** sends, anticipating the Iran→Foreign UDP/QUIC acknowledgements for video downloads, rather than waiting only for upstream DATA to drive the adaptive scheduler.
+- Idle polling remains 250 ms; a connected but quiet link targets 24 ms (previously 80 ms), recent downstream flow targets 16/8 ms, and an established upstream DATA burst can still trigger the existing 2 ms peak. Scheduler intervals are nominal and never guarantee RTT or bandwidth.
+- Fixed a capacity mismatch in the signed Reverse-poll nonce replay cache: a 4,096-entry limit could prematurely reject valid 500/s polls within its 20-second replay window. The explicit limit is now 16,384, sufficient for 10,000 polls plus bursts, while preserving HMAC, freshness and replay defenses.
+- Added measured Iran-side encrypted frame queue residence time (recent EWMA and maximum), age of the oldest pending frame, successful sends counted, and current replay-cache occupancy/overflow counters. The foreign side reports its successful encrypted downstream DATA send count.
+- Added high-load regression verifying 10,000 signed polls at 500/s with no spurious replay-cache refusal, genuine replay rejection and eviction of old nonces; additional tests validate demand-driven pacing, decay after idle and successful-only queue latency metrics.
+- Does not alter the encrypted wire format, pairing key, packet shape, Reverse-first selection or Direct emergency fallback. CI tests correctness, not actual video quality; live Hysteria 2 throughput and stall measurements remain necessary.
+
+
 ## [3.3.3](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.3) — Separate kernel Echo reflections from authenticated DATA
 
 **Config schema: 3 · Wire version: 4 · No packet-layout, crypto or direction changes**
