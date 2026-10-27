@@ -50,9 +50,9 @@ func startReverseHandshake(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *C
     replyReverse(conn,peer,id,seq,c)
 }
 
-func sendForeignPoll(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoConfig,now time.Time) {
+func sendForeignPoll(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoConfig,now time.Time,recentlyAuthenticated bool) {
     if c==nil||c.sec==nil||c.sec.region!="foreign"||c.reverse==nil {return}
-    authenticated:=c.SecureReady()
+    authenticated:=recentlyAuthenticated
     // A long-idle authenticated direct link is not automatically considered
     // offline; real app demand or authenticated link degradation is required.
     if !c.reverse.needsProbe(now,authenticated){return}
