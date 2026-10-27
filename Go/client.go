@@ -361,7 +361,12 @@ func (p *Client) Run() error {
 			}
             // Never restart just because a quiet tunnel has no recent pong.
             // Sustained client demand and prolonged link failure are required.
-            if linkWatchdog.shouldRestart(now, time.Unix(0,p.lastPongUnixNano.Load()),
+            lastPeerResponse := time.Unix(0,p.lastPongUnixNano.Load())
+            if p.cryptoConfig!=nil && p.cryptoConfig.sec!=nil {
+                lastAuthenticated := p.cryptoConfig.sec.lastPeerTraffic()
+                if lastAuthenticated.After(lastPeerResponse) {lastPeerResponse=lastAuthenticated}
+            }
+            if linkWatchdog.shouldRestart(now, lastPeerResponse,
                 p.lastActivity(), p.activeConnCount()>0) {
                 failOnUnexpectedWorkerExit("peer unreachable during sustained traffic for over 4 minutes",&p.exit)
             }
