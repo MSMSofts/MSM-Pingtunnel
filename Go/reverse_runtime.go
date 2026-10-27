@@ -37,15 +37,23 @@ func replyReverse(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoConf
 func startReverseHandshake(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoConfig,now time.Time) {
     if c==nil || c.reverse==nil || c.sec==nil || c.sec.region!="iran" {return}
     if c.reverse.preference==ICMPDirect{return}
-    if !c.SecureReady() || c.reverse.acceptReverseOnDemand(now,c.sec.lastPeerTraffic()) {
+    // Do not reset an already authenticated reverse session on every
+    // authenticated polling request: that caused endless handshakes.
+    if useReverse(c) && c.SecureReady() {
+        replyReverse(conn,peer,id,seq,c)
+        return
+    }
+    if !c.reverse.allowReverseCandidate(now,c.SecureReady(),c.sec.lastPeerTraffic()) {
+        return
+    }
+    if !useReverse(c) {
         if c.SecureReady(){c.sec.resetForTransportChange()}
-        c.reverse.choose(ICMPReverse,now)
-        if !useReverse(c){return}
-        frame,err:=c.SecureControl(now)
-        if err==nil && len(frame)>0{
-            _=emitEcho(conn,peer,0,id,seq,frame)
-            return
-        }
+        if !c.reverse.choose(ICMPReverse,now){return}
+    }
+    frame,err:=c.SecureControl(now)
+    if err==nil && len(frame)>0{
+        _=emitEcho(conn,peer,0,id,seq,frame)
+        return
     }
     replyReverse(conn,peer,id,seq,c)
 }
