@@ -798,9 +798,11 @@ func (p *Client) processPacket(packet *Packet) {
 		return
 	}
 
-	if !icmpDatagram && packet.echoId != p.id {
-		return
-	}
+	// In reverse mode the foreign endpoint owns each Echo Request ID.
+    // Authentication is enforced by the AEAD session and pinned peer IP.
+    if !icmpDatagram && packet.echoId != p.id && !useReverse(p.cryptoConfig) {
+        return
+    }
 
 	if packet.my.Type == (int32)(MyMsg_PING) {
 		t := time.Time{}
