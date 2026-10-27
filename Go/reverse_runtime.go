@@ -27,11 +27,23 @@ func emitEcho(conn icmp.PacketConn,peer *net.IPAddr,typ,id,seq int,body []byte) 
 
 // No response is emitted to unauthenticated control or data. This reply is
 // called only after a valid paired probe or authenticated session frame.
+// Dequeue only for an attempted send. On socket failure restore the frame
+// ahead of subsequent frames without refreshing its original 12s expiry.
+func sendQueuedReverse(r *reverseTransport,now time.Time,write func([]byte)bool) bool {
+    f,ok:=r.takeFrame(now)
+    // Ordinary idle polling receives the kernel's usual Echo Reply.
+    // Avoid injecting a second empty response for every poll.
+    if !ok {return true}
+    if write(f.data){return true}
+    r.restoreFront(f,now)
+    return false
+}
 func replyReverse(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoConfig) {
     if !useReverse(c) || c.sec==nil || c.sec.region!="iran" {return}
-    payload:=c.reverse.take(time.Now())
-    // An empty Echo Reply is a poll acknowledgement, not an application frame.
-    _=emitEcho(conn,peer,0,id,seq,payload)
+    _=sendQueuedReverse(c.reverse,time.Now(),func(payload []byte)bool{
+        // No new framing: preserve standard ICMP Echo Reply and session AEAD.
+        return emitEcho(conn,peer,0,id,seq,payload)
+    })
 }
 
 func startReverseHandshake(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoConfig,now time.Time) {

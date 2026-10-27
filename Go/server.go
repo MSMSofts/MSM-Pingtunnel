@@ -841,27 +841,42 @@ func (p *Server) updateConnError() {
 // The foreign VPS always owns Echo Requests; Iran replies to those requests.
 func (p *Server) runReversePoller() {
     defer failOnUnexpectedWorkerExit("reverse ICMP poller",&p.exit)
-    ticker:=time.NewTicker(10*time.Millisecond)
-    defer ticker.Stop()
+    // One adaptive timer instead of a permanent high-frequency ticker:
+    // a quiet VPS no longer wakes up 500 times/second to do nothing.
+    timer:=time.NewTimer(0)
+    defer timer.Stop()
     peer:=&net.IPAddr{IP:append(net.IP(nil),p.allowedPeer...)}
-    last:=time.Time{}
     for !p.exit.Load() {
-        now:=<-ticker.C
+        <-timer.C
         if p.exit.Load(){return}
+        now:=time.Now()
         recent:=false
-        if p.cryptoConfig.SecureReady(){
+        ready:=p.cryptoConfig.SecureReady()
+        if ready {
             last:=p.cryptoConfig.sec.lastPeerTraffic()
             recent=!last.IsZero() && now.Sub(last)<90*time.Second
         }
-        if !p.cryptoConfig.reverse.needsProbe(now,recent){continue}
-        period:=500*time.Millisecond
-        if p.cryptoConfig.SecureReady() && !useReverse(p.cryptoConfig){period=10*time.Second}
-        if p.localConnMapSize.Load()>0 && p.cryptoConfig.SecureReady(){
-            period=10*time.Millisecond
+        period:=p.cryptoConfig.reverse.pollPeriod(now,int(p.localConnMapSize.Load()),ready)
+        if !useReverse(p.cryptoConfig) {period=10*time.Second}
+        if !p.cryptoConfig.reverse.needsProbe(now,recent) {
+            // Recheck liveness periodically but avoid unnecessary probes on
+            // a healthy Direct connection.
+            p.cryptoConfig.reverse.recordPollInterval(time.Second)
+            timer.Reset(time.Second)
+            continue
         }
-        if !last.IsZero() && now.Sub(last)<period{continue}
+        p.cryptoConfig.reverse.recordPollInterval(period)
         sequence:=int(p.reverseSequence.Add(1)&0xffff)
         sendForeignPoll(*p.conn,peer,0x42A5,sequence,p.cryptoConfig,now,recent)
-        last=now
+        if useReverse(p.cryptoConfig) && ready &&
+            p.cryptoConfig.reverse.shouldSendReceiveAck(now) {
+            // The client deliberately ignores this application-level Ping
+            // (Rproto=0) after AEAD validation. Its secureSession freshness
+            // is updated by Decrypt only when foreign has actually received
+            // and authenticated Iran->foreign data recently.
+            sendICMP(0x42A5,sequence,*p.conn,peer,"","",uint32(MyMsg_PING),nil,
+                8,0,p.key,0,0,0,0,0,0,0,p.cryptoConfig)
+        }
+        timer.Reset(period)
     }
 }

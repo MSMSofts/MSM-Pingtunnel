@@ -62,6 +62,12 @@ type reverseTransport struct {
     recent map[[8]byte]time.Time
     lastPrune time.Time
     lastValidProbe time.Time
+    lastUsefulFrame time.Time
+    usefulBurst int
+    lastReceiveAck time.Time
+    failedReplies uint64
+    pollPeriodMillis int
+    queuePeak int
 }
 
 func newReverseTransport(preference ICMPDirection, key []byte, now time.Time) (*reverseTransport, error) {
@@ -209,10 +215,11 @@ func (r *reverseTransport) enqueue(frame []byte,now time.Time) bool {
     }
     r.pending=append(r.pending,reverseQueuedFrame{data:append([]byte(nil),frame...),created:now})
     r.pendingBytes+=len(frame)
+    if len(r.pending)>r.queuePeak{r.queuePeak=len(r.pending)}
     return true
 }
 
-func (r *reverseTransport) take(now time.Time) []byte {
+func (r *reverseTransport) takeFrame(now time.Time) (reverseQueuedFrame,bool) {
     r.mu.Lock();defer r.mu.Unlock()
     for len(r.pending)>0{
         f:=r.pending[0]
@@ -220,9 +227,101 @@ func (r *reverseTransport) take(now time.Time) []byte {
         r.pending=r.pending[1:]
         r.pendingBytes-=len(f.data)
         if now.Sub(f.created)>reverseFrameTTL{r.drops++;continue}
-        return f.data
+        return f,true
     }
-    return nil
+    return reverseQueuedFrame{},false
+}
+func (r *reverseTransport) take(now time.Time) []byte {
+    f,ok:=r.takeFrame(now)
+    if !ok{return nil}
+    return f.data
+}
+// Roll a failed socket write back to the head of the queue. Preserve the
+// original enqueue timestamp so repeated failures never extend its lifetime.
+func (r *reverseTransport) restoreFront(f reverseQueuedFrame,now time.Time) {
+    if len(f.data)==0{return}
+    r.mu.Lock();defer r.mu.Unlock()
+    if now.Sub(f.created)>reverseFrameTTL{r.drops++;return}
+    for len(r.pending)>0 && (len(r.pending)>=reverseQueueMaxFrames ||
+        r.pendingBytes+len(f.data)>reverseQueueMaxBytes){
+        last:=len(r.pending)-1
+        r.pendingBytes-=len(r.pending[last].data)
+        r.pending[last]=reverseQueuedFrame{}
+        r.pending=r.pending[:last]
+        r.drops++
+    }
+    r.pending=append(r.pending,reverseQueuedFrame{})
+    copy(r.pending[1:],r.pending[:len(r.pending)-1])
+    r.pending[0]=f
+    r.pendingBytes+=len(f.data)
+    r.failedReplies++
+}
+// Confirm that the foreign server received authenticated Iran-side data.
+ // The normal ICMP poll alone proves only the inbound request path.
+func (r *reverseTransport) shouldSendReceiveAck(now time.Time) bool {
+    r.mu.Lock();defer r.mu.Unlock()
+    if r.lastUsefulFrame.IsZero() || now.Sub(r.lastUsefulFrame)<0 ||
+        now.Sub(r.lastUsefulFrame)>10*time.Second {
+        return false
+    }
+    if !r.lastReceiveAck.IsZero() && now.Sub(r.lastReceiveAck)<8*time.Second {
+        return false
+    }
+    r.lastReceiveAck=now
+    return true
+}
+func (r *reverseTransport) recordPollInterval(period time.Duration) {
+    r.mu.Lock();defer r.mu.Unlock()
+    r.pollPeriodMillis=int(period/time.Millisecond)
+}
+func (r *reverseTransport) noteUsefulFrame(now time.Time) {
+    r.mu.Lock();defer r.mu.Unlock()
+    if !r.lastUsefulFrame.IsZero() && now.Sub(r.lastUsefulFrame)>=0 &&
+        now.Sub(r.lastUsefulFrame)<350*time.Millisecond {
+        if r.usefulBurst<1024{r.usefulBurst++}
+    }else{
+        r.usefulBurst=1
+    }
+    r.lastUsefulFrame=now
+}
+func (r *reverseTransport) pollPeriod(now time.Time,activeConns int,ready bool) time.Duration {
+    r.mu.Lock();defer r.mu.Unlock()
+    // Fast polling requires a sustained burst of useful authenticated
+    // payloads. One isolated datagram must never trigger 500 empty polls/s.
+    period:=250*time.Millisecond
+    age:=now.Sub(r.lastUsefulFrame)
+    if !ready {
+        period=200*time.Millisecond
+    } else if !r.lastUsefulFrame.IsZero() && age>=0 && age<1500*time.Millisecond {
+        if r.usefulBurst>=4 && age<350*time.Millisecond {
+            period=2*time.Millisecond
+        }else if r.usefulBurst>=2{
+            period=12*time.Millisecond
+        }else{
+            period=40*time.Millisecond
+        }
+    } else if activeConns>0 {
+        period=80*time.Millisecond
+    }
+    r.pollPeriodMillis=int(period/time.Millisecond)
+    return period
+}
+type reverseDiagnostics struct {
+    Pending int
+    PendingBytes int
+    QueuePeak int
+    QueueDrops uint64
+    FailedReplies uint64
+    PollIntervalMillis int
+    LastUsefulFrameAgeSeconds int64
+}
+func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
+    r.mu.Lock();defer r.mu.Unlock()
+    age:=int64(-1)
+    if !r.lastUsefulFrame.IsZero() {age=int64(now.Sub(r.lastUsefulFrame).Seconds());if age<0{age=0}}
+    return reverseDiagnostics{Pending:len(r.pending),PendingBytes:r.pendingBytes,
+        QueuePeak:r.queuePeak,QueueDrops:r.drops,FailedReplies:r.failedReplies,
+        PollIntervalMillis:r.pollPeriodMillis,LastUsefulFrameAgeSeconds:age}
 }
 
 // Observed inbound authenticated reverse probes are separately reported.

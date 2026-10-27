@@ -499,6 +499,13 @@ type secureStatus struct{
  Region string `json:"region"`
  ICMPDirection string `json:"icmp_direction,omitempty"`
  ReverseProbeAgeSeconds int64 `json:"reverse_probe_age_seconds"`
+ ReverseQueuePackets int `json:"reverse_queue_packets"`
+ ReverseQueueBytes int `json:"reverse_queue_bytes"`
+ ReverseQueuePeak int `json:"reverse_queue_peak"`
+ ReverseQueueDrops uint64 `json:"reverse_queue_drops"`
+ ReverseWriteFailures uint64 `json:"reverse_write_failures"`
+ ReversePollIntervalMs int `json:"reverse_poll_interval_ms"`
+ ReverseLastDataAge int64 `json:"reverse_last_data_age_seconds"`
  State string `json:"state"`
  LastValidAgeSeconds int64 `json:"last_valid_age_seconds"`
  PendingRekey bool `json:"pending_rekey"`
@@ -524,12 +531,19 @@ func (s *secureSession) status()secureStatus{
  }
 }
 func (s *secureSession) writeStatus(path string) {
- s.writeStatusWithDirection(path,"direct",-1)
+ s.writeStatusWithDirection(path,"direct",-1,reverseDiagnostics{LastUsefulFrameAgeSeconds:-1})
 }
-func (s *secureSession) writeStatusWithDirection(path string,direction string,reverseProbeAge int64) {
+func (s *secureSession) writeStatusWithDirection(path string,direction string,reverseProbeAge int64,diag reverseDiagnostics) {
  report:=s.status()
  report.ICMPDirection=direction
  report.ReverseProbeAgeSeconds=reverseProbeAge
+ report.ReverseQueuePackets=diag.Pending
+ report.ReverseQueueBytes=diag.PendingBytes
+ report.ReverseQueuePeak=diag.QueuePeak
+ report.ReverseQueueDrops=diag.QueueDrops
+ report.ReverseWriteFailures=diag.FailedReplies
+ report.ReversePollIntervalMs=diag.PollIntervalMillis
+ report.ReverseLastDataAge=diag.LastUsefulFrameAgeSeconds
  encoded,err:=json.Marshal(report)
  if err!=nil{return}
  tmp:=path+".pending"

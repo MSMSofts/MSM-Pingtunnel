@@ -2,18 +2,40 @@
 
 **یک تونل ICMP رمزنگاری‌شده، دو سرور، راه‌اندازی ساده و مدیریت سبک.**
 
-[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.3.0](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.0)
+[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.3.1](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.1)
 
-![Version](https://img.shields.io/badge/version-3.3.0-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.3.1-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
 
 **Pingtunnel Manager** ابزاری برای نصب، جفت‌سازی، مدیریت و پایش یک تونل مبتنی بر **ICMP** میان **یک VPS ایران و یک VPS خارج** است. ترافیک برنامه‌های TCP یا UDP ابتدا وارد سرور ایران می‌شود، از طریق ICMP رمزنگاری‌شده به سرور خارج می‌رسد و در نهایت به سرویس محلی موردنظر تحویل داده می‌شود.
 
 این پروژه **به‌تنهایی سرویس VPN یا جایگزین Hysteria 2، Xray و s-ui نیست**؛ بلکه لایهٔ انتقال میان دو سرور را فراهم می‌کند.
 
-> **نسخه فعلی: 3.3.0** — مدیریت Rust و هسته Go، Config Schema 3 و Wire v4. جهت ICMP پیش‌فرض **Auto: ابتدا Reverse (خارج→ایران)، سپس Direct پس از عدم موفقیت مذاکره** است. تست دو VPS واقعی هنوز لازم است.
+> **نسخه فعلی: 3.3.1** — مدیریت Rust و هسته Go، Config Schema 3 و Wire v4. جهت ICMP پیش‌فرض **Auto: ابتدا Reverse (خارج→ایران)، سپس Direct پس از عدم موفقیت مذاکره** است. تست دو VPS واقعی هنوز لازم است.
 
 
-## اولویت مسیر در نسخه 3.3.0
+
+## افزایش سرعت و پایداری Reverse در نسخهٔ 3.3.1
+
+هستهٔ سرور خارج حالا به‌جای Poll با فاصلهٔ ثابت، از تایمر تطبیقی استفاده می‌کند. مقادیر زیر **فاصلهٔ هدف در برنامه** هستند، نه تضمین تأخیر واقعی شبکه:
+
+| وضعیت مسیر معکوس | فاصلهٔ هدف Poll |
+| --- | ---: |
+| مذاکره و راه‌اندازی نشست | ۲۰۰ میلی‌ثانیه |
+| بدون جریان فعال | ۲۵۰ میلی‌ثانیه |
+| جریان باز ولی کم‌ترافیک | ۸۰ میلی‌ثانیه |
+| پس از یک فریم دادهٔ احرازشده | ۴۰ میلی‌ثانیه |
+| چند فریم پشت سر هم | ۱۲ میلی‌ثانیه |
+| جریان پیوسته و پرترافیک | ۲ میلی‌ثانیه |
+
+در صف ارسال ایران، اگر نوشتن Echo Reply شکست بخورد فریم به ابتدای صف بازمی‌گردد، اما مهلت انقضای ۱۲ ثانیه‌ای آن تمدید نمی‌شود. پاسخ خالی اضافه از سمت برنامه حذف شده؛ سیستم‌عامل همچنان ممکن است پاسخ عادی ICMP تولید کند. قالب Wire v4 و رمزنگاری نشست تغییر نکرده‌اند.
+
+هنگامی که سرور خارج واقعاً دادهٔ احرازشدهٔ ایران را دریافت می‌کند، یک تأیید رمزنگاری‌شده با نرخ محدود (حداکثر هر ۸ ثانیه و فقط هنگام دریافت داده طی ۱۰ ثانیهٔ اخیر) می‌فرستد. این کار از تشخیص اشتباه قطعی در انتقال‌های طولانی و عمدتاً یک‌طرفه جلوگیری می‌کند؛ Poll عادی شبکه به‌تنهایی نشانهٔ موفقیت مسیر برگشت نیست.
+
+برای مشاهدهٔ شاخص‌ها روی هر دو VPS از `sudo pingtunnel security` استفاده کن. `Reverse queued frames / bytes`، `queue peak / drops`، `reply write failures` و `adaptive reverse polling interval` برای تشخیص گلوگاه به نمایش درمی‌آیند. بالا بودن مستمر Drops نشانهٔ فشار صف یا محدودیت مسیر است؛ رسیدن به فاصلهٔ ۲ میلی‌ثانیه نیز به معنی دستیابی قطعی به سرعت مشخصی نیست.
+
+**اعتبارسنجی:** اتصال واقعی Reverse برای نسخهٔ پیشین گزارش شده است؛ نسخهٔ 3.3.1 در CI تست می‌شود و برای نتیجه‌گیری کمی دربارهٔ سرعت یا پایداری، باید ترافیک واقعی و Packet Loss دو VPS سنجیده شود.
+
+## اولویت مسیر در نسخه 3.3.1
 
 - **Auto (پیش‌فرض):** ابتدا خارج درخواست Echo می‌فرستد، ایران پاسخ حاوی دادهٔ احرازشده می‌دهد. در صورت ناکامی در Handshake اولیه به مدت ۲۵ ثانیه، مسیر Direct امتحان می‌شود. تغییر مسیر بی‌وقفه انجام نمی‌شود و حداقل ۶۰ ثانیه فاصلهٔ تثبیت دارد.
 - **Reverse:** فقط شروع ICMP توسط خارج.
@@ -278,6 +300,8 @@ SECURITY & HEALTH
 
 | نسخه | تنظیمات | پروتکل بین VPSها | سازگاری |
 | --- | --- | --- | --- |
+| **3.3.1** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | Poll تطبیقی Reverse، جلوگیری از اتلاف فریم هنگام خطای نوشتن، آمار صف و کاهش مصرف CPU |
+| **3.3.0** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | Reverse-first با بازگشت به Direct |
 | **3.2.6** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | اصلاح نهایی بازیابی با در نظر گرفتن ترافیک احرازشده |
 | **3.2.5** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | اصلاح مکث Status و بازیابی گیرنده و ارتباط بلندمدت |
 | **3.2.4** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | رفع نمایش منو؛ بدون تغییر شبکه |
@@ -293,7 +317,7 @@ SECURITY & HEALTH
 
 > **نکته پس از انتقال مخزن:** برای به‌روزرسانی، فعلاً از دستور نصب با نشانی جدید `MSMSofts/MSM-Pingtunnel` در بخش «نصب سریع» استفاده کن. برخی باینری‌های منتشرشده پیش از انتقال، ممکن است در فرمان داخلی `pingtunnel update` هنوز به نشانی قدیمی مراجعه کنند.
 
-[جزئیات تغییرات](CHANGELOG.md) · [نسخه ثابت 3.3.0](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.0) · [نسخه rolling](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
+[جزئیات تغییرات](CHANGELOG.md) · [نسخه ثابت 3.3.1](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.1) · [نسخه rolling](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
 
 ## مسیر فایل‌ها
 
@@ -316,7 +340,7 @@ SECURITY & HEALTH
 
 ## محدودیت‌های فعلی و برنامه توسعه
 
-**محدودیت‌های نسخه 3.3.0:** چند VPS و HA، انتقال هم‌زمان TCP و UDP در یک نمونه، تضمین مقابله با DoS حجمی یا فیلترینگ و ممیزی مستقل رمزنگاری هنوز ارائه نشده‌اند. قابلیت Reverse/Auto در CI تست شده ولی تست میدانی دو VPS لازم است.
+**محدودیت‌های نسخه 3.3.1:** چند VPS و HA، انتقال هم‌زمان TCP و UDP در یک نمونه، تضمین مقابله با DoS حجمی یا فیلترینگ و ممیزی مستقل رمزنگاری هنوز ارائه نشده‌اند. قابلیت Reverse/Auto در CI تست شده ولی تست میدانی دو VPS لازم است.
 
 **بررسی‌های ضروری پیش از استفاده گسترده:** آزمایش ICMP روی دو VPS واقعی، تست عملی Hysteria 2، تزریق Packet Loss/Jitter، آزمون Restart و ارتقای دوطرفه، و ممیزی مستقل پروتکل رمزنگاری.
 

@@ -2,9 +2,20 @@
 
 [README فارسی](../README.md) · [English README](../README.en.md) · [Security policy](../SECURITY.md)
 
-**Version:** Manager 3.3.0 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
+**Version:** Manager 3.3.1 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
 
 **خلاصه:** Pingtunnel Manager فقط دو VPS دارد. کاربر به پورت TCP/UDP سرور ایران وصل می‌شود؛ هسته Go ترافیک را در ICMP رمزنگاری‌شده به VPS خارج می‌رساند و سرور خارج آن را به پورت سرویس محلی خودش تحویل می‌دهد. Rust تنها کارهای راه‌اندازی، ذخیره تنظیمات و کنترل systemd را انجام می‌دهد.
+
+
+## Reverse throughput scheduling (v3.3.1)
+
+The overseas Go transport sends authenticated foreign-initiated Echo Requests. An event-driven timer selects nominal inter-poll delays of **200 ms negotiating / 250 ms idle / 80 ms quiet with active connections / 40 ms one useful frame / 12 ms moderate burst / 2 ms sustained burst**. All acceleration is gated on successfully authenticated incoming application DATA, never on untrusted ICMP packets. The resulting schedule is demand-aware, not congestion-aware: middlebox rate limits, ICMP loss and scheduling jitter may still reduce performance.
+
+On Iran, encrypted frames are held in a FIFO queue bounded by **256 frames, 2 MiB, 12 seconds**. One authenticated poll can retrieve one queued encrypted frame in a matching Echo Reply. If the raw socket reports a write failure, the unsent frame is restored to the front without refreshing its lifetime; under pressure the queue drops the newest tail first to preserve the failed older frame. Normal empty polls do not cause an extra userspace reply; system-generated ICMP Echo behavior is controlled by Linux. Direction switching retains the existing reverse-first Auto selection and Direct fallback rules.
+
+For predominantly Iran→Foreign flows, Foreign sends an encrypted delivery receipt at most every eight seconds **only** while genuine authenticated incoming DATA has arrived within the previous ten seconds. Iran validates it using the existing session AEAD, which is useful evidence that Foreign received data and helps avoid an accidental reverse-to-direct switch during one-way traffic. Unsigned Echo Replies are not delivery evidence.
+
+Runtime JSON at `/run/pingtunnel-security.json` now reports `reverse_queue_packets`, `reverse_queue_bytes`, `reverse_queue_peak`, `reverse_queue_drops`, `reverse_write_failures`, `reverse_poll_interval_ms` and `reverse_last_data_age_seconds` along with the existing handshake and replay data. Do not treat incoming HMAC-verified polls alone as proof of a functioning reverse return path.
 
 ## 1. Responsibilities and boundaries
 
@@ -114,7 +125,7 @@ Rust CLI presents these through `pingtunnel security` and `pingtunnel performanc
 
 ~~~text
 Rust/
-  Cargo.toml             Rust manager package (3.3.0)
+  Cargo.toml             Rust manager package (3.3.1)
   src/main.rs            CLI, systemd and config generation
   src/setup.rs           Unified pairing wizard
 
@@ -157,7 +168,7 @@ cargo test --manifest-path Rust/Cargo.toml
 cargo build --release --manifest-path Rust/Cargo.toml
 ~~~
 
-Release builds are verified with SHA256 and a release manifest specifying **manager 3.3.0 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.3.0](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.0); rolling assets may also exist for compatibility.
+Release builds are verified with SHA256 and a release manifest specifying **manager 3.3.1 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.3.1](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.1); rolling assets may also exist for compatibility.
 
 ## 8. Compatibility contract and limitations
 
