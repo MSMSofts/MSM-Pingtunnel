@@ -29,13 +29,12 @@ func TestReverseSelectionAndAutomaticGracePeriod(t *testing.T){
     key:=bytes.Repeat([]byte{7},32)
     r,err:=newReverseTransport(ICMPAuto,key,now)
     if err!=nil{t.Fatal(err)}
-    if r.needsProbe(now.Add(10*time.Second),false){t.Fatal("auto probed prematurely")}
-    if r.needsProbe(now.Add(20*time.Second),true){t.Fatal("auto probed healthy direct path")}
-    if !r.needsProbe(now.Add(20*time.Second),false){t.Fatal("auto did not probe failed direct path")}
-    if !r.choose(ICMPReverse,now.Add(20*time.Second)){t.Fatal("automatic reverse selection failed")}
-    if !r.needsProbe(now.Add(21*time.Second),true){t.Fatal("reverse path polling stopped")}
-    if r.choose(ICMPDirect,now.Add(22*time.Second)){t.Fatal("missing switch hysteresis")}
-    if !r.choose(ICMPDirect,now.Add(51*time.Second)){t.Fatal("auto cannot recover direct after dwell")}
+    if r.direction()!=ICMPReverse{t.Fatal("auto did not choose reverse on startup")}
+    if !r.needsProbe(now,true){t.Fatal("auto did not probe reverse immediately")}
+    if r.fallbackDirect(now.Add(20*time.Second),false,time.Time{}){t.Fatal("direct selected before reverse startup deadline")}
+    if !r.fallbackDirect(now.Add(26*time.Second),false,time.Time{}){t.Fatal("auto did not fall back to direct on reverse timeout")}
+    if r.choose(ICMPReverse,now.Add(45*time.Second)){t.Fatal("switch hysteresis not enforced")}
+    if !r.choose(ICMPReverse,now.Add(87*time.Second)){t.Fatal("auto could not retry reverse after cooldown")}
     d,_:=newReverseTransport(ICMPDirect,key,now)
     if d.needsProbe(now.Add(time.Hour),false) || d.choose(ICMPReverse,now.Add(time.Hour)){t.Fatal("direct-only mode changed direction")}
     only,_:=newReverseTransport(ICMPReverse,key,now)
@@ -61,14 +60,15 @@ func TestReverseQueueBoundsAndTTL(t *testing.T){
 func TestAutoReverseRequiresTrafficAndStaleAuthentication(t *testing.T){
  now:=time.Unix(1800000000,0)
  r,_:=newReverseTransport(ICMPAuto,bytes.Repeat([]byte{9},32),now)
- if r.acceptReverseOnDemand(now,time.Time{}){t.Fatal("quiet transport reversed without demand")}
+ if !r.acceptReverseOnDemand(now,false,time.Time{}){t.Fatal("initial reverse candidate unavailable")}
  r.noteDemand(now.Add(40*time.Second),true)
- if r.acceptReverseOnDemand(now.Add(40*time.Second),now.Add(20*time.Second)){t.Fatal("recent authenticated traffic should retain direct")}
- if !r.acceptReverseOnDemand(now.Add(60*time.Second),now.Add(20*time.Second)){t.Fatal("stale demanded link did not allow reversal")}
- if !r.choose(ICMPReverse,now.Add(60*time.Second)){t.Fatal("could not select reverse")}
- if r.fallbackDirect(now.Add(100*time.Second),time.Time{}){t.Fatal("fallback ignored 90-second dwell")}
- r.noteDemand(now.Add(170*time.Second),true)
- if !r.fallbackDirect(now.Add(171*time.Second),time.Time{}){t.Fatal("reverse outage did not fall back to direct")}
+ if !r.fallbackDirect(now.Add(41*time.Second),false,time.Time{}){t.Fatal("startup did not fall back after timeout")}
+ if r.allowReverseCandidate(now.Add(60*time.Second),false,time.Time{}){t.Fatal("direct stabilization cooldown was bypassed")}
+ if !r.allowReverseCandidate(now.Add(102*time.Second),false,time.Time{}){t.Fatal("reverse retry blocked after cooldown")}
+ if !r.choose(ICMPReverse,now.Add(102*time.Second)){t.Fatal("could not retry reverse")}
+ r.noteDemand(now.Add(210*time.Second),true)
+ if r.fallbackDirect(now.Add(210*time.Second),true,now.Add(190*time.Second)){t.Fatal("fresh reverse traffic triggered fallback")}
+ if !r.fallbackDirect(now.Add(213*time.Second),true,now.Add(110*time.Second)){t.Fatal("stale reverse link did not fall back")}
 }
 
 func TestReverseModeParsing(t *testing.T){
