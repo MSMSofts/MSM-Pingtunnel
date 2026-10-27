@@ -37,7 +37,8 @@ func replyReverse(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoConf
 func startReverseHandshake(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoConfig,now time.Time) {
     if c==nil || c.reverse==nil || c.sec==nil || c.sec.region!="iran" {return}
     if c.reverse.preference==ICMPDirect{return}
-    if !c.SecureReady(){
+    if !c.SecureReady() || c.reverse.acceptReverseOnDemand(now,c.sec.lastPeerTraffic()) {
+        if c.SecureReady(){c.sec.resetForTransportChange()}
         c.reverse.choose(ICMPReverse,now)
         if !useReverse(c){return}
         frame,err:=c.SecureControl(now)
@@ -55,8 +56,8 @@ func sendForeignPoll(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoC
     // A long-idle authenticated direct link is not automatically considered
     // offline; real app demand or authenticated link degradation is required.
     if !c.reverse.needsProbe(now,authenticated){return}
-    if c.reverse.direction()!=ICMPReverse {c.reverse.choose(ICMPReverse,now)}
-    if !useReverse(c){return}
+    // A poll is only a candidate path. Foreign selects Reverse AFTER
+    // receiving an authenticated ClientHello inside the matching Echo Reply.
     probe,err:=c.reverse.makeProbe(now)
     if err!=nil{return}
     _=emitEcho(conn,peer,8,id,seq,probe)
