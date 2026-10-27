@@ -1,6 +1,7 @@
 package pingtunnel
 
 import (
+ "fmt"
  "os"
  "sync/atomic"
  "github.com/esrrhs/gohome/loggo"
@@ -15,6 +16,7 @@ func workerStoppedUnexpectedly(shuttingDown *atomic.Bool) bool {
 func failOnUnexpectedWorkerExit(name string,shuttingDown *atomic.Bool){
  if workerStoppedUnexpectedly(shuttingDown) {
   loggo.Error("critical Pingtunnel worker %s exited unexpectedly; restarting Go core via systemd",name)
+  fmt.Fprintf(os.Stderr, "pingtunnel: critical worker %s stopped; systemd restart requested\n", name)
   os.Exit(1)
  }
 }
