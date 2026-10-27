@@ -52,6 +52,7 @@ type reverseTransport struct {
     selected ICMPDirection
     started time.Time
     lastSwitch time.Time
+    lastDemand time.Time
     secret [32]byte
     pending []reverseQueuedFrame
     pendingBytes int
@@ -66,6 +67,22 @@ func newReverseTransport(preference ICMPDirection, key []byte, now time.Time) (*
     copy(r.secret[:],key)
     if preference==ICMPReverse {r.selected=ICMPReverse}
     return r,nil
+}
+
+func (r *reverseTransport) noteDemand(now time.Time,hasTraffic bool){
+ if !hasTraffic{return}
+ r.mu.Lock();r.lastDemand=now;r.mu.Unlock()
+}
+
+// A stale link alone does not trigger disruption of a quiet direct session.
+// The local client must have recently requested actual transport service.
+func (r *reverseTransport) acceptReverseOnDemand(now time.Time,lastAuthenticated time.Time) bool {
+ r.mu.Lock();defer r.mu.Unlock()
+ if r.preference==ICMPDirect{return false}
+ if r.selected==ICMPReverse{return true}
+ if r.preference==ICMPReverse{return true}
+ if r.lastDemand.IsZero()||now.Sub(r.lastDemand)>30*time.Second{return false}
+ return lastAuthenticated.IsZero()||now.Sub(lastAuthenticated)>=35*time.Second
 }
 
 func (r *reverseTransport) direction() ICMPDirection {
