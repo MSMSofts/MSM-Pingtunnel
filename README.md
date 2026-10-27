@@ -2,19 +2,19 @@
 
 **یک تونل ICMP رمزنگاری‌شده، دو سرور، راه‌اندازی ساده و مدیریت سبک.**
 
-[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.3.1](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.1)
+[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.3.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2)
 
-![Version](https://img.shields.io/badge/version-3.3.1-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.3.2-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
 
 **Pingtunnel Manager** ابزاری برای نصب، جفت‌سازی، مدیریت و پایش یک تونل مبتنی بر **ICMP** میان **یک VPS ایران و یک VPS خارج** است. ترافیک برنامه‌های TCP یا UDP ابتدا وارد سرور ایران می‌شود، از طریق ICMP رمزنگاری‌شده به سرور خارج می‌رسد و در نهایت به سرویس محلی موردنظر تحویل داده می‌شود.
 
 این پروژه **به‌تنهایی سرویس VPN یا جایگزین Hysteria 2، Xray و s-ui نیست**؛ بلکه لایهٔ انتقال میان دو سرور را فراهم می‌کند.
 
-> **نسخه فعلی: 3.3.1** — مدیریت Rust و هسته Go، Config Schema 3 و Wire v4. جهت ICMP پیش‌فرض **Auto: ابتدا Reverse (خارج→ایران)، سپس Direct پس از عدم موفقیت مذاکره** است. تست دو VPS واقعی هنوز لازم است.
+> **نسخه فعلی: 3.3.2** — مدیریت Rust و هسته Go، Config Schema 3 و Wire v4. جهت ICMP پیش‌فرض **Auto: ابتدا Reverse (خارج→ایران)، سپس Direct پس از عدم موفقیت مذاکره** است. تست دو VPS واقعی هنوز لازم است.
 
 
 
-## افزایش سرعت و پایداری Reverse در نسخهٔ 3.3.1
+## افزایش سرعت و پایداری Reverse (3.3.1 و 3.3.2)
 
 هستهٔ سرور خارج حالا به‌جای Poll با فاصلهٔ ثابت، از تایمر تطبیقی استفاده می‌کند. مقادیر زیر **فاصلهٔ هدف در برنامه** هستند، نه تضمین تأخیر واقعی شبکه:
 
@@ -35,13 +35,13 @@
 
 **اعتبارسنجی:** اتصال واقعی Reverse برای نسخهٔ پیشین گزارش شده است؛ نسخهٔ 3.3.1 در CI تست می‌شود و برای نتیجه‌گیری کمی دربارهٔ سرعت یا پایداری، باید ترافیک واقعی و Packet Loss دو VPS سنجیده شود.
 
-## اولویت مسیر در نسخه 3.3.1
+## اولویت مسیر در نسخه 3.3.2
 
-- **Auto (پیش‌فرض):** ابتدا خارج درخواست Echo می‌فرستد، ایران پاسخ حاوی دادهٔ احرازشده می‌دهد. در صورت ناکامی در Handshake اولیه به مدت ۲۵ ثانیه، مسیر Direct امتحان می‌شود. تغییر مسیر بی‌وقفه انجام نمی‌شود و حداقل ۶۰ ثانیه فاصلهٔ تثبیت دارد.
+- **Auto (پیش‌فرض):** ابتدا خارج درخواست Echo می‌فرستد، ایران پاسخ حاوی دادهٔ احرازشده می‌دهد. تغییر به Direct صرفاً هنگام تقاضای پیوستهٔ واقعی و شکست طولانی Reverse انجام می‌شود: نبود Poll معتبر حداقل ۹۰ ثانیه؛ یا کامل‌نشدن Handshake با وجود Poll تا ۱۵۰ ثانیه؛ یا نبود هر دو نشانهٔ Poll و ترافیک احرازشده حداقل ۱۵۰ ثانیه در نشست برقرارشده. تغییر مسیر بی‌وقفه انجام نمی‌شود و حداقل ۶۰ ثانیه فاصلهٔ تثبیت دارد.
 - **Reverse:** فقط شروع ICMP توسط خارج.
 - **Direct:** فقط شروع ICMP توسط ایران.
 
-در هر سه حالت، **کاربرد سرویس تغییر نمی‌کند**: ورودی کاربر روی ایران است و خروجی سرور خارج به سرویس loopback از پیش تعیین‌شده منتقل می‌شود. گزینهٔ `icmp_direction` در `/opt/pingtunnel/conf/config.json` اختیاری است و در صورت حذف، Auto فعال می‌شود. پشتیبانی میدانی از همهٔ مسیرها هنوز نیازمند آزمایش زنده است.
+در هر سه حالت، **کاربرد سرویس تغییر نمی‌کند**: ورودی کاربر روی ایران است و خروجی سرور خارج به سرویس loopback از پیش تعیین‌شده منتقل می‌شود. گزینهٔ `icmp_direction` در `/opt/pingtunnel/conf/config.json` اختیاری است و در صورت حذف، Auto فعال می‌شود. Reverse در نسخهٔ 3.3.0 روی یک جفت VPS واقعی متصل شده است؛ عملکرد خودکار نسخه‌های بعدی هنوز نیازمند پایش میدانی است.
 
 ## چرا Pingtunnel Manager؟
 
@@ -300,6 +300,7 @@ SECURITY & HEALTH
 
 | نسخه | تنظیمات | پروتکل بین VPSها | سازگاری |
 | --- | --- | --- | --- |
+| **3.3.2** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | Reverse اولویت قطعی؛ فقط Failover اضطراری با تقاضای پایدار، حفظ Reverse در بیکاری و ثبت دلیل تغییر مسیر |
 | **3.3.1** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | Poll تطبیقی Reverse، جلوگیری از اتلاف فریم هنگام خطای نوشتن، آمار صف و کاهش مصرف CPU |
 | **3.3.0** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | Reverse-first با بازگشت به Direct |
 | **3.2.6** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | اصلاح نهایی بازیابی با در نظر گرفتن ترافیک احرازشده |
@@ -317,7 +318,7 @@ SECURITY & HEALTH
 
 > **نکته پس از انتقال مخزن:** برای به‌روزرسانی، فعلاً از دستور نصب با نشانی جدید `MSMSofts/MSM-Pingtunnel` در بخش «نصب سریع» استفاده کن. برخی باینری‌های منتشرشده پیش از انتقال، ممکن است در فرمان داخلی `pingtunnel update` هنوز به نشانی قدیمی مراجعه کنند.
 
-[جزئیات تغییرات](CHANGELOG.md) · [نسخه ثابت 3.3.1](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.1) · [نسخه rolling](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
+[جزئیات تغییرات](CHANGELOG.md) · [نسخه ثابت 3.3.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2) · [نسخه rolling](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
 
 ## مسیر فایل‌ها
 
