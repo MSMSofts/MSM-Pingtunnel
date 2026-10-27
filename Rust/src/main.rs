@@ -506,13 +506,21 @@ fn show_security_status() -> Result<()> {
     if report["icmp_direction"].as_str()==Some("reverse") {
         println!("  Reverse queued frames / bytes: {} / {}",report["reverse_queue_packets"],report["reverse_queue_bytes"]);
         println!("  Reverse queue peak / drops: {} / {}",report["reverse_queue_peak"],report["reverse_queue_drops"]);
+        if report["reverse_queue_dequeue_samples"].as_u64().unwrap_or(0)>0{
+            println!("  Reverse dequeue wait max / EWMA: {} / {} ms ({} frames)",
+                report["reverse_queue_max_wait_ms"],report["reverse_queue_wait_ewma_ms"],
+                report["reverse_queue_dequeue_samples"]);
+        }
         println!("  Reverse ICMP reply write failures: {}",report["reverse_write_failures"]);
         println!("  Filtered kernel PTR4 Echo reflections: {}",report["reverse_poll_echo_reflections"]);
         if let Some(ms)=report["reverse_poll_interval_ms"].as_u64().filter(|v|*v>0) {
             println!("  Adaptive reverse polling interval: {ms} ms");
         }
         if let Some(age)=report["reverse_last_data_age_seconds"].as_i64().filter(|v|*v>=0) {
-            println!("  Last authenticated reverse data frame: {age}s ago");
+            println!("  Last authenticated Iran-to-Foreign data: {age}s ago");
+        }
+        if let Some(age)=report["reverse_downstream_data_age_seconds"].as_i64().filter(|v|*v>=0) {
+            println!("  Last Foreign-to-Iran encrypted DATA attempt: {age}s ago");
         }
     }
     Ok(())
