@@ -13,11 +13,11 @@ The foreign Go poller was initially paced by successfully authenticated Iran-to-
 
 Queue observability adds maximum and EWMA dequeue wait, computed from the original enqueue timestamp when a queued frame is taken for attempted sending. These measurements are **process-lifetime** diagnostics and do not include downstream congestion/packet loss after a successful raw-socket write. No plaintext or new wire-protocol fields are introduced; diagnostics are local JSON only.
 
-## Overseas PTR4 Echo reflection filtering (v3.3.4)
+## Overseas PTR4 Echo reflection filtering (v3.3.3)
 
 The overseas reverse poller sends a 36-byte `PTR4` control payload inside a standard ICMP Echo Request. Linux on the Iran host can automatically return that *same* payload inside an Echo Reply. Such a reply is not a `PTH4` authenticated handshake frame or a `PTD4` AEAD data frame. Previously the overseas receiver could route the reflected payload to session decrypt and increment `authentication_failures` in the non-session-frame branch.
 
-v3.3.4 tests the pinned peer source IP first, then filters only **ICMP Type 0** replies with **exactly 36 bytes** of Echo payload and **PTR4** prefix before the session decoder. Ordinary data and authenticated control frames do not match this filter. Filtered reflections increment `reverse_poll_echo_reflections` and never count as security failures, proof of data delivery or fresh authenticated peer traffic. This is an internal receive-path change only, not an ICMP wire-format modification.
+v3.3.3 tests the pinned peer source IP first, then filters only **ICMP Type 0** replies with **exactly 36 bytes** of Echo payload and **PTR4** prefix before the session decoder. Ordinary data and authenticated control frames do not match this filter. Filtered reflections increment `reverse_poll_echo_reflections` and never count as security failures, proof of data delivery or fresh authenticated peer traffic. This is an internal receive-path change only, not an ICMP wire-format modification.
 
 ## Reverse-first Auto failover safety (v3.3.2)
 
@@ -70,7 +70,7 @@ Hysteria 2 / s-ui / application listener on overseas VPS
 - **Iran ingress:** user-selected local TCP or UDP port, suggested **TCP 443 / UDP 444**.
 - **Overseas service port:** separately user-selected, delivered via loopback (for example **UDP 8443**).
 - **One transport choice:** current setup configures either TCP or UDP forwarding per tunnel, not simultaneous TCP+UDP.
-- **Direction:** Default Auto starts with **Reverse**: Foreign sends authenticated ICMP Echo Requests and Iran carries encrypted ingress data in matching Echo Replies. If Reverse cannot authenticate within its bounded startup window, Iran attempts **Direct**, and sustained loss may trigger later recovery; roles and directional encryption remain fixed to physical regions.
+- **Direction:** Default Auto starts with **Reverse**: Foreign sends authenticated ICMP Echo Requests and Iran carries encrypted ingress data in matching Echo Replies. Only after prolonged Reverse failure under genuine sustained local demand may Iran attempt **Direct**, and sustained loss may trigger later recovery; roles and directional encryption remain fixed to physical regions.
 
 Example Hysteria 2 mapping: `Iran_IP:444/UDP → ICMP → 127.0.0.1:8443/UDP` overseas. The VPN client sees only the Iran IP and port; Hysteria 2 is configured on the overseas VPS.
 
