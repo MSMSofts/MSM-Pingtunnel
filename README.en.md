@@ -20,7 +20,7 @@ On a real two-VPS path, the overseas host was observed receiving hundreds of 44-
 
 The overseas `sudo pingtunnel security` output now includes `Filtered kernel PTR4 Echo reflections` separately from `Authentication failures`. This reduces pointless decrypt attempts and improves diagnostics, but **does not prove the Hysteria/Shorts stalling problem is solved**. Measure authenticated error deltas, Iran's reverse queue and playback performance separately after upgrading.
 
-## Reverse throughput and stability (3.3.1 and 3.3.3)
+## Reverse throughput and stability (3.3.1 and 3.3.2)
 
 The foreign Go core uses an **event-driven adaptive timer** instead of a permanently fast polling loop. The following are target program intervals, **not guaranteed end-to-end latencies**:
 
@@ -304,7 +304,8 @@ These features **do not guarantee uninterrupted VPN sessions**, live adaptation 
 
 | Version | Config schema | Wire format | Compatibility |
 | --- | --- | --- | --- |
-| **3.3.3** | 3 | **v4** (`PTH4/PTD4`) | Reverse always preferred, Direct emergency-only after proven sustained failure |
+| **3.3.3** | 3 | **v4** (`PTH4/PTD4`) | Ignore kernel PTR4 Echo reflections before decrypt, count separately |
+| **3.3.2** | 3 | **v4** (`PTH4/PTD4`) | Reverse preferred, Direct only after sustained failure |
 | **3.3.1** | 3 | **v4** (`PTH4/PTD4`) | Adaptive Reverse polls, retry of failed Echo Reply writes, queue telemetry |
 | **3.3.0** | 3 | **v4** (`PTH4/PTD4`) | Reverse-first authenticated transport |
 | **3.2.6** | 3 | **v4** (`PTH4/PTD4`) | Peer watchdog honors authenticated traffic |
@@ -348,7 +349,7 @@ Upgrading both VPSs is recommended during a maintenance window. The manager pres
 
 ## Scope & limitations
 
-**Not provided in v3.3.1:** high availability, multiple VPSs, simultaneous TCP+UDP forwarding through one tunnel, guaranteed filtering resistance, or independent security audit. Reverse/Auto passed CI tests but requires a real two-VPS integration test. Previously, v3.2.4 did not support reverse forwarding; see the changelog.
+**Not provided in v3.3.3:** high availability, multiple VPSs, simultaneous TCP+UDP forwarding through one tunnel, guaranteed filtering resistance, or independent security audit. Reverse/Auto passed CI tests but requires a real two-VPS integration test. Previously, v3.2.4 did not support reverse forwarding; see the changelog.
 
 **Still required before high-assurance deployment:** testing two real VPSs with ICMP packet loss/jitter, Hysteria 2 end-to-end testing, restart/upgrade interruption testing, and independent cryptographic review.
 
