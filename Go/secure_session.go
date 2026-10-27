@@ -416,6 +416,11 @@ func (s *secureSession) decrypt(frame []byte)([]byte,error){
  s.lastValid=time.Now()
  return plaintext,nil
 }
+func (s *secureSession) resetForTransportChange() {
+ s.mu.Lock();defer s.mu.Unlock()
+ s.resetLocked()
+ s.recoveries++
+}
 func (s *secureSession) recoverIfStale(now time.Time,hasPendingTraffic bool)bool{
  s.mu.Lock();defer s.mu.Unlock()
  if s.region!="iran"||s.state!=4||s.keys==nil{return false}
