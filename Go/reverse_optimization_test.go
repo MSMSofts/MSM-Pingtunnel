@@ -18,7 +18,7 @@ func TestReverseAdaptivePollCadence(t *testing.T) {
         t.Fatalf("idle interval %s",got)
     }
     r.noteUsefulFrame(now)
-    if got:=r.pollPeriod(now.Add(50*time.Millisecond),1,true);got!=40*time.Millisecond{
+    if got:=r.pollPeriod(now.Add(50*time.Millisecond),1,true);got!=24*time.Millisecond{
         t.Fatalf("isolated data caused too many polls: %s",got)
     }
     r.noteUsefulFrame(now.Add(100*time.Millisecond))
@@ -30,10 +30,10 @@ func TestReverseAdaptivePollCadence(t *testing.T) {
     if got:=r.pollPeriod(now.Add(250*time.Millisecond),1,true);got!=2*time.Millisecond{
         t.Fatalf("sustained reverse throughput capped at %s",got)
     }
-    if got:=r.pollPeriod(now.Add(2*time.Second),1,true);got!=80*time.Millisecond{
+    if got:=r.pollPeriod(now.Add(2*time.Second),1,true);got!=24*time.Millisecond{
         t.Fatalf("stale reverse traffic should cool: %s",got)
     }
-    if got:=r.pollPeriod(now.Add(10*time.Second),1,true);got!=80*time.Millisecond{
+    if got:=r.pollPeriod(now.Add(10*time.Second),1,true);got!=24*time.Millisecond{
         t.Fatalf("quiet but connected reverse interval %s",got)
     }
     if got:=r.pollPeriod(now.Add(10*time.Second),0,true);got!=250*time.Millisecond{
@@ -121,5 +121,71 @@ func TestAuthenticatedReverseReceiptsOnlyForRealData(t *testing.T) {
     }
     if r.shouldSendReceiveAck(now.Add(20*time.Second)){
         t.Fatal("stale traffic kept producing encrypted receipts")
+    }
+}
+
+func TestReversePollPredictsQUICAcknowledgementsFromDownstream(t *testing.T) {
+    now:=time.Unix(1810000000,0)
+    r,_:=newReverseTransport(ICMPAuto,bytes.Repeat([]byte{27},32),now)
+    // No connections/no traffic still sends low-rate polls.
+    if got:=r.pollPeriod(now,0,true);got!=250*time.Millisecond{
+        t.Fatalf("unexpected idle traffic overhead: %s",got)
+    }
+    // A foreign-origin UDP DATA packet predicts a near-future upstream ACK.
+    r.noteDownstreamFrame(now)
+    if got:=r.pollPeriod(now.Add(10*time.Millisecond),0,true);got!=16*time.Millisecond{
+        t.Fatalf("downstream packet did not trigger ACK-poll anticipation: %s",got)
+    }
+    for _,offset:=range []time.Duration{50,100,150} {
+        r.noteDownstreamFrame(now.Add(offset*time.Millisecond))
+    }
+    if got:=r.pollPeriod(now.Add(175*time.Millisecond),0,true);got!=8*time.Millisecond{
+        t.Fatalf("sustained video traffic did not accelerate polls: %s",got)
+    }
+    if got:=r.pollPeriod(now.Add(2*time.Second),0,true);got!=250*time.Millisecond{
+        t.Fatalf("stale video traffic left excessive poll rate: %s",got)
+    }
+    // Direct-mode negotiation must not be made more aggressive.
+    if got:=r.pollPeriod(now,1,false);got!=200*time.Millisecond{
+        t.Fatalf("handshake pacing unexpectedly changed: %s",got)
+    }
+    d:=r.diagnostics(now.Add(2*time.Second))
+    if d.DownstreamFrames!=4 || d.PollIntervalMillis!=200 {
+        t.Fatalf("inaccurate foreign-outbound diagnostics: %+v",d)
+    }
+}
+
+func TestReverseQueueWaitLatencyMeasuredOnlyAfterSuccessfulSend(t *testing.T) {
+    now:=time.Unix(1810000000,0)
+    r,_:=newReverseTransport(ICMPReverse,bytes.Repeat([]byte{28},32),now)
+    if !r.enqueue([]byte("ack"),now){t.Fatal("enqueue")}
+    if got:=r.diagnostics(now.Add(220*time.Millisecond)).QueueOldestAgeMs;got!=220{
+        t.Fatalf("missing queue age, got %d",got)
+    }
+    // A failed socket write restores original enqueue timestamp; the next
+    // successful attempt, not the failed attempt, counts as delivered.
+    if sendQueuedReverse(r,now.Add(100*time.Millisecond),func([]byte)bool{return false}) {
+        t.Fatal("failed send unexpectedly succeeded")
+    }
+    if d:=r.diagnostics(now.Add(300*time.Millisecond));d.QueueWaitSamples!=0||d.QueueOldestAgeMs!=300{
+        t.Fatalf("failed attempt altered the queue age or stats: %+v",d)
+    }
+    if !sendQueuedReverse(r,now.Add(350*time.Millisecond),func(body []byte)bool{return string(body)=="ack"}) {
+        t.Fatal("encrypted reply was not sent")
+    }
+    d:=r.diagnostics(now.Add(time.Second))
+    if d.QueueWaitSamples!=1 || d.QueueWaitMaxMs!=350 || d.QueueWaitEWMAms!=350 ||
+       d.QueueOldestAgeMs!=0 || d.Pending!=0 {
+        t.Fatalf("invalid measured queue latency: %+v",d)
+    }
+    // Next sample: EWMA is responsive and bounded, max retains worst sample.
+    if !r.enqueue([]byte("ack2"),now.Add(time.Second)){t.Fatal("enqueue 2")}
+    if !sendQueuedReverse(r,now.Add(1100*time.Millisecond),func([]byte)bool{return true}) {
+        t.Fatal("second delivery failed")
+    }
+    d=r.diagnostics(now.Add(2*time.Second))
+    if d.QueueWaitSamples!=2 || d.QueueWaitMaxMs!=350 ||
+       d.QueueWaitEWMAms<330 || d.QueueWaitEWMAms>345 {
+        t.Fatalf("queue EWMA failed: %+v",d)
     }
 }
