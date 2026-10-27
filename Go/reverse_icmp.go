@@ -34,7 +34,12 @@ const (
     reverseProbeBytes = 36
     reverseProbeWindow = 20 * time.Second
     reverseAutoDelay = 0 * time.Second
-    reverseStartupFallback = 25 * time.Second
+    // Reverse must be genuinely unavailable before switching direction.
+    // A short X25519 delay, an idle session or sporadic ICMP loss is not
+    // evidence that the preferred route has failed.
+    reverseAbsentGrace = 90 * time.Second
+    reverseUnconfirmedGrace = 150 * time.Second
+    reverseEstablishedGrace = 150 * time.Second
     reverseMinDwell = 60 * time.Second
     reverseFrameTTL = 12 * time.Second
     reverseQueueMaxFrames = 256
@@ -55,6 +60,9 @@ type reverseTransport struct {
     started time.Time
     lastSwitch time.Time
     lastDemand time.Time
+    demandSince time.Time
+    fallbackCount uint64
+    lastFallbackReason string
     secret [32]byte
     pending []reverseQueuedFrame
     pendingBytes int
@@ -79,9 +87,18 @@ func newReverseTransport(preference ICMPDirection, key []byte, now time.Time) (*
     return r,nil
 }
 
-func (r *reverseTransport) noteDemand(now time.Time,hasTraffic bool){
- if !hasTraffic{return}
- r.mu.Lock();r.lastDemand=now;r.mu.Unlock()
+func (r *reverseTransport) noteDemand(now time.Time,hasTraffic bool) {
+ r.mu.Lock();defer r.mu.Unlock()
+ if !hasTraffic {
+     // Preserve the last demand timestamp for the short activity grace period,
+     // but close the sustained-demand window for a later retry.
+     r.demandSince=time.Time{}
+     return
+ }
+ if r.lastDemand.IsZero() || now.Sub(r.lastDemand)>5*time.Second || r.demandSince.IsZero() {
+     r.demandSince=now
+ }
+ r.lastDemand=now
 }
 
 // A stale link alone does not trigger disruption of a quiet direct session.
@@ -115,21 +132,54 @@ func (r *reverseTransport) choose(direction ICMPDirection, now time.Time) bool {
     return true
 }
 
-// Reverse starts immediately. A direct fallback is evaluated only after
-// reverse handshake timeout; established links keep a stable direction.
-func (r *reverseTransport) fallbackDirect(now time.Time,ready bool,lastAuthenticated time.Time) bool {
+// Reverse is the preferred route. Direct is permitted only after sustained
+// *local user demand* and independently observed reverse-path failure.
+// The authenticated reverse polls are important: an idle AEAD session can
+// legitimately have no DATA for many minutes while the route stays healthy.
+func (r *reverseTransport) fallbackDirect(now time.Time, ready bool, lastAuthenticated time.Time) bool {
  r.mu.Lock()
  reference:=r.started
  if !r.lastSwitch.IsZero(){reference=r.lastSwitch}
  elapsed:=now.Sub(reference)
- can:=r.preference==ICMPAuto && r.selected==ICMPReverse &&
-  ((!ready && elapsed>=reverseStartupFallback) ||
-   (ready && elapsed>=90*time.Second &&
-    !r.lastDemand.IsZero() && now.Sub(r.lastDemand)<30*time.Second &&
-    (lastAuthenticated.IsZero()||now.Sub(lastAuthenticated)>75*time.Second)))
+ demandDuration:=now.Sub(r.demandSince)
+ activeDemand:=!r.demandSince.IsZero() &&
+   !r.lastDemand.IsZero() && now.Sub(r.lastDemand)<=5*time.Second
+ probeAge:=time.Duration(1<<63-1)
+ if !r.lastValidProbe.IsZero(){probeAge=now.Sub(r.lastValidProbe)}
+ authenticatedAge:=time.Duration(1<<63-1)
+ if !lastAuthenticated.IsZero(){authenticatedAge=now.Sub(lastAuthenticated)}
+ allowed:=false
+ reason:=""
+ if r.preference==ICMPAuto && r.selected==ICMPReverse && activeDemand {
+     if ready {
+         // Once established, neither an idle application nor a single
+         // missing reply can override a continuously verified reverse path.
+         if elapsed>=reverseEstablishedGrace && demandDuration>=reverseAbsentGrace &&
+           probeAge>=reverseEstablishedGrace && authenticatedAge>=reverseEstablishedGrace {
+             allowed=true
+             reason="no_authenticated_reverse_traffic_or_polls"
+         }
+     } else if r.lastValidProbe.IsZero() || probeAge>=reverseAbsentGrace {
+         // No authenticated probes at all despite prolonged live demand:
+         // the overseas -> Iran request path is most likely unavailable.
+         if elapsed>=reverseAbsentGrace && demandDuration>=reverseAbsentGrace {
+             allowed=true
+             reason="reverse_polls_unreachable"
+         }
+     } else if elapsed>=reverseUnconfirmedGrace && demandDuration>=reverseUnconfirmedGrace {
+         // The poll path works, but the four-step authenticated exchange has
+         // failed continuously. The reverse reply/control path may be broken.
+         allowed=true
+         reason="reverse_handshake_unconfirmed"
+     }
+ }
  r.mu.Unlock()
- if !can{return false}
- return r.choose(ICMPDirect,now)
+ if !allowed || !r.choose(ICMPDirect,now){return false}
+ r.mu.Lock()
+ r.fallbackCount++
+ r.lastFallbackReason=reason
+ r.mu.Unlock()
+ return true
 }
 
 // A recent successful direct exchange wins over speculative reverse polls.
@@ -314,6 +364,8 @@ type reverseDiagnostics struct {
     FailedReplies uint64
     PollIntervalMillis int
     LastUsefulFrameAgeSeconds int64
+    FallbackCount uint64
+    FallbackReason string
 }
 func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
     r.mu.Lock();defer r.mu.Unlock()
@@ -321,7 +373,8 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
     if !r.lastUsefulFrame.IsZero() {age=int64(now.Sub(r.lastUsefulFrame).Seconds());if age<0{age=0}}
     return reverseDiagnostics{Pending:len(r.pending),PendingBytes:r.pendingBytes,
         QueuePeak:r.queuePeak,QueueDrops:r.drops,FailedReplies:r.failedReplies,
-        PollIntervalMillis:r.pollPeriodMillis,LastUsefulFrameAgeSeconds:age}
+        PollIntervalMillis:r.pollPeriodMillis,LastUsefulFrameAgeSeconds:age,
+        FallbackCount:r.fallbackCount,FallbackReason:r.lastFallbackReason}
 }
 
 // Observed inbound authenticated reverse probes are separately reported.
