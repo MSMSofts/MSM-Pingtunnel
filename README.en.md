@@ -2,15 +2,24 @@
 
 **A lightweight, encrypted ICMP tunnel between exactly two Linux VPSs, with a five-question setup wizard.**
 
-[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.2.6](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.2.6)
+[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.3.0](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.0)
 
-![Version](https://img.shields.io/badge/version-3.2.6-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.3.0-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
 
 Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** between an **Iran-side VPS** and an **overseas VPS**. Local TCP or UDP traffic enters the Iran VPS, travels inside authenticated, encrypted ICMP packets, and is forwarded by the overseas VPS to its configured local service.
 
 **This is a transport layer—not a standalone VPN server.** Services such as Hysteria 2, s-ui or other TCP/UDP applications run and are configured separately.
 
-**Current release: 3.2.6** · Rust management CLI · Modified Go Pingtunnel core · Config schema **3** · Secure wire protocol **4** · Direct Iran → foreign ICMP only.
+**Current release: 3.3.0** · Rust manager and modified Go core · Config schema **3** · Secure wire **4** · **Reverse-first Auto:** Foreign-initiated ICMP Echo Requests, with Direct fallback after reverse negotiation fails. Live VPS validation is still required.
+
+
+## ICMP direction in v3.3.0
+
+- **Auto (default):** start with **Reverse** foreign-origin ICMP Echo Requests. If initial authentication has not completed within 25 seconds, attempt **Direct** initiation from Iran. Selection has a 60-second minimum dwell to reduce flapping.
+- **Reverse:** foreign-origin Echo Requests only.
+- **Direct:** Iran-origin Echo Requests only.
+
+The physical roles are fixed regardless of direction: users connect to Iran, and the overseas endpoint forwards to its pinned local loopback service. `icmp_direction` is optional in persistent config; omitting it selects Auto. Real VPS field testing is required before relying on automatic recovery in production.
 
 ## Highlights
 
@@ -19,7 +28,7 @@ Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** betwe
 | **Two VPSs only** | No HA node, backup server, resident management daemon, or separate proxy transport |
 | **Unified five-step wizard** | Region, opposite VPS IPv4, shared pairing key, TCP/UDP, and this VPS's port |
 | **Independent ports** | For example, receive UDP **444** in Iran and forward to UDP **8443** overseas |
-| **ICMP transport** | No TCP/UDP port on the *outer* tunnel itself |
+| **ICMP transport** | Reverse-first Echo polling, authenticated reply data and bounded fallback to Direct; no TCP/UDP port on the outer tunnel |
 | **Automatic AEAD** | AES-256-GCM or XChaCha20-Poly1305, selected by a startup CPU benchmark |
 | **Per-session forward secrecy** | Authenticated ephemeral X25519 exchange with HKDF directional session keys |
 | **Anti-replay** | Authenticated 64-bit packet sequences, a 1,024-packet window, and renegotiation protections |
@@ -86,7 +95,7 @@ sudo bash /tmp/pingtunnel-install.sh
 
 Review downloaded scripts before executing them with elevated privileges.
 
-The installer pins the [v3.2.4 release](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.2.6), checks SHA256 and the release manifest, verifies manager/core compatibility, and backs up existing installed files for failure rollback.
+The installer pins the [v3.3.0 release](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.0), checks SHA256 and the release manifest, verifies manager/core compatibility, and backs up existing installed files for failure rollback.
 
 ### Set up the overseas VPS first
 
@@ -124,7 +133,7 @@ Run `sudo pingtunnel` to open the redesigned **v3.2.4** menu. The header shows t
 ~~~text
 ================================================================
   PINGTUNNEL  /  CONTROL CENTER
-  v3.2.6   |   Encrypted ICMP   |   Wire v4
+  v3.3.0   |   Encrypted ICMP   |   Wire v4
 ----------------------------------------------------------------
 LIVE TUNNEL STATUS
   Location     Foreign (service)
@@ -282,7 +291,7 @@ Upgrading both VPSs is recommended during a maintenance window. The manager pres
 
 > **Repository transfer note:** For updates, use the canonical installer URL under `MSMSofts/MSM-Pingtunnel` shown in the Install section. Earlier manager binaries may still use the former repository owner in the built-in `pingtunnel update` URL.
 
-[Version history](CHANGELOG.md) · [Pinned release](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.2.6) · [Rolling assets](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
+[Version history](CHANGELOG.md) · [Pinned release](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.0) · [Rolling assets](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
 
 ## Important paths
 
@@ -308,7 +317,7 @@ Upgrading both VPSs is recommended during a maintenance window. The manager pres
 
 ## Scope & limitations
 
-**Not implemented as of 3.2.4:** actual reverse tunnel forwarding, automatic Direct/Reverse switching, high availability, multiple VPSs, simultaneous TCP+UDP forwarding through one configured tunnel, or guaranteed ICMP traffic camouflage.
+**Not provided in v3.3.0:** high availability, multiple VPSs, simultaneous TCP+UDP forwarding through one tunnel, guaranteed filtering resistance, or independent security audit. Reverse/Auto passed CI tests but requires a real two-VPS integration test. Previously, v3.2.4 did not support reverse forwarding; see the changelog.
 
 **Still required before high-assurance deployment:** testing two real VPSs with ICMP packet loss/jitter, Hysteria 2 end-to-end testing, restart/upgrade interruption testing, and independent cryptographic review.
 

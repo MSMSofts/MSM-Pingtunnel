@@ -81,6 +81,8 @@ fn validate(cfg: &Value) -> Result<()> {
     }
     let transport=get_string(cfg,"transport").ok_or_else(||failure("missing transport"))?;
     if transport!="tcp"&&transport!="udp"{return Err(failure("transport must be tcp or udp"));}
+    let direction=cfg.get("icmp_direction").and_then(Value::as_str).unwrap_or("auto");
+    if !matches!(direction,"auto"|"direct"|"reverse"){return Err(failure("icmp_direction must be auto, direct or reverse"));}
     if !(1..=65535).contains(&get_number(cfg,"port",0)?){return Err(failure("invalid local port"));}
     let secret=get_string(cfg,"pair_key").ok_or_else(||failure("missing pairing key"))?;
     let bytes=STANDARD.decode(secret).map_err(|_|failure("pairing key not base64"))?;
@@ -153,7 +155,8 @@ fn go_core_config(cfg:&Value)->Result<Value>{
         "type":if region=="iran"{"client"}else{"server"},
         "key":numeric_auth_code(key)?,
         "encrypt":"auto", "encrypt_key":key, "region":region,
-        "tcp":protocol,"noprint":0,"nolog":1,"loglevel":"error"
+        "tcp":protocol,"noprint":0,"nolog":1,"loglevel":"error",
+        "icmp_direction":cfg.get("icmp_direction").and_then(Value::as_str).unwrap_or("auto")
     });
     if region=="iran"{
         config["listen"]=json!(format!(":{port}"));
@@ -446,6 +449,10 @@ fn show_health() -> Result<()> {
     }
     println!("Service active and Go workers reporting (heartbeat {}s ago).",age);
     println!("Security session state: {}",status["state"].as_str().unwrap_or("unknown"));
+    if let Some(direction)=status["icmp_direction"].as_str(){println!("ICMP initiation: {direction}");}
+    if let Some(age)=status["reverse_probe_age_seconds"].as_i64().filter(|a|*a>=0) {
+        println!("Last authenticated inbound reverse poll: {age}s ago (one-way evidence).");
+    }
     println!("Last authenticated peer traffic: {} seconds ago.",status["last_valid_age_seconds"]);
     if status["region"].as_str()==Some("iran") {
         let age=status["last_valid_age_seconds"].as_i64().unwrap_or(-1);
@@ -476,6 +483,10 @@ fn show_security_status() -> Result<()> {
     println!("Authenticated session: {}",report["state"].as_str().unwrap_or("unknown"));
     println!("  Config schema: {} | Wire version: {}",report["config_schema"],report["wire_version"]);
     println!("  Region: {}",report["region"].as_str().unwrap_or("unknown"));
+    if let Some(direction)=report["icmp_direction"].as_str(){println!("  ICMP initiation: {direction}");}
+    if let Some(age)=report["reverse_probe_age_seconds"].as_i64().filter(|a|*a>=0) {
+        println!("  Inbound reverse probe age: {age}s (does not confirm return path)");
+    }
     println!("  Last valid message age: {} seconds",report["last_valid_age_seconds"]);
     println!("  Pending key renegotiation: {}",report["pending_rekey"]);
     println!("  Replays rejected: {}",report["replay_drops"]);
@@ -579,9 +590,11 @@ mod tests{
         assert_eq!(numeric_auth_code(get_string(&iran,"pair_key").unwrap()).unwrap(),
                    numeric_auth_code(get_string(&foreign,"pair_key").unwrap()).unwrap());
         assert_eq!(go_core_config(&iran).unwrap()["listen"],":444");
+        assert_eq!(go_core_config(&iran).unwrap()["icmp_direction"],"auto");
         let remote=go_core_config(&foreign).unwrap();
         assert_eq!(remote["fixed_target"],"127.0.0.1:8443");
         assert_eq!(remote["forward_protocol"],0);
+        assert_eq!(remote["icmp_direction"],"auto");
         assert_eq!(remote["peer_ip"],"198.51.100.45");
     }
     #[test]

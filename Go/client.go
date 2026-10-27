@@ -135,6 +135,7 @@ type Client struct {
 
 	lastPongUnixNano     atomic.Int64
 	lastActivityUnixNano atomic.Int64
+    hasLocalDemand atomic.Bool
 	nextResolveAt        time.Time
 	resolveRetryBackoff  time.Duration
 }
@@ -213,6 +214,7 @@ func (p *Client) LocalAddrToConnMapSize() int {
 }
 
 func (p *Client) touchActivity() {
+    p.hasLocalDemand.Store(true)
 	p.lastActivityUnixNano.Store(time.Now().UnixNano())
 }
 
@@ -345,9 +347,17 @@ func (p *Client) Run() error {
 
 			now := time.Now()
             p.adaptive.OnTick(now)
+            if p.cryptoConfig!=nil && p.cryptoConfig.reverse!=nil {
+                r:=p.cryptoConfig.reverse
+                r.noteDemand(now,p.activeConnCount()>0||(p.hasLocalDemand.Load()&&now.Sub(p.lastActivity())<30*time.Second))
+                if r.fallbackDirect(now,p.cryptoConfig.SecureReady(),p.cryptoConfig.sec.lastPeerTraffic()) {
+                    p.cryptoConfig.sec.resetForTransportChange()
+                    nextPingAt=now
+                }
+            }
             if p.cryptoConfig!=nil {p.cryptoConfig.WriteSecureStatus("/run/pingtunnel-security.json")}
             if p.cryptoConfig!=nil {FlushPendingICMP(*p.conn,p.cryptoConfig)}
-            if p.cryptoConfig != nil && p.cryptoConfig.RecoverSecureSession(now, p.activeConnCount()>0 || now.Sub(p.lastActivity())<30*time.Second) {
+            if p.cryptoConfig != nil && !useReverse(p.cryptoConfig) && p.cryptoConfig.RecoverSecureSession(now, p.activeConnCount()>0 || now.Sub(p.lastActivity())<30*time.Second) {
                 loggo.Info("Smart Recovery: restarting authenticated ephemeral session after sustained silence")
                 nextPingAt=now
             }
@@ -366,7 +376,7 @@ func (p *Client) Run() error {
                 lastAuthenticated := p.cryptoConfig.sec.lastPeerTraffic()
                 if lastAuthenticated.After(lastPeerResponse) {lastPeerResponse=lastAuthenticated}
             }
-            if linkWatchdog.shouldRestart(now, lastPeerResponse,
+            if !useReverse(p.cryptoConfig) && linkWatchdog.shouldRestart(now, lastPeerResponse,
                 p.lastActivity(), p.activeConnCount()>0) {
                 failOnUnexpectedWorkerExit("peer unreachable during sustained traffic for over 4 minutes",&p.exit)
             }
@@ -798,9 +808,11 @@ func (p *Client) processPacket(packet *Packet) {
 		return
 	}
 
-	if !icmpDatagram && packet.echoId != p.id {
-		return
-	}
+	// In reverse mode the foreign endpoint owns each Echo Request ID.
+    // Authentication is enforced by the AEAD session and pinned peer IP.
+    if !icmpDatagram && packet.echoId != p.id && !useReverse(p.cryptoConfig) {
+        return
+    }
 
 	if packet.my.Type == (int32)(MyMsg_PING) {
 		t := time.Time{}

@@ -165,6 +165,7 @@ func main() {
 	forward := flag.String("forward", "", "forward TCP traffic through proxy (socks5://host:port or http://host:port)")
 	congestion := flag.String("congestion", "bb", "congestion control algorithm: bb or empty")
 	region := ""
+	icmpDirection := "auto"
 	peerIP := ""
 	fixedTarget := ""
 	forwardProtocol := 0
@@ -179,7 +180,7 @@ func main() {
 	flag.Parse()
 
     if *protocolInfo {
-        fmt.Println("pingtunnel-go-core=3.2.6 config-schema=3 wire=4")
+        fmt.Println("pingtunnel-go-core=3.3.0 config-schema=3 wire=4")
         return
     }
 	if *showVersion || *showVersionLong {
@@ -202,6 +203,7 @@ func main() {
 		}
 
 		region = cfg.Region
+		if cfg.ICMPDirection!=""{icmpDirection=cfg.ICMPDirection}
 		peerIP = cfg.PeerIP
 		fixedTarget = cfg.FixedTarget
 		forwardProtocol = cfg.ForwardProtocol
@@ -344,6 +346,10 @@ func main() {
         }
         expectedPeer:=peerIP
         if region=="iran" {expectedPeer=*server}
+        if err=cryptoConfig.BindICMPDirection(icmpDirection);err!=nil {
+            fmt.Fprintf(os.Stderr,"Invalid ICMP direction: %v\n",err)
+            os.Exit(1)
+        }
         if err=cryptoConfig.BindSecurePeer(expectedPeer);err!=nil {
             fmt.Fprintf(os.Stderr,"Invalid secure peer IP: %v\n",err)
             os.Exit(1)

@@ -32,6 +32,7 @@ type CryptoConfig struct {
 	Cipher cipher.AEAD
 	auto *autoCrypto
 	sec *secureSession
+	reverse *reverseTransport
 }
 
 // NewCryptoConfig creates a new crypto configuration
@@ -101,6 +102,15 @@ func (c *CryptoConfig) BindSecurePeer(address string) error {
 func (c *CryptoConfig) SecurePeerAllowed(address net.IP) bool {
  return c.sec!=nil && c.sec.acceptsPeer(address)
 }
+func (c *CryptoConfig) BindICMPDirection(direction string) error {
+ if c.sec==nil{return errors.New("authenticated session required for reverse ICMP")}
+ mode,err:=ParseICMPDirection(direction)
+ if err!=nil{return err}
+ r,err:=newReverseTransport(mode,c.Key,time.Now())
+ if err!=nil{return err}
+ c.reverse=r
+ return nil
+}
 func (c *CryptoConfig) SecureReady() bool {
  return c.sec!=nil && c.sec.ready()
 }
@@ -115,7 +125,16 @@ func (c *CryptoConfig) ReceiveSecureControl(frame []byte,now time.Time)([]byte,e
 func (c *CryptoConfig) RecoverSecureSession(now time.Time,traffic bool)bool{
  return c.sec!=nil && c.sec.recoverIfStale(now,traffic)
 }
-func (c *CryptoConfig) WriteSecureStatus(path string){if c.sec!=nil{c.sec.writeStatus(path)}}
+func (c *CryptoConfig) WriteSecureStatus(path string){
+ if c.sec==nil{return}
+ direction:="direct"
+ reverseProbeAge:=int64(-1)
+ if c.reverse!=nil{
+  direction=string(c.reverse.direction())
+  reverseProbeAge=c.reverse.probeAge(time.Now())
+ }
+ c.sec.writeStatusWithDirection(path,direction,reverseProbeAge)
+}
 func (c *CryptoConfig) SecureStats()sessionStats{
  if c.sec==nil{return sessionStats{}}
  return c.sec.stats()

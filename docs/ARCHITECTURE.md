@@ -2,7 +2,7 @@
 
 [README فارسی](../README.md) · [English README](../README.en.md) · [Security policy](../SECURITY.md)
 
-**Version:** Manager 3.2.6 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
+**Version:** Manager 3.3.0 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
 
 **خلاصه:** Pingtunnel Manager فقط دو VPS دارد. کاربر به پورت TCP/UDP سرور ایران وصل می‌شود؛ هسته Go ترافیک را در ICMP رمزنگاری‌شده به VPS خارج می‌رساند و سرور خارج آن را به پورت سرویس محلی خودش تحویل می‌دهد. Rust تنها کارهای راه‌اندازی، ذخیره تنظیمات و کنترل systemd را انجام می‌دهد.
 
@@ -39,7 +39,7 @@ Hysteria 2 / s-ui / application listener on overseas VPS
 - **Iran ingress:** user-selected local TCP or UDP port, suggested **TCP 443 / UDP 444**.
 - **Overseas service port:** separately user-selected, delivered via loopback (for example **UDP 8443**).
 - **One transport choice:** current setup configures either TCP or UDP forwarding per tunnel, not simultaneous TCP+UDP.
-- **Direction:** currently Iran initiates the ICMP control/data exchange. Reversing this initiation direction is **not implemented**. Physical role is kept separate from handshake roles to make future engineering possible, not to claim current reverse support.
+- **Direction:** Default Auto starts with **Reverse**: Foreign sends authenticated ICMP Echo Requests and Iran carries encrypted ingress data in matching Echo Replies. If Reverse cannot authenticate within its bounded startup window, Iran attempts **Direct**, and sustained loss may trigger later recovery; roles and directional encryption remain fixed to physical regions.
 
 Example Hysteria 2 mapping: `Iran_IP:444/UDP → ICMP → 127.0.0.1:8443/UDP` overseas. The VPN client sees only the Iran IP and port; Hysteria 2 is configured on the overseas VPS.
 
@@ -114,7 +114,7 @@ Rust CLI presents these through `pingtunnel security` and `pingtunnel performanc
 
 ~~~text
 Rust/
-  Cargo.toml             Rust manager package (3.2.6)
+  Cargo.toml             Rust manager package (3.3.0)
   src/main.rs            CLI, systemd and config generation
   src/setup.rs           Unified pairing wizard
 
@@ -157,7 +157,7 @@ cargo test --manifest-path Rust/Cargo.toml
 cargo build --release --manifest-path Rust/Cargo.toml
 ~~~
 
-Release builds are verified with SHA256 and a release manifest specifying **manager 3.2.6 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.2.6](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.2.6); rolling assets may also exist for compatibility.
+Release builds are verified with SHA256 and a release manifest specifying **manager 3.3.0 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.3.0](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.0); rolling assets may also exist for compatibility.
 
 ## 8. Compatibility contract and limitations
 
@@ -170,4 +170,4 @@ Release builds are verified with SHA256 and a release manifest specifying **mana
 
 Further changes must preserve schema 3 unless explicitly versioned and provide a documented migration path. Wire protocol modifications require explicit version negotiation or a planned, fail-closed coordinated upgrade. **Never silently fall back to plaintext or earlier unauthenticated packet formats.**
 
-Current omissions: genuine reverse forwarding, automatic Direct/Reverse selection, multiple VPSs/HA, simultaneous TCP and UDP in one tunnel, independent cryptographic audit and proven DPI resistance. Testing over a real two-VPS ICMP path—including packet loss, high jitter and actual Hysteria 2 sessions—is still required.
+Remaining omissions: multiple VPSs/HA, simultaneous TCP and UDP in one tunnel, independent cryptographic audit, and proven DPI resistance. Reverse-first Auto is implemented but needs field testing over an actual two-VPS ICMP path—including packet loss, high jitter, ICMP Echo kernel reply interactions, and application sessions.

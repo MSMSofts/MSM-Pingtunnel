@@ -416,6 +416,11 @@ func (s *secureSession) decrypt(frame []byte)([]byte,error){
  s.lastValid=time.Now()
  return plaintext,nil
 }
+func (s *secureSession) resetForTransportChange() {
+ s.mu.Lock();defer s.mu.Unlock()
+ s.resetLocked()
+ s.recoveries++
+}
 func (s *secureSession) recoverIfStale(now time.Time,hasPendingTraffic bool)bool{
  s.mu.Lock();defer s.mu.Unlock()
  if s.region!="iran"||s.state!=4||s.keys==nil{return false}
@@ -492,6 +497,8 @@ type secureStatus struct{
  ConfigSchema int `json:"config_schema"`
  WireVersion int `json:"wire_version"`
  Region string `json:"region"`
+ ICMPDirection string `json:"icmp_direction,omitempty"`
+ ReverseProbeAgeSeconds int64 `json:"reverse_probe_age_seconds"`
  State string `json:"state"`
  LastValidAgeSeconds int64 `json:"last_valid_age_seconds"`
  PendingRekey bool `json:"pending_rekey"`
@@ -517,7 +524,13 @@ func (s *secureSession) status()secureStatus{
  }
 }
 func (s *secureSession) writeStatus(path string) {
- encoded,err:=json.Marshal(s.status())
+ s.writeStatusWithDirection(path,"direct",-1)
+}
+func (s *secureSession) writeStatusWithDirection(path string,direction string,reverseProbeAge int64) {
+ report:=s.status()
+ report.ICMPDirection=direction
+ report.ReverseProbeAgeSeconds=reverseProbeAge
+ encoded,err:=json.Marshal(report)
  if err!=nil{return}
  tmp:=path+".pending"
  if err=os.WriteFile(tmp,encoded,0600);err!=nil{return}

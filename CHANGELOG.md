@@ -1,5 +1,18 @@
 # Changelog / تاریخچه تغییرات
 
+## [3.3.0](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.0) — Reverse-first ICMP Auto
+
+**Config schema: 3 · Wire protocol: 4 · Both paired VPSs must use matching 3.3.0 binaries**
+
+- Auto defaults to **Reverse** at startup: the overseas VPS sends HMAC-authenticated ICMP Echo Requests; the Iran VPS returns encrypted application frames within matching Echo Replies.
+- If the initial Reverse handshake is not completed after 25 seconds, Iran retries in **Direct**. Healthy links are retained; transitions are protected by a minimum 60-second dwell.
+- Reverse polling is bounded, supports signed timestamp/nonce replay checks and a bounded response queue; stale application frames expire after 12 seconds.
+- The authenticated ephemeral X25519 exchange and per-direction AEAD session keys are preserved; no plaintext downgrade is allowed.
+- When the application is quiet, signed Reverse polls are reported separately from authenticated two-way traffic; they never falsely mark a broken return path as healthy.
+- Integration tests cover the entire Reverse handshake in ICMP Echo Request/Reply frames, bidirectional encrypted data, duplicate rejection, and Direct fallback.
+- **Operational limitation:** CI and race tests cannot establish filtering resistance or reproduce a live VPS firewall, automatic kernel Echo Replies, traffic shaping, or network outages. Verify on a nonproduction two-VPS pair before upgrading critical connections.
+
+
 [README فارسی](README.md) · [English README](README.en.md) · [Releases](https://github.com/MSMSofts/MSM-Pingtunnel/releases)
 
 این فایل از **نسخه 3.0 به بعد** تغییرات اصلی Pingtunnel Manager را ثبت می‌کند. نسخه‌ها فقط با عنوان محصول توصیف نمی‌شوند؛ تغییرات **قالب تنظیمات** و **پروتکل ارتباط بین دو VPS** نیز در هر مرحله مشخص شده‌اند.
