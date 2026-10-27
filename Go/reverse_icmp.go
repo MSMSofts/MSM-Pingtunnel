@@ -72,6 +72,12 @@ type reverseTransport struct {
     lastValidProbe time.Time
     lastUsefulFrame time.Time
     usefulBurst int
+    lastDownstreamFrame time.Time
+    downstreamBurst int
+    downstreamFrames uint64
+    queueWaitAvgMs float64
+    queueWaitMaxMs int64
+    queueWaitSamples uint64
     lastReceiveAck time.Time
     failedReplies uint64
     reflectedPolls uint64
@@ -345,27 +351,82 @@ func (r *reverseTransport) noteUsefulFrame(now time.Time) {
     }
     r.lastUsefulFrame=now
 }
+// The foreign receiver sees Iran->foreign DATA, but in video workloads the
+// majority of payloads travel foreign->Iran. A recent *successful local
+// encrypted send* predicts imminent UDP/QUIC ACK traffic from Iran, so poll
+// promptly without waiting for the first delayed ACK to reach Foreign.
+func (r *reverseTransport) noteDownstreamFrame(now time.Time) {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    if !r.lastDownstreamFrame.IsZero() && now.Sub(r.lastDownstreamFrame)>=0 &&
+       now.Sub(r.lastDownstreamFrame)<350*time.Millisecond {
+        if r.downstreamBurst<1024 {r.downstreamBurst++}
+    } else {
+        r.downstreamBurst=1
+    }
+    r.lastDownstreamFrame=now
+    r.downstreamFrames++
+}
+
+func reverseMinPeriod(a,b time.Duration) time.Duration {
+    if a<b{return a}
+    return b
+}
+
 func (r *reverseTransport) pollPeriod(now time.Time,activeConns int,ready bool) time.Duration {
     r.mu.Lock();defer r.mu.Unlock()
-    // Fast polling requires a sustained burst of useful authenticated
-    // payloads. One isolated datagram must never trigger 500 empty polls/s.
     period:=250*time.Millisecond
-    age:=now.Sub(r.lastUsefulFrame)
     if !ready {
         period=200*time.Millisecond
-    } else if !r.lastUsefulFrame.IsZero() && age>=0 && age<1500*time.Millisecond {
-        if r.usefulBurst>=4 && age<350*time.Millisecond {
-            period=2*time.Millisecond
-        }else if r.usefulBurst>=2{
-            period=12*time.Millisecond
-        }else{
-            period=40*time.Millisecond
+    } else {
+        // One connected UDP flow benefits from timely reverse ACKs even
+        // before a sustained burst has been detected.
+        if activeConns>0 {period=24*time.Millisecond}
+
+        inboundAge:=now.Sub(r.lastUsefulFrame)
+        if !r.lastUsefulFrame.IsZero() && inboundAge>=0 &&
+           inboundAge<1500*time.Millisecond {
+            switch {
+            case r.usefulBurst>=4 && inboundAge<350*time.Millisecond:
+                period=reverseMinPeriod(period,2*time.Millisecond)
+            case r.usefulBurst>=2:
+                period=reverseMinPeriod(period,12*time.Millisecond)
+            default:
+                period=reverseMinPeriod(period,35*time.Millisecond)
+            }
         }
-    } else if activeConns>0 {
-        period=80*time.Millisecond
+
+        downstreamAge:=now.Sub(r.lastDownstreamFrame)
+        if !r.lastDownstreamFrame.IsZero() && downstreamAge>=0 &&
+           downstreamAge<1500*time.Millisecond {
+            if r.downstreamBurst>=3 && downstreamAge<500*time.Millisecond {
+                period=reverseMinPeriod(period,8*time.Millisecond)
+            } else {
+                period=reverseMinPeriod(period,16*time.Millisecond)
+            }
+        }
     }
     r.pollPeriodMillis=int(period/time.Millisecond)
     return period
+}
+
+func (r *reverseTransport) noteQueueDelivered(created,now time.Time) {
+    if created.IsZero(){return}
+    latency:=now.Sub(created)
+    if latency<0{latency=0}
+    ms:=float64(latency)/float64(time.Millisecond)
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    r.queueWaitSamples++
+    if r.queueWaitSamples==1 {
+        r.queueWaitAvgMs=ms
+    } else {
+        // EWMA tracks recent latency; an all-time arithmetic mean hides a
+        // transient but UX-relevant 1-3 second buffer underrun.
+        r.queueWaitAvgMs+=0.05*(ms-r.queueWaitAvgMs)
+    }
+    rounded:=int64(latency/time.Millisecond)
+    if rounded>r.queueWaitMaxMs{r.queueWaitMaxMs=rounded}
 }
 type reverseDiagnostics struct {
     Pending int
@@ -378,16 +439,29 @@ type reverseDiagnostics struct {
     LastUsefulFrameAgeSeconds int64
     FallbackCount uint64
     FallbackReason string
+    DownstreamFrames uint64
+    QueueWaitEWMAms int64
+    QueueWaitMaxMs int64
+    QueueOldestAgeMs int64
+    QueueWaitSamples uint64
 }
 func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
     r.mu.Lock();defer r.mu.Unlock()
     age:=int64(-1)
     if !r.lastUsefulFrame.IsZero() {age=int64(now.Sub(r.lastUsefulFrame).Seconds());if age<0{age=0}}
+    oldest:=int64(0)
+    if len(r.pending)>0 {
+        wait:=now.Sub(r.pending[0].created)
+        if wait>0{oldest=int64(wait/time.Millisecond)}
+    }
     return reverseDiagnostics{Pending:len(r.pending),PendingBytes:r.pendingBytes,
         QueuePeak:r.queuePeak,QueueDrops:r.drops,FailedReplies:r.failedReplies,
         ReflectedPolls:r.reflectedPolls,
         PollIntervalMillis:r.pollPeriodMillis,LastUsefulFrameAgeSeconds:age,
-        FallbackCount:r.fallbackCount,FallbackReason:r.lastFallbackReason}
+        FallbackCount:r.fallbackCount,FallbackReason:r.lastFallbackReason,
+        DownstreamFrames:r.downstreamFrames,
+        QueueWaitEWMAms:int64(r.queueWaitAvgMs+0.5),QueueWaitMaxMs:r.queueWaitMaxMs,
+        QueueOldestAgeMs:oldest,QueueWaitSamples:r.queueWaitSamples}
 }
 
 // Observed inbound authenticated reverse probes are separately reported.
