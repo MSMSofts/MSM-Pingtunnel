@@ -124,6 +124,11 @@ func (s *secureSession) lastPeerTraffic() time.Time {
  s.mu.Lock();defer s.mu.Unlock()
  return s.lastValid
 }
+// A new HMAC-verified, replay-checked foreign poll proves peer liveness.
+func (s *secureSession) noteAuthenticatedPoll(now time.Time) {
+ s.mu.Lock();defer s.mu.Unlock()
+ if s.state==4 && now.After(s.lastValid){s.lastValid=now}
+}
 func (s *secureSession) resetLocked() {
  s.pending=nil
  s.state=0;s.keys=nil;s.confirmKey=nil;s.localPrivate=nil
