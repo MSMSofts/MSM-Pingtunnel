@@ -58,6 +58,7 @@ type reverseTransport struct {
     pendingBytes int
     drops uint64
     recent map[[8]byte]time.Time
+    lastPrune time.Time
 }
 
 func newReverseTransport(preference ICMPDirection, key []byte, now time.Time) (*reverseTransport, error) {
@@ -163,10 +164,14 @@ func (r *reverseTransport) authenticateProbe(frame []byte,now time.Time) bool {
     defer r.mu.Unlock()
     if r.recent==nil{r.recent=make(map[[8]byte]time.Time)}
     if _,ok:=r.recent[nonce];ok{return false}
-    for id,t:=range r.recent {
-        if now.Sub(t)>reverseProbeWindow{delete(r.recent,id)}
+    if r.lastPrune.IsZero() || now.Sub(r.lastPrune)>=time.Second {
+        for id,t:=range r.recent {
+            if now.Sub(t)>reverseProbeWindow{delete(r.recent,id)}
+        }
+        r.lastPrune=now
     }
-    if len(r.recent)>=256{return false}
+    // 100 polls/second over 20 seconds plus generous network bursts.
+    if len(r.recent)>=4096{return false}
     r.recent[nonce]=now
     return true
 }
