@@ -1,5 +1,17 @@
 # Changelog / تاریخچه تغییرات
 
+## [3.3.5](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.5) — Prevent Reverse poll replay-cache saturation
+
+**Config schema: 3 · Secure wire: 4 · No external packet layout or cryptographic changes**
+
+- Corrected a capacity mismatch: a 500Hz authenticated Reverse poller with 20-second replay protection can maintain roughly **10,000** valid nonces concurrently, but the existing cache rejected fresh requests once it reached **4,096**.
+- Increased the bounded Iran-side cache to **16,384** while retaining HMAC checks, the 20-second validity window, nonce replay rejection and periodic pruning. Overflow remains rejected rather than disabling security.
+- Exposed `reverse_replay_capacity_rejections` in local security JSON and in `pingtunnel security`. It distinguishes cache exhaustion from replay or authentication errors.
+- Added regression tests for 10,000 valid signed polls over a 20-second simulated 500pps interval and explicit overflow/replay rejection.
+- Preserves the successfully written downlink DATA-driven scheduling and measured queue delays introduced in 3.3.4; maintains Reverse-first with emergency-only Direct.
+- **Validation limitation:** this corrects a demonstrable polling-capacity bug; improvement to the user's intermittent 1–3-second video stalls still requires paired VPS playback measurements.
+
+
 ## [3.3.5](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.5) — Fix signed reverse poll replay cache saturation under continuous video load
 
 **Secure wire v4 and config schema 3 unchanged.**
