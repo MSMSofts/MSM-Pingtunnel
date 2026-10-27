@@ -159,6 +159,16 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
             if stdbytes.HasPrefix(payloadData,secureControlMagic[:]) {
                 response,err:=cryptoConfig.ReceiveSecureControl(payloadData,now)
                 if err==nil {
+                    // The first verified ClientHello acknowledges the poll:
+                    // only then may Foreign select the reverse direction.
+                    if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="foreign" &&
+                        controlType(payloadData)==helloClient {
+                        if int(bytes[0])==0 {
+                            cryptoConfig.reverse.choose(ICMPReverse,now)
+                        } else if int(bytes[0])==8 {
+                            cryptoConfig.reverse.choose(ICMPDirect,now)
+                        }
+                    }
                     replyType:=8
                     if cryptoConfig.sec.region=="foreign" && !useReverse(cryptoConfig) {replyType=0}
                     if cryptoConfig.sec.region=="iran" && useReverse(cryptoConfig) {replyType=0}
