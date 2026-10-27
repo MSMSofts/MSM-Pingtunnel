@@ -1,5 +1,17 @@
 # Changelog / تاریخچه تغییرات
 
+## [3.3.3](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.3) — Separate kernel Echo reflections from authenticated DATA
+
+**Config schema: 3 · Wire version: 4 · No packet-layout, crypto or direction changes**
+
+- Confirmed in a real-world VPS diagnostic that the foreign host receives kernel-reflected 44-byte ICMP Echo Replies with the same 36-byte `PTR4` payload as outbound Reverse poll requests (491 in a 10-second capture).
+- The overseas Go receive path now filters **only** ICMP Type 0 Echo Replies whose payload is **exactly 36 bytes and starts with PTR4**, after checking the paired peer's IP and before sending the payload to the AEAD decoder.
+- The filter cannot match normal `PTD4` authenticated DATA or `PTH4` control handshakes; foreign-to-Iran ICMP Requests and Iran-side decoding are unchanged.
+- New `reverse_poll_echo_reflections` field and `Filtered kernel PTR4 Echo reflections` manager metric track what the **Go receiver**, rather than tcpdump, actually filters. Such reflections no longer inflate the session's `authentication_failures` counter.
+- Regression tests cover a real 44-byte ICMP Echo Reply frame, source-role/type/length filtering, false-positive avoidance and metric isolation. Go and Rust CI remain required before release.
+- **Limit:** This corrects excess decryption attempts and misleading authentication error diagnostics. It does **not** establish that the user's Hysteria/Shorts buffering issue is resolved; queue wait time, packet loss and playback must be assessed independently.
+
+
 ## [3.3.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2) — Reverse first, Direct only after sustained actual failure
 
 **Config schema: 3 · Wire protocol: 4 · Exact same authenticated ICMP framing**

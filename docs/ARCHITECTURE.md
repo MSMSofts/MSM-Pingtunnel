@@ -2,10 +2,16 @@
 
 [README فارسی](../README.md) · [English README](../README.en.md) · [Security policy](../SECURITY.md)
 
-**Version:** Manager 3.3.2 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
+**Version:** Manager 3.3.3 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
 
 **خلاصه:** Pingtunnel Manager فقط دو VPS دارد. کاربر به پورت TCP/UDP سرور ایران وصل می‌شود؛ هسته Go ترافیک را در ICMP رمزنگاری‌شده به VPS خارج می‌رساند و سرور خارج آن را به پورت سرویس محلی خودش تحویل می‌دهد. Rust تنها کارهای راه‌اندازی، ذخیره تنظیمات و کنترل systemd را انجام می‌دهد.
 
+
+## Overseas PTR4 Echo reflection filtering (v3.3.3)
+
+The overseas reverse poller sends a 36-byte `PTR4` control payload inside a standard ICMP Echo Request. Linux on the Iran host can automatically return that *same* payload inside an Echo Reply. Such a reply is not a `PTH4` authenticated handshake frame or a `PTD4` AEAD data frame. Previously the overseas receiver could route the reflected payload to session decrypt and increment `authentication_failures` in the non-session-frame branch.
+
+v3.3.3 tests the pinned peer source IP first, then filters only **ICMP Type 0** replies with **exactly 36 bytes** of Echo payload and **PTR4** prefix before the session decoder. Ordinary data and authenticated control frames do not match this filter. Filtered reflections increment `reverse_poll_echo_reflections` and never count as security failures, proof of data delivery or fresh authenticated peer traffic. This is an internal receive-path change only, not an ICMP wire-format modification.
 
 ## Reverse-first Auto failover safety (v3.3.2)
 
@@ -133,7 +139,7 @@ Rust CLI presents these through `pingtunnel security` and `pingtunnel performanc
 
 ~~~text
 Rust/
-  Cargo.toml             Rust manager package (3.3.2)
+  Cargo.toml             Rust manager package (3.3.3)
   src/main.rs            CLI, systemd and config generation
   src/setup.rs           Unified pairing wizard
 
@@ -176,7 +182,7 @@ cargo test --manifest-path Rust/Cargo.toml
 cargo build --release --manifest-path Rust/Cargo.toml
 ~~~
 
-Release builds are verified with SHA256 and a release manifest specifying **manager 3.3.2 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.3.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2); rolling assets may also exist for compatibility.
+Release builds are verified with SHA256 and a release manifest specifying **manager 3.3.3 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.3.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2); rolling assets may also exist for compatibility.
 
 ## 8. Compatibility contract and limitations
 

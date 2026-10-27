@@ -507,6 +507,7 @@ fn show_security_status() -> Result<()> {
         println!("  Reverse queued frames / bytes: {} / {}",report["reverse_queue_packets"],report["reverse_queue_bytes"]);
         println!("  Reverse queue peak / drops: {} / {}",report["reverse_queue_peak"],report["reverse_queue_drops"]);
         println!("  Reverse ICMP reply write failures: {}",report["reverse_write_failures"]);
+        println!("  Filtered kernel PTR4 Echo reflections: {}",report["reverse_poll_echo_reflections"]);
         if let Some(ms)=report["reverse_poll_interval_ms"].as_u64().filter(|v|*v>0) {
             println!("  Adaptive reverse polling interval: {ms} ms");
         }

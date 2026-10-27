@@ -86,6 +86,16 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
 	sendEncryptedICMP(id,sequence,conn,server,sproto,mb,cryptoConfig)
 }
 
+// isReflectedReversePoll detects a Linux Echo Reply that copies the 36-byte
+// authenticated foreign-origin PTR4 request verbatim. It is not a secure
+// control frame (PTH4) or encrypted application DATA (PTD4).
+// The receiver must first enforce its pinned-IP policy before calling this.
+func isReflectedReversePoll(crypto *CryptoConfig, icmpType byte, data []byte) bool {
+    return crypto!=nil && crypto.sec!=nil && crypto.sec.region=="foreign" &&
+        icmpType==0 && len(data)==reverseProbeBytes &&
+        stdbytes.Equal(data[:len(reverseProbeMagic)],reverseProbeMagic[:])
+}
+
 // Send an already-encrypted payload without re-wrapping MyMsg or allocating
 // a second session sequence. Used for draining authenticated pending packets.
 func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr, proto int, encrypted []byte, crypto *CryptoConfig) {
@@ -151,6 +161,13 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
             peer:=icmpSrcToIPAddr(srcaddr)
             if peer==nil||!cryptoConfig.SecurePeerAllowed(peer.IP){continue}
             now:=time.Now()
+            // Linux commonly reflects a received Echo Request with a
+            // second, kernel-generated Echo Reply. These PTR4 reflections
+            // are NOT session ciphertext and must never be passed to AEAD.
+            if isReflectedReversePoll(cryptoConfig,bytes[0],payloadData) {
+                if cryptoConfig.reverse!=nil {cryptoConfig.reverse.noteReflectedProbe()}
+                continue
+            }
             if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="iran" &&
                 int(bytes[0])==8 && stdbytes.HasPrefix(payloadData,reverseProbeMagic[:]) {
                 if cryptoConfig.reverse.authenticateProbe(payloadData,now) {

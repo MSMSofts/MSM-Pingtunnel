@@ -74,6 +74,7 @@ type reverseTransport struct {
     usefulBurst int
     lastReceiveAck time.Time
     failedReplies uint64
+    reflectedPolls uint64
     pollPeriodMillis int
     queuePeak int
 }
@@ -323,6 +324,13 @@ func (r *reverseTransport) shouldSendReceiveAck(now time.Time) bool {
     r.lastReceiveAck=now
     return true
 }
+// Count only echo reflections delivered to the Go receive path. This
+// separates harmless kernel ICMP traffic from AEAD authentication failures.
+func (r *reverseTransport) noteReflectedProbe() {
+    r.mu.Lock()
+    r.reflectedPolls++
+    r.mu.Unlock()
+}
 func (r *reverseTransport) recordPollInterval(period time.Duration) {
     r.mu.Lock();defer r.mu.Unlock()
     r.pollPeriodMillis=int(period/time.Millisecond)
@@ -365,6 +373,7 @@ type reverseDiagnostics struct {
     QueuePeak int
     QueueDrops uint64
     FailedReplies uint64
+    ReflectedPolls uint64
     PollIntervalMillis int
     LastUsefulFrameAgeSeconds int64
     FallbackCount uint64
@@ -376,6 +385,7 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
     if !r.lastUsefulFrame.IsZero() {age=int64(now.Sub(r.lastUsefulFrame).Seconds());if age<0{age=0}}
     return reverseDiagnostics{Pending:len(r.pending),PendingBytes:r.pendingBytes,
         QueuePeak:r.queuePeak,QueueDrops:r.drops,FailedReplies:r.failedReplies,
+        ReflectedPolls:r.reflectedPolls,
         PollIntervalMillis:r.pollPeriodMillis,LastUsefulFrameAgeSeconds:age,
         FallbackCount:r.fallbackCount,FallbackReason:r.lastFallbackReason}
 }
