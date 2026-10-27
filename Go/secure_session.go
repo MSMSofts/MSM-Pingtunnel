@@ -117,6 +117,13 @@ func (s *secureSession) ready()bool{
  s.mu.Lock();defer s.mu.Unlock()
  return s.state==4&&s.keys!=nil
 }
+
+// Authenticated inbound application traffic is evidence of a live peer,
+// even if ICMP ping replies are selectively filtered or delayed.
+func (s *secureSession) lastPeerTraffic() time.Time {
+ s.mu.Lock();defer s.mu.Unlock()
+ return s.lastValid
+}
 func (s *secureSession) resetLocked() {
  s.pending=nil
  s.state=0;s.keys=nil;s.confirmKey=nil;s.localPrivate=nil
