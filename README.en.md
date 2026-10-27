@@ -320,6 +320,7 @@ These features **do not guarantee uninterrupted VPN sessions**, live adaptation 
 
 | Version | Config schema | Wire format | Compatibility |
 | --- | --- | --- | --- |
+| **3.3.5** | 3 | **v4** (`PTH4/PTD4`) | Correct sustained 500/s Reverse poll replay-cache capacity; bounded authentication nonce memory |
 | **3.3.4** | 3 | **v4** (`PTH4/PTD4`) | Bidirectional DATA-aware poll pacing and queue wait telemetry |
 | **3.3.3** | 3 | **v4** (`PTH4/PTD4`) | Ignore kernel PTR4 Echo reflections before decrypt, count separately |
 | **3.3.2** | 3 | **v4** (`PTH4/PTD4`) | Reverse preferred, Direct only after sustained failure |
@@ -366,7 +367,7 @@ Upgrading both VPSs is recommended during a maintenance window. The manager pres
 
 ## Scope & limitations
 
-**Not provided in v3.3.4:** high availability, multiple VPSs, simultaneous TCP+UDP forwarding through one tunnel, guaranteed filtering resistance, or independent security audit. Reverse/Auto passed CI tests but requires a real two-VPS integration test. Previously, v3.2.4 did not support reverse forwarding; see the changelog.
+**Not provided in v3.3.5:** high availability, multiple VPSs, simultaneous TCP+UDP forwarding through one tunnel, guaranteed filtering resistance, or independent security audit. Reverse/Auto passed CI tests but requires a real two-VPS integration test. Previously, v3.2.4 did not support reverse forwarding; see the changelog.
 
 **Still required before high-assurance deployment:** testing two real VPSs with ICMP packet loss/jitter, Hysteria 2 end-to-end testing, restart/upgrade interruption testing, and independent cryptographic review.
 
