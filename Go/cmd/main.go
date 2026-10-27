@@ -165,7 +165,7 @@ func main() {
 	forward := flag.String("forward", "", "forward TCP traffic through proxy (socks5://host:port or http://host:port)")
 	congestion := flag.String("congestion", "bb", "congestion control algorithm: bb or empty")
 	region := ""
-	icmpDirection := "direct"
+	icmpDirection := "auto"
 	peerIP := ""
 	fixedTarget := ""
 	forwardProtocol := 0
