@@ -85,7 +85,7 @@ jobs:
           cp Go/*.go upstream/
           cp Go/cmd/main.go upstream/cmd/main.go
           cd upstream
-          gofmt -w crypto.go auto_crypto.go auto_crypto_test.go adaptive_performance.go adaptive_performance_test.go client.go server.go server_policy.go config.go pairing_v3_test.go secure_session.go secure_session_test.go security_hardening_test.go link_watchdog.go link_watchdog_test.go reverse_icmp.go reverse_icmp_test.go reverse_integration_test.go reverse_optimization_test.go reverse_runtime.go pingtunnel.go cmd/main.go
+          gofmt -w crypto.go auto_crypto.go auto_crypto_test.go adaptive_performance.go adaptive_performance_test.go client.go server.go server_policy.go config.go pairing_v3_test.go secure_session.go secure_session_test.go security_hardening_test.go link_watchdog.go link_watchdog_test.go reverse_icmp.go reverse_icmp_test.go reverse_echo_reflection_test.go reverse_integration_test.go reverse_optimization_test.go reverse_runtime.go pingtunnel.go cmd/main.go
       - name: Run upstream and auto crypto tests
         run: |
           cd upstream
