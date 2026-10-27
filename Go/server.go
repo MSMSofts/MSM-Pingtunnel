@@ -63,6 +63,7 @@ type Server struct {
 	sendPacketSize   atomic.Uint64
 	recvPacketSize   atomic.Uint64
 	localConnMapSize atomic.Int64
+	reverseSequence atomic.Uint32
 
 	processtp   *thread.ThreadPool
 	recvcontrol chan int
@@ -98,6 +99,10 @@ func (p *Server) Run() error {
 		return err
 	}
 	p.conn = conn
+
+	if p.cryptoConfig!=nil && p.cryptoConfig.reverse!=nil && p.allowedPeer!=nil {
+        go p.runReversePoller()
+    }
 
 	recv := make(chan *Packet, 10000)
 	p.recvcontrol = make(chan int, 1)
@@ -828,4 +833,29 @@ func (p *Server) updateConnError() {
 			p.connErrorMap.Delete(id)
 		}
 	}
+}
+
+ 
+// Keep the reverse leg's ICMP receive opportunities bounded and adaptive.
+// Poll only after direct negotiation has failed (or reverse is configured).
+// The foreign VPS always owns Echo Requests; Iran replies to those requests.
+func (p *Server) runReversePoller() {
+    defer failOnUnexpectedWorkerExit("reverse ICMP poller",&p.exit)
+    ticker:=time.NewTicker(10*time.Millisecond)
+    defer ticker.Stop()
+    peer:=&net.IPAddr{IP:append(net.IP(nil),p.allowedPeer...)}
+    last:=time.Time{}
+    for !p.exit.Load() {
+        now:=<-ticker.C
+        if p.exit.Load(){return}
+        if !p.cryptoConfig.reverse.needsProbe(now,p.cryptoConfig.SecureReady()){continue}
+        period:=500*time.Millisecond
+        if p.localConnMapSize.Load()>0 && p.cryptoConfig.SecureReady(){
+            period=10*time.Millisecond
+        }
+        if !last.IsZero() && now.Sub(last)<period{continue}
+        sequence:=int(p.reverseSequence.Add(1)&0xffff)
+        sendForeignPoll(*p.conn,peer,0x42A5,sequence,p.cryptoConfig,now)
+        last=now
+    }
 }
