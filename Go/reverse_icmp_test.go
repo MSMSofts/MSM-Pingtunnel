@@ -60,7 +60,7 @@ func TestReverseQueueBoundsAndTTL(t *testing.T){
 func TestAutoReverseRequiresTrafficAndStaleAuthentication(t *testing.T){
  now:=time.Unix(1800000000,0)
  r,_:=newReverseTransport(ICMPAuto,bytes.Repeat([]byte{9},32),now)
- if !r.acceptReverseOnDemand(now,false,time.Time{}){t.Fatal("initial reverse candidate unavailable")}
+ if !r.allowReverseCandidate(now,false,time.Time{}){t.Fatal("initial reverse candidate unavailable")}
  r.noteDemand(now.Add(40*time.Second),true)
  if !r.fallbackDirect(now.Add(41*time.Second),false,time.Time{}){t.Fatal("startup did not fall back after timeout")}
  if r.allowReverseCandidate(now.Add(60*time.Second),false,time.Time{}){t.Fatal("direct stabilization cooldown was bypassed")}
