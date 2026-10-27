@@ -861,9 +861,11 @@ func (p *Server) runReversePoller() {
         if !p.cryptoConfig.reverse.needsProbe(now,recent) {
             // Recheck liveness periodically but avoid unnecessary probes on
             // a healthy Direct connection.
+            p.cryptoConfig.reverse.recordPollInterval(time.Second)
             timer.Reset(time.Second)
             continue
         }
+        p.cryptoConfig.reverse.recordPollInterval(period)
         sequence:=int(p.reverseSequence.Add(1)&0xffff)
         sendForeignPoll(*p.conn,peer,0x42A5,sequence,p.cryptoConfig,now,recent)
         timer.Reset(period)
