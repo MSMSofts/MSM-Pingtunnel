@@ -1,5 +1,17 @@
 # Changelog / تاریخچه تغییرات
 
+## [3.3.4](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.4) — Bidirectional demand-aware Reverse pacing and queue latency metrics
+
+**Config schema 3 · Secure wire v4 unchanged · Reverse-first Auto unchanged**
+
+- Fixed a video-stream ACK-delay feedback loop: v3.3.3 tuned foreign-initiated ICMP polling from incoming **Iran→Foreign** authenticated DATA. If ACK traffic paused, polling could cool to 80–250 ms while the **Foreign→Iran** video stream was active, delaying the next acknowledgements further.
+- The foreign Go transport now also observes actual encrypted **Foreign→Iran application DATA send attempts**. It chooses the faster of inbound authenticated-DATA and outbound encrypted-DATA pacing, without counting routine PINGs, handshake controls, or kernel PTR4 reflections as demand.
+- During download-heavy bursts, outbound demand warms the reverse poller toward **4 ms**; short gaps cool in stages of **12 / 24 / 45 ms**, then an open but quiet connection uses **60 ms** and a fully idle session uses **250 ms**. Short ACK stalls no longer trigger an immediate drop to the slowest rate.
+- New local-only diagnostics: `reverse_downstream_data_age_seconds`, `reverse_queue_max_wait_ms`, `reverse_queue_wait_ewma_ms`, and `reverse_queue_dequeue_samples`. Maximum and EWMA measure time spent in the bounded Iran-side FIFO *until dequeue for an attempted ICMP reply*, not end-to-end packet latency or application playback buffer status.
+- Unit regression tests cover persistent Foreign→Iran traffic without inbound ACKs, staged cooldown, idle resources and queue-wait measurements, alongside the existing secure/reverse integration suite.
+- **Scope:** this is targeted scheduling and observability, not a throughput guarantee. Packet loss, Hysteria congestion control, ICMP rate limits and IP fragmentation require real VPS measurements. Pair both hosts with the same release.
+
+
 ## [3.3.3](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.3) — Separate kernel Echo reflections from authenticated DATA
 
 **Config schema: 3 · Wire version: 4 · No packet-layout, crypto or direction changes**
