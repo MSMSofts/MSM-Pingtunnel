@@ -19,6 +19,7 @@ type Config struct {
 	EncryptKey       string `json:"encrypt_key,omitempty"`
 	PeerIP           string `json:"peer_ip,omitempty"`
 	Region           string `json:"region,omitempty"`
+	ICMPDirection    string `json:"icmp_direction,omitempty"`
 	FixedTarget      string `json:"fixed_target,omitempty"`
 	ForwardProtocol  int    `json:"forward_protocol,omitempty"`
 	TCPMode          int    `json:"tcp,omitempty"`
