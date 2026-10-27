@@ -7,6 +7,16 @@
 **خلاصه:** Pingtunnel Manager فقط دو VPS دارد. کاربر به پورت TCP/UDP سرور ایران وصل می‌شود؛ هسته Go ترافیک را در ICMP رمزنگاری‌شده به VPS خارج می‌رساند و سرور خارج آن را به پورت سرویس محلی خودش تحویل می‌دهد. Rust تنها کارهای راه‌اندازی، ذخیره تنظیمات و کنترل systemd را انجام می‌دهد.
 
 
+## Video ACK scheduling and replay-cache capacity (v3.3.4)
+
+A Foreign→Iran UDP/QUIC DATA frame is sent as an ICMP Request, independent of the foreign-origin polling loop. Its return acknowledgements, however, may be queued on Iran until another authenticated reverse poll arrives. Previous adaptive pacing used only successfully decrypted **Iran→Foreign** application DATA to increase the poll rate, delaying the first few ACKs in a heavy downstream flow.
+
+After a **successful encrypted Foreign→Iran application DATA send**, the foreign endpoint updates a local downstream-burst tracker. When the session is authenticated, the poll scheduler takes the minimum interval requested by: active connections (24 ms), recent downstream payloads (16 ms or 8 ms after a brief burst), and recent authenticated upstream payloads (35/12/2 ms, depending on burst activity). An idle session stays at 250 ms, handshake at 200 ms. Downstream traffic must be a successfully queued/sent local encrypted DATA frame; unsigned remote ICMP does not drive high-rate polling. No new network protocol fields were added.
+
+The 20-second HMAC-authenticated poll replay window can see 10,000 requests at the maximum 500/s schedule. Its previous cap of 4096 nonces prematurely rejected valid high-throughput polls. The bounded cache cap is now 16,384 nonces, with pruning at least once per second during poll processing. `reverse_probe_replay_entries` and `reverse_probe_replay_overflows` expose the current count and saturation events.
+
+On Iran, `reverse_queue_oldest_age_ms` measures how long the oldest frame is currently waiting; `reverse_queue_wait_ewma_ms` tracks recently completed successful userspace ICMP reply writes and `reverse_queue_wait_max_ms` tracks maximum observed wait since restart. Failed writes do not count as delivered; their original age survives retry. `reverse_queue_wait_samples` counts actual successful dequeues. On Foreign, `reverse_downstream_frames` counts successful encrypted application DATA socket writes used by the scheduler. These measurements diagnose buffer stalls but do not directly measure QUIC stream RTT or all network losses.
+
 ## Overseas PTR4 Echo reflection filtering (v3.3.3)
 
 The overseas reverse poller sends a 36-byte `PTR4` control payload inside a standard ICMP Echo Request. Linux on the Iran host can automatically return that *same* payload inside an Echo Reply. Such a reply is not a `PTH4` authenticated handshake frame or a `PTD4` AEAD data frame. Previously the overseas receiver could route the reflected payload to session decrypt and increment `authentication_failures` in the non-session-frame branch.
