@@ -37,7 +37,7 @@ pub(crate) fn wizard() -> Result<()> {
     root_required()?;
     let previous = existing_v3()?;
     println!("\nPingtunnel — Unified Pair Setup (v3)");
-    println!("Only two VPSs: Iran and Foreign. Direct ICMP tunnel; all tuning is automatic.");
+    println!("Only two VPSs: Iran and Foreign. Automatic direct/reverse ICMP initiation.");
     println!("The shared 256-bit pairing key is NEVER bound to Client/Server roles.");
 
     // Q1: Physical identity (retained independently of ICMP client/server role).
@@ -112,6 +112,7 @@ pub(crate) fn wizard() -> Result<()> {
         "peer_ip":peer,
         "pair_key":pair_key,
         "transport":transport,
+        "icmp_direction":"auto",
         "port":port,
         "memory_mb":0,
         "autostart":true
@@ -121,7 +122,7 @@ pub(crate) fn wizard() -> Result<()> {
     println!("  This server: {region} | Peer: {peer}");
     println!("  Forwarding: {}:{} ({transport})", if region=="iran" { "Iran listen" } else { "Foreign loopback target" }, port);
     println!("  Security: mandatory authenticated auto-AEAD; no plaintext fallback.");
-    println!("  ICMP direction: Iran -> Foreign (future reversal will reuse this pairing key).");
+    println!("  ICMP direction: Auto (Direct or Reverse, authenticated negotiation).");
     println!("  Auto performance: enabled on Iran; BB congestion in Go.");
     // Always save only after all five answers passed validation.
     store_config(&cfg)?;
