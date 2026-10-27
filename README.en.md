@@ -10,7 +10,7 @@ Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** betwe
 
 **This is a transport layer—not a standalone VPN server.** Services such as Hysteria 2, s-ui or other TCP/UDP applications run and are configured separately.
 
-**Current release: 3.3.4** · Rust manager and modified Go core · Config schema **3** · Secure wire **4** · **Reverse-first Auto:** Foreign-initiated ICMP Echo Requests, with Direct fallback after reverse negotiation fails. Live VPS validation is still required.
+**Current release: 3.3.4** · Rust manager, Go core, schema **3**, secure wire **4** · **Reverse-first Auto:** Foreign starts ICMP polls; Direct is reserved for prolonged confirmed outages with client demand. Video latency improvements require measured live testing.
 
 
 
@@ -24,7 +24,7 @@ On Iran, `sudo pingtunnel security` now reports oldest queued frame age, last/ma
 
 No change to the ICMP packet layout, secure Wire v4, X25519/session authentication, or Reverse-first with emergency Direct-only fallback. Actual video playback improvements require real VPS testing.
 
-## ICMP Echo reflection filtering (v3.3.4)
+## ICMP Echo reflection filtering (v3.3.3)
 
 On a real two-VPS path, the overseas host was observed receiving hundreds of 44-byte ICMP Echo Replies containing a 36-byte `PTR4` payload. These are automatic Linux kernel echoes of foreign-origin Reverse poll requests, **not authenticated application ciphertext**. v3.3.4 filters only these exact-size, exact-marker Echo Replies, *after verifying the pinned peer source IP and before attempting AEAD decrypt*. Genuine `PTD4` DATA and `PTH4` handshakes remain unaffected; neither the network packet format nor session cryptography changes.
 
@@ -314,6 +314,7 @@ These features **do not guarantee uninterrupted VPN sessions**, live adaptation 
 
 | Version | Config schema | Wire format | Compatibility |
 | --- | --- | --- | --- |
+| **3.3.4** | 3 | **v4** (`PTH4/PTD4`) | Bidirectional DATA-aware poll pacing and queue wait telemetry |
 | **3.3.3** | 3 | **v4** (`PTH4/PTD4`) | Ignore kernel PTR4 Echo reflections before decrypt, count separately |
 | **3.3.2** | 3 | **v4** (`PTH4/PTD4`) | Reverse preferred, Direct only after sustained failure |
 | **3.3.1** | 3 | **v4** (`PTH4/PTD4`) | Adaptive Reverse polls, retry of failed Echo Reply writes, queue telemetry |
