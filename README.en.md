@@ -2,19 +2,19 @@
 
 **A lightweight, encrypted ICMP tunnel between exactly two Linux VPSs, with a five-question setup wizard.**
 
-[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.3.1](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.1)
+[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.3.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2)
 
-![Version](https://img.shields.io/badge/version-3.3.1-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.3.2-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
 
 Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** between an **Iran-side VPS** and an **overseas VPS**. Local TCP or UDP traffic enters the Iran VPS, travels inside authenticated, encrypted ICMP packets, and is forwarded by the overseas VPS to its configured local service.
 
 **This is a transport layer—not a standalone VPN server.** Services such as Hysteria 2, s-ui or other TCP/UDP applications run and are configured separately.
 
-**Current release: 3.3.1** · Rust manager and modified Go core · Config schema **3** · Secure wire **4** · **Reverse-first Auto:** Foreign-initiated ICMP Echo Requests, with Direct fallback after reverse negotiation fails. Live VPS validation is still required.
+**Current release: 3.3.2** · Rust manager and modified Go core · Config schema **3** · Secure wire **4** · **Reverse-first Auto:** Foreign-initiated ICMP Echo Requests, with Direct fallback after reverse negotiation fails. Live VPS validation is still required.
 
 
 
-## Reverse throughput and stability in 3.3.1
+## Reverse throughput and stability (3.3.1 and 3.3.2)
 
 The foreign Go core uses an **event-driven adaptive timer** instead of a permanently fast polling loop. The following are target program intervals, **not guaranteed end-to-end latencies**:
 
@@ -35,13 +35,13 @@ Run `sudo pingtunnel security` on either VPS to inspect reverse queue size/bytes
 
 **Validation:** v3.3.0 Reverse connectivity was reported working on a live pair. v3.3.1 builds, tests, and race checking are automated, but the actual bandwidth, VPS overhead, loss recovery, and resilience still require measured two-host testing.
 
-## ICMP direction in v3.3.1
+## ICMP direction in v3.3.2
 
-- **Auto (default):** start with **Reverse** foreign-origin ICMP Echo Requests. If initial authentication has not completed within 25 seconds, attempt **Direct** initiation from Iran. Selection has a 60-second minimum dwell to reduce flapping.
+- **Auto (default):** start with **Reverse** foreign-origin ICMP Echo Requests. **Direct is an emergency-only fallback** after sustained local client demand and a prolonged failed Reverse: no authenticated polls for 90 seconds, unconfirmed negotiation for 150 seconds, or absence of both authenticated polls and encrypted peer traffic for 150 seconds on an established route. Selection has a 60-second minimum dwell to reduce flapping.
 - **Reverse:** foreign-origin Echo Requests only.
 - **Direct:** Iran-origin Echo Requests only.
 
-The physical roles are fixed regardless of direction: users connect to Iran, and the overseas endpoint forwards to its pinned local loopback service. `icmp_direction` is optional in persistent config; omitting it selects Auto. Real VPS field testing is required before relying on automatic recovery in production.
+The physical roles are fixed regardless of direction: users connect to Iran, and the overseas endpoint forwards to its pinned local loopback service. `icmp_direction` is optional in persistent config; omitting it selects Auto. Reverse was observed working on a live pair with v3.3.0, but automated failover and 3.3.2 performance still require live validation.
 
 ## Highlights
 
@@ -298,6 +298,7 @@ These features **do not guarantee uninterrupted VPN sessions**, live adaptation 
 
 | Version | Config schema | Wire format | Compatibility |
 | --- | --- | --- | --- |
+| **3.3.2** | 3 | **v4** (`PTH4/PTD4`) | Reverse always preferred, Direct emergency-only after proven sustained failure |
 | **3.3.1** | 3 | **v4** (`PTH4/PTD4`) | Adaptive Reverse polls, retry of failed Echo Reply writes, queue telemetry |
 | **3.3.0** | 3 | **v4** (`PTH4/PTD4`) | Reverse-first authenticated transport |
 | **3.2.6** | 3 | **v4** (`PTH4/PTD4`) | Peer watchdog honors authenticated traffic |
@@ -315,7 +316,7 @@ Upgrading both VPSs is recommended during a maintenance window. The manager pres
 
 > **Repository transfer note:** For updates, use the canonical installer URL under `MSMSofts/MSM-Pingtunnel` shown in the Install section. Earlier manager binaries may still use the former repository owner in the built-in `pingtunnel update` URL.
 
-[Version history](CHANGELOG.md) · [Pinned release](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.1) · [Rolling assets](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
+[Version history](CHANGELOG.md) · [Pinned release](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2) · [Rolling assets](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
 
 ## Important paths
 

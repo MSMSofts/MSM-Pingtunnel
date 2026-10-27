@@ -2,10 +2,18 @@
 
 [README فارسی](../README.md) · [English README](../README.en.md) · [Security policy](../SECURITY.md)
 
-**Version:** Manager 3.3.1 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
+**Version:** Manager 3.3.2 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
 
 **خلاصه:** Pingtunnel Manager فقط دو VPS دارد. کاربر به پورت TCP/UDP سرور ایران وصل می‌شود؛ هسته Go ترافیک را در ICMP رمزنگاری‌شده به VPS خارج می‌رساند و سرور خارج آن را به پورت سرویس محلی خودش تحویل می‌دهد. Rust تنها کارهای راه‌اندازی، ذخیره تنظیمات و کنترل systemd را انجام می‌دهد.
 
+
+## Reverse-first Auto failover safety (v3.3.2)
+
+Auto starts with Reverse on both peers. The Iran endpoint alone decides when sustained failure merits emergency Direct; the overseas peer follows authenticated ICMP negotiation. This prevents short packet-loss bursts, an idle VPN, or the previous unconditional 25-second handshake deadline from preempting a functioning Reverse tunnel.
+
+The Iran transport records sustained local client demand separately from the last authenticated peer data and last verified reverse poll timestamp. Direct is eligible only if real client demand continues and one of three conditions holds: (1) no signed Reverse polls at all for at least 90 seconds, (2) signed polls arrive but the authenticated four-step handshake remains incomplete for 150 seconds, or (3) an established reverse path has seen neither authenticated polls nor decrypted authenticated peer frames for at least 150 seconds. Direction dwell and later recovery opportunities remain bounded. A mode switch reports its reason and accounts for queued ciphertext that cannot be replayed across sessions.
+
+Authenticated inbound polls prove that the foreign-origin ICMP request arrived in Iran; they do not independently prove that Iran's Echo Reply reached Foreign. For complete reachability, use authenticated handshake/data receipts and application throughput statistics. Avoid inferring transport availability from process liveness or generic Ping.
 
 ## Reverse throughput scheduling (v3.3.1)
 
@@ -125,7 +133,7 @@ Rust CLI presents these through `pingtunnel security` and `pingtunnel performanc
 
 ~~~text
 Rust/
-  Cargo.toml             Rust manager package (3.3.1)
+  Cargo.toml             Rust manager package (3.3.2)
   src/main.rs            CLI, systemd and config generation
   src/setup.rs           Unified pairing wizard
 
@@ -168,7 +176,7 @@ cargo test --manifest-path Rust/Cargo.toml
 cargo build --release --manifest-path Rust/Cargo.toml
 ~~~
 
-Release builds are verified with SHA256 and a release manifest specifying **manager 3.3.1 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.3.1](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.1); rolling assets may also exist for compatibility.
+Release builds are verified with SHA256 and a release manifest specifying **manager 3.3.2 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.3.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2); rolling assets may also exist for compatibility.
 
 ## 8. Compatibility contract and limitations
 

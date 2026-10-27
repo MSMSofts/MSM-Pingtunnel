@@ -1,5 +1,18 @@
 # Changelog / تاریخچه تغییرات
 
+## [3.3.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2) — Reverse first, Direct only after sustained actual failure
+
+**Config schema: 3 · Wire protocol: 4 · Exact same authenticated ICMP framing**
+
+- Corrected the v3.3.1 Auto regression that unconditionally left Reverse after a 25-second incomplete handshake; a short negotiation delay is NOT sufficient evidence of network failure.
+- **Reverse is the sticky default.** While authenticated Reverse probes or valid encrypted session traffic are still arriving, Auto does not switch to Direct just because the application is idle or response traffic is sparse.
+- A fallback now requires **continuous local demand** and sustained failure: no valid reverse polls after 90 seconds, a repeatedly unconfirmed four-step handshake despite valid polls after 150 seconds, or no valid reverse polls AND no authenticated messages for 150 seconds on an established session.
+- Observed Reverse outages are not hidden: `pingtunnel security` and `pingtunnel health` report `auto_direct_fallback_count` and the explicit last fallback reason. Data discarded during a mode change counts toward queue drops.
+- Regression tests check the 25-second delay, 24-hour idle Reverse, ongoing valid polls without app data, intermittent traffic, true prolonged outages and Direct handshakes.
+- These grace periods prioritize keeping a working Reverse path, not minimizing time to emergency Direct. A completely broken Reverse connection can be unavailable for more than a minute before automatic fallback.
+- No change to pairing key, wire version, ICMP Echo format or application-specific cryptographic envelopes; all paired endpoints must be upgraded together for consistent behavior.
+
+
 ## [3.3.1](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.1) — تطبیق Poll معکوس با بار واقعی و بازیابی صف
 
 **Config schema: 3 · Secure wire: 4 · No new external packet framing**

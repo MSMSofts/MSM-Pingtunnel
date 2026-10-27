@@ -31,10 +31,16 @@ func TestReverseSelectionAndAutomaticGracePeriod(t *testing.T){
     if err!=nil{t.Fatal(err)}
     if r.direction()!=ICMPReverse{t.Fatal("auto did not choose reverse on startup")}
     if !r.needsProbe(now,true){t.Fatal("auto did not probe reverse immediately")}
-    if r.fallbackDirect(now.Add(20*time.Second),false,time.Time{}){t.Fatal("direct selected before reverse startup deadline")}
-    if !r.fallbackDirect(now.Add(26*time.Second),false,time.Time{}){t.Fatal("auto did not fall back to direct on reverse timeout")}
-    if r.choose(ICMPReverse,now.Add(45*time.Second)){t.Fatal("switch hysteresis not enforced")}
-    if !r.choose(ICMPReverse,now.Add(87*time.Second)){t.Fatal("auto could not retry reverse after cooldown")}
+    r.noteDemand(now.Add(time.Second),true)
+    if r.fallbackDirect(now.Add(26*time.Second),false,time.Time{}){t.Fatal("a short handshake delay switched to direct")}
+    if r.fallbackDirect(now.Add(90*time.Second),false,time.Time{}){t.Fatal("demand must remain sustained")}
+    // Constant real traffic with no reverse requests justifies fallback.
+    for elapsed:=2;elapsed<=94;elapsed++{
+        r.noteDemand(now.Add(time.Duration(elapsed)*time.Second),true)
+    }
+    if !r.fallbackDirect(now.Add(94*time.Second),false,time.Time{}){t.Fatal("unreachable reverse did not fall back after sustained demand")}
+    if r.choose(ICMPReverse,now.Add(105*time.Second)){t.Fatal("switch hysteresis not enforced")}
+    if !r.choose(ICMPReverse,now.Add(155*time.Second)){t.Fatal("auto could not retry reverse after cooldown")}
     d,_:=newReverseTransport(ICMPDirect,key,now)
     if d.needsProbe(now.Add(time.Hour),false) || d.choose(ICMPReverse,now.Add(time.Hour)){t.Fatal("direct-only mode changed direction")}
     only,_:=newReverseTransport(ICMPReverse,key,now)
@@ -61,14 +67,29 @@ func TestAutoReverseRequiresTrafficAndStaleAuthentication(t *testing.T){
  now:=time.Unix(1800000000,0)
  r,_:=newReverseTransport(ICMPAuto,bytes.Repeat([]byte{9},32),now)
  if !r.allowReverseCandidate(now,false,time.Time{}){t.Fatal("initial reverse candidate unavailable")}
- r.noteDemand(now.Add(40*time.Second),true)
- if !r.fallbackDirect(now.Add(41*time.Second),false,time.Time{}){t.Fatal("startup did not fall back after timeout")}
- if r.allowReverseCandidate(now.Add(60*time.Second),false,time.Time{}){t.Fatal("direct stabilization cooldown was bypassed")}
- if !r.allowReverseCandidate(now.Add(102*time.Second),false,time.Time{}){t.Fatal("reverse retry blocked after cooldown")}
- if !r.choose(ICMPReverse,now.Add(102*time.Second)){t.Fatal("could not retry reverse")}
- r.noteDemand(now.Add(210*time.Second),true)
- if r.fallbackDirect(now.Add(210*time.Second),true,now.Add(190*time.Second)){t.Fatal("fresh reverse traffic triggered fallback")}
- if !r.fallbackDirect(now.Add(213*time.Second),true,now.Add(110*time.Second)){t.Fatal("stale reverse link did not fall back")}
+ for i:=1;i<=110;i++{r.noteDemand(now.Add(time.Duration(i)*time.Second),true)}
+ // A recent paired poll proves the reverse request path is alive even
+ // when X25519 needs multiple attempts, so no premature fallback.
+ r.lastValidProbe=now.Add(100*time.Second)
+ if r.fallbackDirect(now.Add(110*time.Second),false,time.Time{}) {
+    t.Fatal("valid incoming Reverse polls did not protect negotiation")
+ }
+ for i:=111;i<=151;i++{r.noteDemand(now.Add(time.Duration(i)*time.Second),true)}
+ if !r.fallbackDirect(now.Add(151*time.Second),false,time.Time{}) {
+    t.Fatal("persistently unconfirmed reverse handshake did not eventually fail over")
+ }
+ if r.allowReverseCandidate(now.Add(180*time.Second),false,time.Time{}){t.Fatal("direct stabilization cooldown was bypassed")}
+ if !r.allowReverseCandidate(now.Add(215*time.Second),false,time.Time{}){t.Fatal("reverse retry blocked after cooldown")}
+ if !r.choose(ICMPReverse,now.Add(215*time.Second)){t.Fatal("could not retry reverse")}
+ for i:=216;i<=370;i++{r.noteDemand(now.Add(time.Duration(i)*time.Second),true)}
+ r.lastValidProbe=now.Add(369*time.Second)
+ if r.fallbackDirect(now.Add(370*time.Second),true,now.Add(216*time.Second)){
+    t.Fatal("recent reverse polls did not protect healthy but idle AEAD session")
+ }
+ r.lastValidProbe=now.Add(216*time.Second)
+ if !r.fallbackDirect(now.Add(371*time.Second),true,now.Add(216*time.Second)){
+    t.Fatal("fully stale authenticated reverse failed to enter emergency direct")
+ }
 }
 
 func TestReverseModeParsing(t *testing.T){
@@ -76,4 +97,47 @@ func TestReverseModeParsing(t *testing.T){
         if _,err:=ParseICMPDirection(mode);err!=nil{t.Fatal(err)}
     }
     if _,err:=ParseICMPDirection("opaque");err==nil{t.Fatal("unrecognized mode accepted")}
+}
+
+func TestReverseAutoNeverFailsOverWhileIdleOrPollsHealthy(t *testing.T) {
+    start:=time.Unix(1805000000,0)
+    key:=bytes.Repeat([]byte{19},32)
+    r,_:=newReverseTransport(ICMPAuto,key,start)
+    for i:=1;i<=24;i++{
+        // A quiet reverse link may be idle for hours; it is not failed.
+        now:=start.Add(time.Duration(i)*time.Hour)
+        r.noteDemand(now,false)
+        if r.fallbackDirect(now,true,start) {
+            t.Fatalf("quiet established reverse failed over at hour %d",i)
+        }
+    }
+    // Long-lived flow, no recent application DATA but fresh signed polls:
+    // ICMP reverse direction is still usable and must stay primary.
+    baseline:=start.Add(25*time.Hour)
+    for i:=0;i<=190;i++{
+        now:=baseline.Add(time.Duration(i)*time.Second)
+        r.noteDemand(now,true)
+        if i%5==0 {r.lastValidProbe=now}
+        if r.fallbackDirect(now,true,start){
+            t.Fatalf("authenticated reverse poll path ignored at second %d",i)
+        }
+    }
+    if r.direction()!=ICMPReverse {t.Fatal("preferred reverse changed unexpectedly")}
+    d:=r.diagnostics(baseline.Add(190*time.Second))
+    if d.FallbackCount!=0||d.FallbackReason!="" {
+        t.Fatalf("unexpected failover diagnostics: %+v",d)
+    }
+}
+
+func TestReverseAutoRejectsShortDemandAndIntermittentProbeLoss(t *testing.T) {
+    start:=time.Unix(1805000000,0)
+    r,_:=newReverseTransport(ICMPAuto,bytes.Repeat([]byte{21},32),start)
+    for i:=1;i<240;i++{
+        now:=start.Add(time.Duration(i)*time.Second)
+        if i%15<4 {r.noteDemand(now,true)} else {r.noteDemand(now,false)}
+        if i%60==0 {r.lastValidProbe=now}
+        if r.fallbackDirect(now,true,start){
+            t.Fatalf("intermittent request/packet loss flipped at second %d",i)
+        }
+    }
 }
