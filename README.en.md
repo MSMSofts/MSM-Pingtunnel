@@ -13,6 +13,12 @@ Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** betwe
 **Current release: 3.3.5** · Rust manager, Go core, schema **3**, secure wire **4** · **Reverse-first Auto:** Foreign starts ICMP polls; Direct is reserved for prolonged confirmed outages with client demand. Video latency improvements require measured live testing.
 
 
+## High-rate Reverse replay cache correction (v3.3.5)
+
+At 500 signed polls/sec, the 20-second anti-replay window can contain roughly **10,000 distinct valid nonces**. The previous 4,096-entry replay cache was too small, temporarily rejecting legitimate poll requests during sustained traffic. This can delay the Iran-to-Foreign reply opportunities required by QUIC acknowledgements even when ping and encrypted sessions appear healthy.
+
+v3.3.5 increases the bounded cache to **16,384** with unchanged HMAC verification, replay uniqueness and expiration rules. `sudo pingtunnel security` now reports `Reverse poll replay-cache capacity rejections`; the expected normal value is zero. Duplex-aware polling and queue telemetry from v3.3.4 remain enabled. Field playback, queueing and rate-limit effects still require measurement.
+
 
 ## Reverse streaming and ACK latency — v3.3.4
 
