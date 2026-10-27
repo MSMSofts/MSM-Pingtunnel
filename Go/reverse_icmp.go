@@ -61,6 +61,7 @@ type reverseTransport struct {
     drops uint64
     recent map[[8]byte]time.Time
     lastPrune time.Time
+    lastValidProbe time.Time
 }
 
 func newReverseTransport(preference ICMPDirection, key []byte, now time.Time) (*reverseTransport, error) {
@@ -193,6 +194,7 @@ func (r *reverseTransport) authenticateProbe(frame []byte,now time.Time) bool {
     // 100 polls/second over 20 seconds plus generous network bursts.
     if len(r.recent)>=4096{return false}
     r.recent[nonce]=now
+    r.lastValidProbe=now
     return true
 }
 
@@ -223,6 +225,13 @@ func (r *reverseTransport) take(now time.Time) []byte {
     return nil
 }
 
+// Observed inbound authenticated reverse probes are separately reported.
+func (r *reverseTransport) probeAge(now time.Time) int64 {
+ r.mu.Lock();defer r.mu.Unlock()
+ if r.lastValidProbe.IsZero(){return -1}
+ if now.Before(r.lastValidProbe){return 0}
+ return int64(now.Sub(r.lastValidProbe).Seconds())
+}
 func (r *reverseTransport) statistics()(pending int,drops uint64){
     r.mu.Lock();defer r.mu.Unlock()
     return len(r.pending),r.drops
