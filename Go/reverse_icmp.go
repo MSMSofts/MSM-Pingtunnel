@@ -33,6 +33,10 @@ func ParseICMPDirection(s string) (ICMPDirection, error) {
 const (
     reverseProbeBytes = 36
     reverseProbeWindow = 20 * time.Second
+    // The poller can send 500 signed polls/s, retaining roughly 10,000
+    // unique nonces inside the 20-second replay window. 4096 rejected
+    // otherwise-valid requests every ~8 seconds during active streaming.
+    reverseReplayCacheLimit = 16384
     reverseAutoDelay = 0 * time.Second
     // Reverse must be genuinely unavailable before switching direction.
     // A short X25519 delay, an idle session or sporadic ICMP loss is not
@@ -69,6 +73,7 @@ type reverseTransport struct {
     drops uint64
     recent map[[8]byte]time.Time
     lastPrune time.Time
+    replayCapacityRejects uint64
     lastValidProbe time.Time
     lastUsefulFrame time.Time
     usefulBurst int
@@ -257,8 +262,12 @@ func (r *reverseTransport) authenticateProbe(frame []byte,now time.Time) bool {
         }
         r.lastPrune=now
     }
-    // 100 polls/second over 20 seconds plus generous network bursts.
-    if len(r.recent)>=4096{return false}
+    // Capacity accommodates max intended poll rate plus jitter/bursts;
+    // never disable replay tracking just to meet throughput.
+    if len(r.recent)>=reverseReplayCacheLimit {
+        r.replayCapacityRejects++
+        return false
+    }
     r.recent[nonce]=now
     r.lastValidProbe=now
     return true
@@ -417,6 +426,7 @@ type reverseDiagnostics struct {
     QueueDrops uint64
     FailedReplies uint64
     ReflectedPolls uint64
+    ReplayCapacityRejects uint64
     PollIntervalMillis int
     LastUsefulFrameAgeSeconds int64
     FallbackCount uint64
@@ -446,6 +456,7 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
     return reverseDiagnostics{Pending:len(r.pending),PendingBytes:r.pendingBytes,
         QueuePeak:r.queuePeak,QueueDrops:r.drops,FailedReplies:r.failedReplies,
         ReflectedPolls:r.reflectedPolls,
+        ReplayCapacityRejects:r.replayCapacityRejects,
         PollIntervalMillis:r.pollPeriodMillis,LastUsefulFrameAgeSeconds:age,
         FallbackCount:r.fallbackCount,FallbackReason:r.lastFallbackReason,
         OldestQueueAgeMs:oldest,LastQueueDelayMs:r.lastDeliveredQueueDelayMs,
