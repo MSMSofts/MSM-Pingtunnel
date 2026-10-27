@@ -254,6 +254,10 @@ func (r *reverseTransport) restoreFront(f reverseQueuedFrame,now time.Time) {
     r.pendingBytes+=len(f.data)
     r.failedReplies++
 }
+func (r *reverseTransport) recordPollInterval(period time.Duration) {
+    r.mu.Lock();defer r.mu.Unlock()
+    r.pollPeriodMillis=int(period/time.Millisecond)
+}
 func (r *reverseTransport) noteUsefulFrame(now time.Time) {
     r.mu.Lock();defer r.mu.Unlock()
     r.lastUsefulFrame=now
