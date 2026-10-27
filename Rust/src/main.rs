@@ -5,7 +5,7 @@ use std::net::Ipv4Addr;
 use std::env;
 use std::error::Error;
 use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -418,7 +418,7 @@ fn menu()->Result<()>{
         if let Err(e)=action{eprintln!("Operation failed: {e}");}
         // Hold command output until confirmed; otherwise the alternate-screen
         // menu instantly erases status, logs and diagnostics.
-        if menu_ui::interactive_available() {
+        if io::stdin().is_terminal() && io::stdout().is_terminal() {
             println!("\nPress Enter to return to the menu...");
             io::stdout().flush()?;
             let mut ignored = String::new();
