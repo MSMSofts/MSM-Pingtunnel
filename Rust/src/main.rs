@@ -494,6 +494,17 @@ fn show_security_status() -> Result<()> {
     println!("  Recovery handshakes: {}",report["recoveries"]);
     println!("  Queued data frames: {}",report["pending_packets"]);
     println!("  Expired/overflow data frames: {}",report["expired_or_overflow_packets"]);
+    if report["icmp_direction"].as_str()==Some("reverse") {
+        println!("  Reverse queued frames / bytes: {} / {}",report["reverse_queue_packets"],report["reverse_queue_bytes"]);
+        println!("  Reverse queue peak / drops: {} / {}",report["reverse_queue_peak"],report["reverse_queue_drops"]);
+        println!("  Reverse ICMP reply write failures: {}",report["reverse_write_failures"]);
+        if let Some(ms)=report["reverse_poll_interval_ms"].as_u64().filter(|v|*v>0) {
+            println!("  Adaptive reverse polling interval: {ms} ms");
+        }
+        if let Some(age)=report["reverse_last_data_age_seconds"].as_i64().filter(|v|*v>=0) {
+            println!("  Last authenticated reverse data frame: {age}s ago");
+        }
+    }
     Ok(())
 }
 
