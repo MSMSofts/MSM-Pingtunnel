@@ -338,6 +338,7 @@ func (p *Client) Run() error {
 
 		nextPingAt := time.Now()
 		lastAdaptiveStatus := time.Time{}
+        var linkWatchdog peerRecoveryWatchdog
 		for !p.exit.Load() {
 			p.checkTimeoutConn()
 			p.showNet()
@@ -358,6 +359,12 @@ func (p *Client) Run() error {
 				p.ping()
 				nextPingAt = now.Add(p.nextPingInterval(now))
 			}
+            // Never restart just because a quiet tunnel has no recent pong.
+            // Sustained client demand and prolonged link failure are required.
+            if linkWatchdog.shouldRestart(now, time.Unix(0,p.lastPongUnixNano.Load()),
+                p.lastActivity(), p.activeConnCount()>0) {
+                failOnUnexpectedWorkerExit("peer unreachable during sustained traffic for over 4 minutes",&p.exit)
+            }
 			p.maybeRefreshServerAddr(now)
 			<-ticker.C
 		}
