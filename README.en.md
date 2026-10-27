@@ -267,7 +267,8 @@ These features **do not guarantee uninterrupted VPN sessions**, live adaptation 
 
 | Version | Config schema | Wire format | Compatibility |
 | --- | --- | --- | --- |
-| **3.2.5** | 3 | **v4** (`PTH4/PTD4`) | Status pause, worker and lost-link recovery |\n| **3.2.4** | 3 | **v4** (`PTH4/PTD4`) | Current; raw-mode and menu-order fix |
+| **3.2.5** | 3 | **v4** (`PTH4/PTD4`) | Status pause, worker and lost-link recovery |
+| **3.2.4** | 3 | **v4** (`PTH4/PTD4`) | Current; raw-mode and menu-order fix |
 | **3.2.3** | 3 | **v4** | Previous release; resource dashboard |
 | **3.2.2** | 3 | **v4** | Previous compatible patch |
 | **3.2.1** | 3 | **v4** | Previous compatible maintenance release |
