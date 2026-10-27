@@ -91,14 +91,23 @@ func TestReverseUnavailableFallsBackToDirectHandshake(t *testing.T) {
  if err:=foreign.BindRegion("foreign");err!=nil{t.Fatal(err)}
  if err:=iran.BindICMPDirection("auto");err!=nil{t.Fatal(err)}
  if err:=foreign.BindICMPDirection("auto");err!=nil{t.Fatal(err)}
- // No reverse poll is received. Local timeout switches to direct.
- if !iran.reverse.fallbackDirect(now.Add(26*time.Second),false,time.Time{}){t.Fatal("did not attempt direct fallback")}
+ // No authenticated Reverse poll is received, and the local client
+ // continuously needs transport service for longer than the failover grace.
+ for i:=1;i<=95;i++{
+   iran.reverse.noteDemand(now.Add(time.Duration(i)*time.Second),true)
+ }
+ if iran.reverse.fallbackDirect(now.Add(26*time.Second),false,time.Time{}){
+   t.Fatal("initial reverse handshake was preempted by a short timeout")
+ }
+ if !iran.reverse.fallbackDirect(now.Add(95*time.Second),false,time.Time{}){
+   t.Fatal("sustained reverse outage did not attempt direct fallback")
+ }
  if useReverse(iran){t.Fatal("fallback did not select direct")}
  h1,err:=iran.SecureControl(now)
  if err!=nil{t.Fatal(err)}
  h2,err:=foreign.ReceiveSecureControl(h1,now)
  if err!=nil{t.Fatal(err)}
- if !foreign.reverse.choose(ICMPDirect,now.Add(26*time.Second)){t.Fatal("foreign did not accept direct hello")}
+ if !foreign.reverse.choose(ICMPDirect,now.Add(95*time.Second)){t.Fatal("foreign did not accept direct hello")}
  h3,err:=iran.ReceiveSecureControl(h2,now)
  if err!=nil{t.Fatal(err)}
  h4,err:=foreign.ReceiveSecureControl(h3,now)
