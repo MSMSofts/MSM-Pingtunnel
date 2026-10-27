@@ -83,7 +83,12 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
         mb=ciphertext
 	}
 
-	sendEncryptedICMP(id,sequence,conn,server,sproto,mb,cryptoConfig)
+    if sendEncryptedICMP(id,sequence,conn,server,sproto,mb,cryptoConfig) &&
+        cryptoConfig!=nil && cryptoConfig.sec!=nil && cryptoConfig.reverse!=nil &&
+        cryptoConfig.sec.region=="foreign" && useReverse(cryptoConfig) &&
+        msgType==uint32(MyMsg_DATA) {
+        cryptoConfig.reverse.noteDownstreamFrame(time.Now())
+    }
 }
 
 // isReflectedReversePoll detects a Linux Echo Reply that copies the 36-byte
@@ -98,16 +103,15 @@ func isReflectedReversePoll(crypto *CryptoConfig, icmpType byte, data []byte) bo
 
 // Send an already-encrypted payload without re-wrapping MyMsg or allocating
 // a second session sequence. Used for draining authenticated pending packets.
-func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr, proto int, encrypted []byte, crypto *CryptoConfig) {
- if peer==nil||len(encrypted)==0{return}
+func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr, proto int, encrypted []byte, crypto *CryptoConfig) bool {
+ if peer==nil||len(encrypted)==0{return false}
  if useReverse(crypto) {
   if crypto.sec.region=="iran" {
-   crypto.reverse.enqueue(encrypted,time.Now())
-   return
+   return crypto.reverse.enqueue(encrypted,time.Now())
   }
   proto=8
  }
- _=emitEcho(conn,peer,proto,id,sequence,encrypted)
+ return emitEcho(conn,peer,proto,id,sequence,encrypted)
 }
 
 // Flush only when both peers finished their authenticated ephemeral exchange.
