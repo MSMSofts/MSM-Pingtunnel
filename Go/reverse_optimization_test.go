@@ -18,7 +18,7 @@ func TestReverseAdaptivePollCadence(t *testing.T) {
         t.Fatalf("idle interval %s",got)
     }
     r.noteUsefulFrame(now)
-    if got:=r.pollPeriod(now.Add(50*time.Millisecond),1,true);got!=40*time.Millisecond{
+    if got:=r.pollPeriod(now.Add(50*time.Millisecond),1,true);got!=30*time.Millisecond{
         t.Fatalf("isolated data caused too many polls: %s",got)
     }
     r.noteUsefulFrame(now.Add(100*time.Millisecond))
@@ -30,10 +30,10 @@ func TestReverseAdaptivePollCadence(t *testing.T) {
     if got:=r.pollPeriod(now.Add(250*time.Millisecond),1,true);got!=2*time.Millisecond{
         t.Fatalf("sustained reverse throughput capped at %s",got)
     }
-    if got:=r.pollPeriod(now.Add(2*time.Second),1,true);got!=80*time.Millisecond{
+    if got:=r.pollPeriod(now.Add(2*time.Second),1,true);got!=30*time.Millisecond{
         t.Fatalf("stale reverse traffic should cool: %s",got)
     }
-    if got:=r.pollPeriod(now.Add(10*time.Second),1,true);got!=80*time.Millisecond{
+    if got:=r.pollPeriod(now.Add(10*time.Second),1,true);got!=60*time.Millisecond{
         t.Fatalf("quiet but connected reverse interval %s",got)
     }
     if got:=r.pollPeriod(now.Add(10*time.Second),0,true);got!=250*time.Millisecond{
@@ -121,5 +121,62 @@ func TestAuthenticatedReverseReceiptsOnlyForRealData(t *testing.T) {
     }
     if r.shouldSendReceiveAck(now.Add(20*time.Second)){
         t.Fatal("stale traffic kept producing encrypted receipts")
+    }
+}
+
+func TestDuplexReversePollPacingFollowsDownlinkWithoutACKs(t *testing.T) {
+    now:=time.Unix(1830000000,0)
+    r,_:=newReverseTransport(ICMPReverse,bytes.Repeat([]byte{0xa7},32),now)
+    if p:=r.pollPeriod(now,1,true);p!=60*time.Millisecond {
+        t.Fatalf("quiet open UDP flow too slow: %s",p)
+    }
+    // Foreign may continuously transmit the video stream while QUIC ACKs
+    // are missing from the reverse path. Pacing must NOT depend only on
+    // receiving Iran-side frames.
+    r.noteDownstreamFrame(now)
+    if p:=r.pollPeriod(now.Add(50*time.Millisecond),1,true);p!=12*time.Millisecond {
+        t.Fatalf("first downstream DATA did not warm reverse polls: %s",p)
+    }
+    for i:=1;i<=5;i++ {
+        r.noteDownstreamFrame(now.Add(time.Duration(i)*70*time.Millisecond))
+    }
+    if p:=r.pollPeriod(now.Add(400*time.Millisecond),1,true);p!=4*time.Millisecond {
+        t.Fatalf("sustained video downlink did not accelerate ACK opportunities: %s",p)
+    }
+    // Natural gaps should not immediately collapse polling to 60-250 ms.
+    if p:=r.pollPeriod(now.Add(3*time.Second),1,true);p!=24*time.Millisecond {
+        t.Fatalf("downlink cool-down skipped warm stage: %s",p)
+    }
+    if p:=r.pollPeriod(now.Add(6*time.Second),1,true);p!=45*time.Millisecond {
+        t.Fatalf("downlink cool-down skipped medium stage: %s",p)
+    }
+    if p:=r.pollPeriod(now.Add(9*time.Second),1,true);p!=60*time.Millisecond {
+        t.Fatalf("stale activity should return to open-connection interval: %s",p)
+    }
+    if p:=r.pollPeriod(now.Add(9*time.Second),0,true);p!=250*time.Millisecond {
+        t.Fatalf("completely idle tunnel should not flood polls: %s",p)
+    }
+    d:=r.diagnostics(now.Add(9*time.Second))
+    if d.LastDownstreamAgeSeconds!=8 {t.Fatalf("unexpected downstream age: %+v",d)}
+}
+
+func TestReverseQueueWaitTelemetry(t *testing.T) {
+    now:=time.Unix(1830000000,0)
+    r,_:=newReverseTransport(ICMPAuto,bytes.Repeat([]byte{12},32),now)
+    r.enqueue([]byte("a"),now)
+    r.enqueue([]byte("b"),now)
+    if got:=r.take(now.Add(100*time.Millisecond));string(got)!="a"{t.Fatalf("FIFO: %q",got)}
+    if got:=r.take(now.Add(900*time.Millisecond));string(got)!="b"{t.Fatalf("FIFO: %q",got)}
+    d:=r.diagnostics(now.Add(time.Second))
+    if d.DequeueSamples!=2 || d.DequeueMaxWaitMs!=900 ||
+       d.DequeueWaitEWMAMs<100 || d.DequeueWaitEWMAMs>900 {
+        t.Fatalf("invalid bounded queue-wait telemetry: %+v",d)
+    }
+    // Neither stale frames nor idle polls should count as successful dequeues.
+    r.enqueue([]byte("stale"),now)
+    _=r.take(now.Add(13*time.Second))
+    e:=r.diagnostics(now.Add(13*time.Second))
+    if e.DequeueSamples!=2 || e.QueueDrops!=1 {
+        t.Fatalf("expired frame inflated queue-wait samples: %+v",e)
     }
 }
