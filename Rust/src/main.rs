@@ -511,6 +511,9 @@ fn show_security_status() -> Result<()> {
         println!("  Reverse delivered/slow (>250ms) frames: {} / {}",report["reverse_delivered_frames"],report["reverse_delayed_frames"]);
         println!("  Reverse ICMP reply write failures: {}",report["reverse_write_failures"]);
         println!("  Filtered kernel PTR4 Echo reflections: {}",report["reverse_poll_echo_reflections"]);
+        if let Some(drops)=report["reverse_replay_capacity_rejections"].as_u64() {
+            println!("  Reverse poll replay-cache capacity rejections: {drops}");
+        }
         if let Some(ms)=report["reverse_poll_interval_ms"].as_u64().filter(|v|*v>0) {
             println!("  Adaptive reverse polling interval: {ms} ms");
         }
