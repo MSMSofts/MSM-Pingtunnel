@@ -33,7 +33,9 @@ func ParseICMPDirection(s string) (ICMPDirection, error) {
 const (
     reverseProbeBytes = 36
     reverseProbeWindow = 20 * time.Second
-    reverseAutoDelay = 15 * time.Second
+    reverseAutoDelay = 0 * time.Second
+    reverseStartupFallback = 25 * time.Second
+    reverseMinDwell = 60 * time.Second
     reverseFrameTTL = 12 * time.Second
     reverseQueueMaxFrames = 256
     reverseQueueMaxBytes = 2 * 1024 * 1024
@@ -64,9 +66,9 @@ type reverseTransport struct {
 func newReverseTransport(preference ICMPDirection, key []byte, now time.Time) (*reverseTransport, error) {
     if len(key)!=32 {return nil, errors.New("reverse transport requires a 32-byte shared pairing key")}
     if _,err:=ParseICMPDirection(string(preference));err!=nil{return nil,err}
-    r:=&reverseTransport{preference:preference,selected:ICMPDirect,started:now}
+    r:=&reverseTransport{preference:preference,selected:ICMPReverse,started:now}
     copy(r.secret[:],key)
-    if preference==ICMPReverse {r.selected=ICMPReverse}
+    if preference==ICMPDirect {r.selected=ICMPDirect}
     return r,nil
 }
 
@@ -98,7 +100,7 @@ func (r *reverseTransport) choose(direction ICMPDirection, now time.Time) bool {
     if direction!=ICMPDirect && direction!=ICMPReverse{return false}
     if r.preference!=ICMPAuto && direction!=r.preference{return false}
     if r.selected==direction{return false}
-    if !r.lastSwitch.IsZero() && now.Sub(r.lastSwitch)<30*time.Second{return false}
+    if !r.lastSwitch.IsZero() && now.Sub(r.lastSwitch)<reverseMinDwell{return false}
     r.selected=direction
     r.lastSwitch=now
     r.pending=nil
@@ -106,25 +108,43 @@ func (r *reverseTransport) choose(direction ICMPDirection, now time.Time) bool {
     return true
 }
 
-// The foreign VPS only begins probing in Auto after the ordinary client
-// initiation has had an opportunity to establish an authenticated session.
-// Direct mode never sends reverse probes.
-func (r *reverseTransport) fallbackDirect(now time.Time,lastAuthenticated time.Time) bool {
+// Reverse starts immediately. A direct fallback is evaluated only after
+// reverse handshake timeout; established links keep a stable direction.
+func (r *reverseTransport) fallbackDirect(now time.Time,ready bool,lastAuthenticated time.Time) bool {
  r.mu.Lock()
+ reference:=r.started
+ if !r.lastSwitch.IsZero(){reference=r.lastSwitch}
+ elapsed:=now.Sub(reference)
  can:=r.preference==ICMPAuto && r.selected==ICMPReverse &&
-  now.Sub(r.lastSwitch)>90*time.Second &&
-  !r.lastDemand.IsZero() && now.Sub(r.lastDemand)<30*time.Second &&
-  (lastAuthenticated.IsZero()||now.Sub(lastAuthenticated)>75*time.Second)
+  ((!ready && elapsed>=reverseStartupFallback) ||
+   (ready && elapsed>=90*time.Second &&
+    !r.lastDemand.IsZero() && now.Sub(r.lastDemand)<30*time.Second &&
+    (lastAuthenticated.IsZero()||now.Sub(lastAuthenticated)>75*time.Second)))
  r.mu.Unlock()
  if !can{return false}
  return r.choose(ICMPDirect,now)
+}
+
+// A recent successful direct exchange wins over speculative reverse polls.
+// Give the fallback a full stabilization window before trying Reverse again.
+func (r *reverseTransport) allowReverseCandidate(now time.Time,ready bool,lastAuthenticated time.Time) bool {
+ r.mu.Lock()
+ defer r.mu.Unlock()
+ if r.preference==ICMPDirect {return false}
+ if r.selected==ICMPReverse {return true}
+ if !r.lastSwitch.IsZero() && now.Sub(r.lastSwitch)<reverseMinDwell {return false}
+ if !ready {return true}
+ if r.lastDemand.IsZero() || now.Sub(r.lastDemand)>30*time.Second{return false}
+ return lastAuthenticated.IsZero() || now.Sub(lastAuthenticated)>=35*time.Second
 }
 
 func (r *reverseTransport) needsProbe(now time.Time, authenticated bool) bool {
     r.mu.Lock();defer r.mu.Unlock()
     if r.preference==ICMPDirect{return false}
     if r.selected==ICMPReverse{return true}
-    return r.preference==ICMPAuto && !authenticated && now.Sub(r.started)>=reverseAutoDelay
+    // On a Direct fallback keep testing the reverse path at a bounded rate
+    // only when the authenticated Direct channel is stale.
+    return r.preference==ICMPAuto && !authenticated
 }
 
 func (r *reverseTransport) mac(body []byte) [32]byte {
