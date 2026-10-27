@@ -450,6 +450,9 @@ fn show_health() -> Result<()> {
     println!("Service active and Go workers reporting (heartbeat {}s ago).",age);
     println!("Security session state: {}",status["state"].as_str().unwrap_or("unknown"));
     if let Some(direction)=status["icmp_direction"].as_str(){println!("ICMP initiation: {direction}");}
+    if let Some(age)=status["reverse_probe_age_seconds"].as_i64().filter(|a|*a>=0) {
+        println!("Last authenticated inbound reverse poll: {age}s ago (one-way evidence).");
+    }
     println!("Last authenticated peer traffic: {} seconds ago.",status["last_valid_age_seconds"]);
     if status["region"].as_str()==Some("iran") {
         let age=status["last_valid_age_seconds"].as_i64().unwrap_or(-1);
@@ -481,6 +484,9 @@ fn show_security_status() -> Result<()> {
     println!("  Config schema: {} | Wire version: {}",report["config_schema"],report["wire_version"]);
     println!("  Region: {}",report["region"].as_str().unwrap_or("unknown"));
     if let Some(direction)=report["icmp_direction"].as_str(){println!("  ICMP initiation: {direction}");}
+    if let Some(age)=report["reverse_probe_age_seconds"].as_i64().filter(|a|*a>=0) {
+        println!("  Inbound reverse probe age: {age}s (does not confirm return path)");
+    }
     println!("  Last valid message age: {} seconds",report["last_valid_age_seconds"]);
     println!("  Pending key renegotiation: {}",report["pending_rekey"]);
     println!("  Replays rejected: {}",report["replay_drops"]);
