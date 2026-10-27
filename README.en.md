@@ -86,7 +86,7 @@ sudo bash /tmp/pingtunnel-install.sh
 
 Review downloaded scripts before executing them with elevated privileges.
 
-The installer pins the [v3.2.4 release](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.2.6), checks SHA256 and the release manifest, verifies manager/core compatibility, and backs up existing installed files for failure rollback.
+The installer pins the [v3.3.0 release](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.0), checks SHA256 and the release manifest, verifies manager/core compatibility, and backs up existing installed files for failure rollback.
 
 ### Set up the overseas VPS first
 
@@ -124,7 +124,7 @@ Run `sudo pingtunnel` to open the redesigned **v3.2.4** menu. The header shows t
 ~~~text
 ================================================================
   PINGTUNNEL  /  CONTROL CENTER
-  v3.2.6   |   Encrypted ICMP   |   Wire v4
+  v3.3.0   |   Encrypted ICMP   |   Wire v4
 ----------------------------------------------------------------
 LIVE TUNNEL STATUS
   Location     Foreign (service)
