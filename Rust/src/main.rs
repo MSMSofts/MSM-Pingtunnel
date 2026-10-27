@@ -506,6 +506,13 @@ fn show_security_status() -> Result<()> {
     if report["icmp_direction"].as_str()==Some("reverse") {
         println!("  Reverse queued frames / bytes: {} / {}",report["reverse_queue_packets"],report["reverse_queue_bytes"]);
         println!("  Reverse queue peak / drops: {} / {}",report["reverse_queue_peak"],report["reverse_queue_drops"]);
+        if report["region"].as_str()==Some("iran") {
+            println!("  Reverse queue oldest frame age: {} ms",report["reverse_queue_oldest_age_ms"]);
+            println!("  Reverse queue wait (recent EWMA / maximum): {} / {} ms",report["reverse_queue_wait_ewma_ms"],report["reverse_queue_wait_max_ms"]);
+            println!("  Reverse delivered frames measured: {}",report["reverse_queue_wait_samples"]);
+        } else {
+            println!("  Foreign-to-Iran encrypted DATA frames: {}",report["reverse_downstream_frames"]);
+        }
         println!("  Reverse ICMP reply write failures: {}",report["reverse_write_failures"]);
         println!("  Filtered kernel PTR4 Echo reflections: {}",report["reverse_poll_echo_reflections"]);
         if let Some(ms)=report["reverse_poll_interval_ms"].as_u64().filter(|v|*v>0) {
