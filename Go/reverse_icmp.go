@@ -64,6 +64,7 @@ type reverseTransport struct {
     lastValidProbe time.Time
     lastUsefulFrame time.Time
     usefulBurst int
+    lastReceiveAck time.Time
     failedReplies uint64
     pollPeriodMillis int
     queuePeak int
@@ -254,6 +255,20 @@ func (r *reverseTransport) restoreFront(f reverseQueuedFrame,now time.Time) {
     r.pending[0]=f
     r.pendingBytes+=len(f.data)
     r.failedReplies++
+}
+// Confirm that the foreign server received authenticated Iran-side data.
+ // The normal ICMP poll alone proves only the inbound request path.
+func (r *reverseTransport) shouldSendReceiveAck(now time.Time) bool {
+    r.mu.Lock();defer r.mu.Unlock()
+    if r.lastUsefulFrame.IsZero() || now.Sub(r.lastUsefulFrame)<0 ||
+        now.Sub(r.lastUsefulFrame)>10*time.Second {
+        return false
+    }
+    if !r.lastReceiveAck.IsZero() && now.Sub(r.lastReceiveAck)<8*time.Second {
+        return false
+    }
+    r.lastReceiveAck=now
+    return true
 }
 func (r *reverseTransport) recordPollInterval(period time.Duration) {
     r.mu.Lock();defer r.mu.Unlock()
