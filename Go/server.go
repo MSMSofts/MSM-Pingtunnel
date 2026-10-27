@@ -841,7 +841,7 @@ func (p *Server) updateConnError() {
 // The foreign VPS always owns Echo Requests; Iran replies to those requests.
 func (p *Server) runReversePoller() {
     defer failOnUnexpectedWorkerExit("reverse ICMP poller",&p.exit)
-    ticker:=time.NewTicker(10*time.Millisecond)
+    ticker:=time.NewTicker(2*time.Millisecond)
     defer ticker.Stop()
     peer:=&net.IPAddr{IP:append(net.IP(nil),p.allowedPeer...)}
     last:=time.Time{}
@@ -854,11 +854,8 @@ func (p *Server) runReversePoller() {
             recent=!last.IsZero() && now.Sub(last)<90*time.Second
         }
         if !p.cryptoConfig.reverse.needsProbe(now,recent){continue}
-        period:=500*time.Millisecond
-        if p.cryptoConfig.SecureReady() && !useReverse(p.cryptoConfig){period=10*time.Second}
-        if p.localConnMapSize.Load()>0 && p.cryptoConfig.SecureReady(){
-            period=10*time.Millisecond
-        }
+        period:=p.cryptoConfig.reverse.pollPeriod(now,int(p.localConnMapSize.Load()),p.cryptoConfig.SecureReady())
+        if !useReverse(p.cryptoConfig){period=10*time.Second}
         if !last.IsZero() && now.Sub(last)<period{continue}
         sequence:=int(p.reverseSequence.Add(1)&0xffff)
         sendForeignPoll(*p.conn,peer,0x42A5,sequence,p.cryptoConfig,now,recent)
