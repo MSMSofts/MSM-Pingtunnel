@@ -506,6 +506,8 @@ type secureStatus struct{
  ReverseWriteFailures uint64 `json:"reverse_write_failures"`
  ReversePollIntervalMs int `json:"reverse_poll_interval_ms"`
  ReverseLastDataAge int64 `json:"reverse_last_data_age_seconds"`
+ AutoFallbackCount uint64 `json:"auto_direct_fallback_count"`
+ AutoFallbackReason string `json:"auto_direct_fallback_reason,omitempty"`
  State string `json:"state"`
  LastValidAgeSeconds int64 `json:"last_valid_age_seconds"`
  PendingRekey bool `json:"pending_rekey"`
@@ -544,6 +546,8 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.ReverseWriteFailures=diag.FailedReplies
  report.ReversePollIntervalMs=diag.PollIntervalMillis
  report.ReverseLastDataAge=diag.LastUsefulFrameAgeSeconds
+ report.AutoFallbackCount=diag.FallbackCount
+ report.AutoFallbackReason=diag.FallbackReason
  encoded,err:=json.Marshal(report)
  if err!=nil{return}
  tmp:=path+".pending"
