@@ -83,6 +83,13 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
         mb=ciphertext
 	}
 
+    // Foreign->Iran encrypted DATA is a leading indicator of upcoming
+    // Hysteria/QUIC ACKs from Iran. Keep reverse return opportunities warm
+    // even when the ACKs themselves are sparse or delayed.
+    if msgType==uint32(MyMsg_DATA) && useReverse(cryptoConfig) &&
+        cryptoConfig.sec.region=="foreign" {
+        cryptoConfig.reverse.noteDownstreamFrame(time.Now())
+    }
 	sendEncryptedICMP(id,sequence,conn,server,sproto,mb,cryptoConfig)
 }
 
