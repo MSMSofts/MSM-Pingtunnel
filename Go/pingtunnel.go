@@ -12,18 +12,21 @@ import (
 	"github.com/esrrhs/gohome/common"
 	"github.com/esrrhs/gohome/loggo"
 	"golang.org/x/net/icmp"
-	"golang.org/x/net/ipv4"
 	"google.golang.org/protobuf/proto"
 )
 
 // Secure control frames use ICMP Echo with the same source/destination
 // semantics as standard Pingtunnel, but contain no user data.
-func sendSecureControl(id,sequence int,conn icmp.PacketConn,peer *net.IPAddr,sproto int,body []byte){
+func sendSecureControl(id,sequence int,conn icmp.PacketConn,peer *net.IPAddr,sproto int,body []byte,crypto *CryptoConfig){
  if peer==nil||len(body)==0{return}
- msg:=&icmp.Message{Type:(ipv4.ICMPType)(sproto),Code:0,Body:&icmp.Echo{ID:id,Seq:sequence,Data:body}}
- encoded,err:=msg.Marshal(nil)
- if err!=nil{return}
- _,_=conn.WriteTo(encoded,icmpDstAddr(peer))
+ if useReverse(crypto) {
+  if crypto.sec.region=="iran" && sproto==8 {
+   crypto.reverse.enqueue(body,time.Now())
+   return
+  }
+  if crypto.sec.region=="foreign" {sproto=8}
+ }
+ _=emitEcho(conn,peer,sproto,id,sequence,body)
 }
 
 func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, target string,
@@ -62,7 +65,9 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
                 cryptoConfig.sec.queuePacket(pendingICMP{raw:mb,peer:server,id:id,seq:sequence,proto:sproto})
             }
             control,e:=cryptoConfig.SecureControl(time.Now())
-            if e==nil&&len(control)>0{sendSecureControl(id,sequence,conn,server,sproto,control)}
+            if e==nil&&len(control)>0 && !(useReverse(cryptoConfig)&&cryptoConfig.sec.region=="iran") {
+                 sendSecureControl(id,sequence,conn,server,sproto,control,cryptoConfig)
+             }
             return
         }
 		if encryptErr != nil {
@@ -72,18 +77,21 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
         mb=ciphertext
 	}
 
-	sendEncryptedICMP(id,sequence,conn,server,sproto,mb)
+	sendEncryptedICMP(id,sequence,conn,server,sproto,mb,cryptoConfig)
 }
 
 // Send an already-encrypted payload without re-wrapping MyMsg or allocating
 // a second session sequence. Used for draining authenticated pending packets.
-func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr, proto int, encrypted []byte) {
- if peer==nil || len(encrypted)==0{return}
- msg:=&icmp.Message{Type:(ipv4.ICMPType)(proto),Code:0,
-  Body:&icmp.Echo{ID:id,Seq:sequence,Data:encrypted}}
- wire,err:=msg.Marshal(nil)
- if err!=nil{return}
- _,_=conn.WriteTo(wire,icmpDstAddr(peer))
+func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr, proto int, encrypted []byte, crypto *CryptoConfig) {
+ if peer==nil||len(encrypted)==0{return}
+ if useReverse(crypto) {
+  if crypto.sec.region=="iran" {
+   crypto.reverse.enqueue(encrypted,time.Now())
+   return
+  }
+  proto=8
+ }
+ _=emitEcho(conn,peer,proto,id,sequence,encrypted)
 }
 
 // Flush only when both peers finished their authenticated ephemeral exchange.
@@ -99,7 +107,7 @@ func FlushPendingICMP(conn icmp.PacketConn, crypto *CryptoConfig) {
    for _,unsent:=range packets[i:] {crypto.sec.pushBack(unsent)}
    return
   }
-  sendEncryptedICMP(p.id,p.seq,conn,p.peer,p.proto,encrypted)
+  sendEncryptedICMP(p.id,p.seq,conn,p.peer,p.proto,encrypted,crypto)
  }
 }
 
@@ -136,12 +144,25 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
         if cryptoConfig!=nil && cryptoConfig.sec!=nil {
             peer:=icmpSrcToIPAddr(srcaddr)
             if peer==nil||!cryptoConfig.SecurePeerAllowed(peer.IP){continue}
+            now:=time.Now()
+            if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="iran" &&
+                int(bytes[0])==8 && stdbytes.HasPrefix(payloadData,reverseProbeMagic[:]) {
+                if cryptoConfig.reverse.authenticateProbe(payloadData,now) {
+                    startReverseHandshake(conn,peer,echoId,echoSeq,cryptoConfig,now)
+                }
+                continue
+            }
             if stdbytes.HasPrefix(payloadData,secureControlMagic[:]) {
-                response,err:=cryptoConfig.ReceiveSecureControl(payloadData,time.Now())
-                if err==nil&&len(response)>0 {
+                response,err:=cryptoConfig.ReceiveSecureControl(payloadData,now)
+                if err==nil {
                     replyType:=8
-                    if cryptoConfig.sec.region=="foreign"{replyType=0}
-                    sendSecureControl(echoId,echoSeq,conn,peer,replyType,response)
+                    if cryptoConfig.sec.region=="foreign" && !useReverse(cryptoConfig) {replyType=0}
+                    if cryptoConfig.sec.region=="iran" && useReverse(cryptoConfig) {replyType=0}
+                    if len(response)>0 {
+                        sendSecureControl(echoId,echoSeq,conn,peer,replyType,response,cryptoConfig)
+                    } else if cryptoConfig.sec.region=="iran" && useReverse(cryptoConfig) && int(bytes[0])==8 {
+                        replyReverse(conn,peer,echoId,echoSeq,cryptoConfig)
+                    }
                 }
                 continue
             }
@@ -168,6 +189,10 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
 			continue
 		}
 
+        if cryptoConfig!=nil && cryptoConfig.sec!=nil &&
+            cryptoConfig.sec.region=="iran" && useReverse(cryptoConfig) && int(bytes[0])==8 {
+            replyReverse(conn,icmpSrcToIPAddr(srcaddr),echoId,echoSeq,cryptoConfig)
+        }
         packet := &Packet{my: my,
             src: icmpSrcToIPAddr(srcaddr),
             echoId: echoId, echoSeq: echoSeq}
