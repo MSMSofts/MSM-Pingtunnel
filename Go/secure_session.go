@@ -506,6 +506,12 @@ type secureStatus struct{
  ReverseWriteFailures uint64 `json:"reverse_write_failures"`
  ReversePollEchoReflections uint64 `json:"reverse_poll_echo_reflections"`
  ReversePollIntervalMs int `json:"reverse_poll_interval_ms"`
+ ReverseOldestQueueAgeMs int64 `json:"reverse_oldest_queue_age_ms"`
+ ReverseLastDeliveryDelayMs int64 `json:"reverse_last_delivery_delay_ms"`
+ ReverseMaxDeliveryDelayMs int64 `json:"reverse_max_delivery_delay_ms"`
+ ReverseDeliveredFrames uint64 `json:"reverse_delivered_frames"`
+ ReverseDelayedFrames uint64 `json:"reverse_delayed_frames"`
+ ReverseLastOutboundDataAgeMs int64 `json:"reverse_last_outbound_data_age_ms"`
  ReverseLastDataAge int64 `json:"reverse_last_data_age_seconds"`
  AutoFallbackCount uint64 `json:"auto_direct_fallback_count"`
  AutoFallbackReason string `json:"auto_direct_fallback_reason,omitempty"`
@@ -547,6 +553,12 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.ReverseWriteFailures=diag.FailedReplies
  report.ReversePollEchoReflections=diag.ReflectedPolls
  report.ReversePollIntervalMs=diag.PollIntervalMillis
+ report.ReverseOldestQueueAgeMs=diag.OldestQueueAgeMs
+ report.ReverseLastDeliveryDelayMs=diag.LastQueueDelayMs
+ report.ReverseMaxDeliveryDelayMs=diag.MaxQueueDelayMs
+ report.ReverseDeliveredFrames=diag.DeliveredFrames
+ report.ReverseDelayedFrames=diag.DelayedFrames
+ report.ReverseLastOutboundDataAgeMs=diag.LastOutboundDataAgeMs
  report.ReverseLastDataAge=diag.LastUsefulFrameAgeSeconds
  report.AutoFallbackCount=diag.FallbackCount
  report.AutoFallbackReason=diag.FallbackReason
