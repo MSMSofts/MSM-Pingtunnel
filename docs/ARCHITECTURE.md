@@ -2,16 +2,22 @@
 
 [README فارسی](../README.md) · [English README](../README.en.md) · [Security policy](../SECURITY.md)
 
-**Version:** Manager 3.3.3 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
+**Version:** Manager 3.3.4 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
 
 **خلاصه:** Pingtunnel Manager فقط دو VPS دارد. کاربر به پورت TCP/UDP سرور ایران وصل می‌شود؛ هسته Go ترافیک را در ICMP رمزنگاری‌شده به VPS خارج می‌رساند و سرور خارج آن را به پورت سرویس محلی خودش تحویل می‌دهد. Rust تنها کارهای راه‌اندازی، ذخیره تنظیمات و کنترل systemd را انجام می‌دهد.
 
 
-## Overseas PTR4 Echo reflection filtering (v3.3.3)
+## Bidirectional Reverse poll scheduling (v3.3.4)
+
+The foreign Go poller was initially paced by successfully authenticated Iran-to-Foreign DATA alone. For download-heavy QUIC video, a temporary lack of return ACKs could incorrectly cool the poller from 2–12 ms to 80–250 ms, creating a self-reinforcing return-path delay. The scheduler now tracks a second signal: Foreign-to-Iran encrypted application DATA send attempts. It uses whichever side requires the shorter polling interval, holding the return path warm through short ACK silences with staged 12/24/45-ms cooldown. Only application DATA drives the new demand signal: handshake control, routine PINGs and unauthenticated PTR4 replies do not count.
+
+Queue observability adds maximum and EWMA dequeue wait, computed from the original enqueue timestamp when a queued frame is taken for attempted sending. These measurements are **process-lifetime** diagnostics and do not include downstream congestion/packet loss after a successful raw-socket write. No plaintext or new wire-protocol fields are introduced; diagnostics are local JSON only.
+
+## Overseas PTR4 Echo reflection filtering (v3.3.4)
 
 The overseas reverse poller sends a 36-byte `PTR4` control payload inside a standard ICMP Echo Request. Linux on the Iran host can automatically return that *same* payload inside an Echo Reply. Such a reply is not a `PTH4` authenticated handshake frame or a `PTD4` AEAD data frame. Previously the overseas receiver could route the reflected payload to session decrypt and increment `authentication_failures` in the non-session-frame branch.
 
-v3.3.3 tests the pinned peer source IP first, then filters only **ICMP Type 0** replies with **exactly 36 bytes** of Echo payload and **PTR4** prefix before the session decoder. Ordinary data and authenticated control frames do not match this filter. Filtered reflections increment `reverse_poll_echo_reflections` and never count as security failures, proof of data delivery or fresh authenticated peer traffic. This is an internal receive-path change only, not an ICMP wire-format modification.
+v3.3.4 tests the pinned peer source IP first, then filters only **ICMP Type 0** replies with **exactly 36 bytes** of Echo payload and **PTR4** prefix before the session decoder. Ordinary data and authenticated control frames do not match this filter. Filtered reflections increment `reverse_poll_echo_reflections` and never count as security failures, proof of data delivery or fresh authenticated peer traffic. This is an internal receive-path change only, not an ICMP wire-format modification.
 
 ## Reverse-first Auto failover safety (v3.3.2)
 
@@ -139,7 +145,7 @@ Rust CLI presents these through `pingtunnel security` and `pingtunnel performanc
 
 ~~~text
 Rust/
-  Cargo.toml             Rust manager package (3.3.3)
+  Cargo.toml             Rust manager package (3.3.4)
   src/main.rs            CLI, systemd and config generation
   src/setup.rs           Unified pairing wizard
 
@@ -182,7 +188,7 @@ cargo test --manifest-path Rust/Cargo.toml
 cargo build --release --manifest-path Rust/Cargo.toml
 ~~~
 
-Release builds are verified with SHA256 and a release manifest specifying **manager 3.3.3 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.3.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2); rolling assets may also exist for compatibility.
+Release builds are verified with SHA256 and a release manifest specifying **manager 3.3.4 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.3.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2); rolling assets may also exist for compatibility.
 
 ## 8. Compatibility contract and limitations
 
