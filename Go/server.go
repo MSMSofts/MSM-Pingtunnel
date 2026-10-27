@@ -848,14 +848,20 @@ func (p *Server) runReversePoller() {
     for !p.exit.Load() {
         now:=<-ticker.C
         if p.exit.Load(){return}
-        if !p.cryptoConfig.reverse.needsProbe(now,p.cryptoConfig.SecureReady()){continue}
+        recent:=false
+        if p.cryptoConfig.SecureReady(){
+            last:=p.cryptoConfig.sec.lastPeerTraffic()
+            recent=!last.IsZero() && now.Sub(last)<90*time.Second
+        }
+        if !p.cryptoConfig.reverse.needsProbe(now,recent){continue}
         period:=500*time.Millisecond
+        if p.cryptoConfig.SecureReady() && !useReverse(p.cryptoConfig){period=10*time.Second}
         if p.localConnMapSize.Load()>0 && p.cryptoConfig.SecureReady(){
             period=10*time.Millisecond
         }
         if !last.IsZero() && now.Sub(last)<period{continue}
         sequence:=int(p.reverseSequence.Add(1)&0xffff)
-        sendForeignPoll(*p.conn,peer,0x42A5,sequence,p.cryptoConfig,now)
+        sendForeignPoll(*p.conn,peer,0x42A5,sequence,p.cryptoConfig,now,recent)
         last=now
     }
 }
