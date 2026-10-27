@@ -128,8 +128,12 @@ func (c *CryptoConfig) RecoverSecureSession(now time.Time,traffic bool)bool{
 func (c *CryptoConfig) WriteSecureStatus(path string){
  if c.sec==nil{return}
  direction:="direct"
- if c.reverse!=nil{direction=string(c.reverse.direction())}
- c.sec.writeStatusWithDirection(path,direction)
+ reverseProbeAge:=int64(-1)
+ if c.reverse!=nil{
+  direction=string(c.reverse.direction())
+  reverseProbeAge=c.reverse.probeAge(time.Now())
+ }
+ c.sec.writeStatusWithDirection(path,direction,reverseProbeAge)
 }
 func (c *CryptoConfig) SecureStats()sessionStats{
  if c.sec==nil{return sessionStats{}}
