@@ -584,9 +584,11 @@ mod tests{
         assert_eq!(numeric_auth_code(get_string(&iran,"pair_key").unwrap()).unwrap(),
                    numeric_auth_code(get_string(&foreign,"pair_key").unwrap()).unwrap());
         assert_eq!(go_core_config(&iran).unwrap()["listen"],":444");
+        assert_eq!(go_core_config(&iran).unwrap()["icmp_direction"],"auto");
         let remote=go_core_config(&foreign).unwrap();
         assert_eq!(remote["fixed_target"],"127.0.0.1:8443");
         assert_eq!(remote["forward_protocol"],0);
+        assert_eq!(remote["icmp_direction"],"auto");
         assert_eq!(remote["peer_ip"],"198.51.100.45");
     }
     #[test]
