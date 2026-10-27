@@ -125,7 +125,12 @@ func (c *CryptoConfig) ReceiveSecureControl(frame []byte,now time.Time)([]byte,e
 func (c *CryptoConfig) RecoverSecureSession(now time.Time,traffic bool)bool{
  return c.sec!=nil && c.sec.recoverIfStale(now,traffic)
 }
-func (c *CryptoConfig) WriteSecureStatus(path string){if c.sec!=nil{c.sec.writeStatus(path)}}
+func (c *CryptoConfig) WriteSecureStatus(path string){
+ if c.sec==nil{return}
+ direction:="direct"
+ if c.reverse!=nil{direction=string(c.reverse.direction())}
+ c.sec.writeStatusWithDirection(path,direction)
+}
 func (c *CryptoConfig) SecureStats()sessionStats{
  if c.sec==nil{return sessionStats{}}
  return c.sec.stats()
