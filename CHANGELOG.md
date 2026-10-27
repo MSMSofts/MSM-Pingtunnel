@@ -4,6 +4,13 @@
 
 این فایل از **نسخه 3.0 به بعد** تغییرات اصلی Pingtunnel Manager را ثبت می‌کند. نسخه‌ها فقط با عنوان محصول توصیف نمی‌شوند؛ تغییرات **قالب تنظیمات** و **پروتکل ارتباط بین دو VPS** نیز در هر مرحله مشخص شده‌اند.
 
+## [3.2.6](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.2.6) — جلوگیری از بازیابی غیرضروری
+
+**Config schema: 3 · Wire protocol: 4**
+
+- Watchdog برای تشخیص قطع ارتباط، ترافیک واقعی احرازشده را هم در کنار Ping در نظر می‌گیرد؛ عبور سالم داده باعث Restart بی‌مورد نمی‌شود.
+- هسته و Manager هر دو از Release یکسان 3.2.6 نصب می‌شوند.
+
 ## [3.2.5](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.2.5) — نمایش پایدار Status و بازیابی طولانی‌مدت
 
 **Config schema: 3 · Wire protocol: 4 · No re-pairing required**
