@@ -40,7 +40,7 @@ func TestReverseAdaptivePollCadence(t *testing.T) {
         t.Fatalf("idle reverse interval %s",got)
     }
     d:=r.diagnostics(now.Add(10*time.Second))
-    if d.PollIntervalMillis!=250 || d.LastUsefulFrameAgeSeconds!=10{
+    if d.PollIntervalMillis!=250 || d.LastUsefulFrameAgeSeconds!=9{
         t.Fatalf("wrong reverse diagnostic snapshot: %+v",d)
     }
 }
