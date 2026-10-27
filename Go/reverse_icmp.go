@@ -72,6 +72,11 @@ type reverseTransport struct {
     lastValidProbe time.Time
     lastUsefulFrame time.Time
     usefulBurst int
+    lastDownstreamFrame time.Time
+    downstreamBurst int
+    dequeueMaxWait time.Duration
+    dequeueWaitEWMANs int64
+    dequeueSamples uint64
     lastReceiveAck time.Time
     failedReplies uint64
     reflectedPolls uint64
@@ -281,6 +286,15 @@ func (r *reverseTransport) takeFrame(now time.Time) (reverseQueuedFrame,bool) {
         r.pending=r.pending[1:]
         r.pendingBytes-=len(f.data)
         if now.Sub(f.created)>reverseFrameTTL{r.drops++;continue}
+        wait:=now.Sub(f.created)
+        if wait<0{wait=0}
+        if wait>r.dequeueMaxWait{r.dequeueMaxWait=wait}
+        if r.dequeueSamples==0 {
+            r.dequeueWaitEWMANs=int64(wait)
+        }else{
+            r.dequeueWaitEWMANs+=(int64(wait)-r.dequeueWaitEWMANs)/8
+        }
+        r.dequeueSamples++
         return f,true
     }
     return reverseQueuedFrame{},false
@@ -345,28 +359,68 @@ func (r *reverseTransport) noteUsefulFrame(now time.Time) {
     }
     r.lastUsefulFrame=now
 }
+// Downstream DATA is sent from Foreign to Iran immediately as encrypted
+// Echo Requests. Its activity predicts when the client will need to return
+// QUIC acknowledgements in Echo Replies, even if those ACKs are momentarily
+// delayed and foreign has not received any useful reverse DATA.
+func (r *reverseTransport) noteDownstreamFrame(now time.Time) {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    if !r.lastDownstreamFrame.IsZero() && now.Sub(r.lastDownstreamFrame)>=0 &&
+        now.Sub(r.lastDownstreamFrame)<350*time.Millisecond {
+        if r.downstreamBurst<1024{r.downstreamBurst++}
+    } else {
+        r.downstreamBurst=1
+    }
+    r.lastDownstreamFrame=now
+}
+
 func (r *reverseTransport) pollPeriod(now time.Time,activeConns int,ready bool) time.Duration {
     r.mu.Lock();defer r.mu.Unlock()
-    // Fast polling requires a sustained burst of useful authenticated
-    // payloads. One isolated datagram must never trigger 500 empty polls/s.
+    // A reverse poll creates a return-path opportunity. Receive-only
+    // scheduling can stall QUIC: if its ACKs slow down, poll pacing also
+    // slows, which delays more ACKs. Take the faster of authenticated
+    // upstream demand and local encrypted downstream DATA demand.
     period:=250*time.Millisecond
-    age:=now.Sub(r.lastUsefulFrame)
     if !ready {
         period=200*time.Millisecond
-    } else if !r.lastUsefulFrame.IsZero() && age>=0 && age<1500*time.Millisecond {
-        if r.usefulBurst>=4 && age<350*time.Millisecond {
-            period=2*time.Millisecond
-        }else if r.usefulBurst>=2{
-            period=12*time.Millisecond
-        }else{
-            period=40*time.Millisecond
+    } else {
+        if activeConns>0 {period=60*time.Millisecond}
+        upstreamAge:=now.Sub(r.lastUsefulFrame)
+        if !r.lastUsefulFrame.IsZero() && upstreamAge>=0 {
+            switch {
+            case upstreamAge<350*time.Millisecond && r.usefulBurst>=4:
+                period=2*time.Millisecond
+            case upstreamAge<1500*time.Millisecond && r.usefulBurst>=2:
+                period=minPollDuration(period,12*time.Millisecond)
+            case upstreamAge<3*time.Second:
+                period=minPollDuration(period,30*time.Millisecond)
+            case upstreamAge<7*time.Second:
+                period=minPollDuration(period,50*time.Millisecond)
+            }
         }
-    } else if activeConns>0 {
-        period=80*time.Millisecond
+        downAge:=now.Sub(r.lastDownstreamFrame)
+        if !r.lastDownstreamFrame.IsZero() && downAge>=0 {
+            switch {
+            case downAge<1500*time.Millisecond && r.downstreamBurst>=4:
+                period=minPollDuration(period,4*time.Millisecond)
+            case downAge<2*time.Second:
+                period=minPollDuration(period,12*time.Millisecond)
+            case downAge<5*time.Second:
+                period=minPollDuration(period,24*time.Millisecond)
+            case downAge<8*time.Second:
+                period=minPollDuration(period,45*time.Millisecond)
+            }
+        }
     }
     r.pollPeriodMillis=int(period/time.Millisecond)
     return period
 }
+func minPollDuration(a,b time.Duration) time.Duration {
+    if a<b{return a}
+    return b
+}
+
 type reverseDiagnostics struct {
     Pending int
     PendingBytes int
@@ -376,6 +430,10 @@ type reverseDiagnostics struct {
     ReflectedPolls uint64
     PollIntervalMillis int
     LastUsefulFrameAgeSeconds int64
+    LastDownstreamAgeSeconds int64
+    DequeueMaxWaitMs int64
+    DequeueWaitEWMAMs int64
+    DequeueSamples uint64
     FallbackCount uint64
     FallbackReason string
 }
@@ -383,7 +441,16 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
     r.mu.Lock();defer r.mu.Unlock()
     age:=int64(-1)
     if !r.lastUsefulFrame.IsZero() {age=int64(now.Sub(r.lastUsefulFrame).Seconds());if age<0{age=0}}
+    downAge:=int64(-1)
+    if !r.lastDownstreamFrame.IsZero() {
+        downAge=int64(now.Sub(r.lastDownstreamFrame).Seconds())
+        if downAge<0{downAge=0}
+    }
     return reverseDiagnostics{Pending:len(r.pending),PendingBytes:r.pendingBytes,
+        LastDownstreamAgeSeconds:downAge,
+        DequeueMaxWaitMs:int64(r.dequeueMaxWait/time.Millisecond),
+        DequeueWaitEWMAMs:r.dequeueWaitEWMANs/int64(time.Millisecond),
+        DequeueSamples:r.dequeueSamples,
         QueuePeak:r.queuePeak,QueueDrops:r.drops,FailedReplies:r.failedReplies,
         ReflectedPolls:r.reflectedPolls,
         PollIntervalMillis:r.pollPeriodMillis,LastUsefulFrameAgeSeconds:age,
