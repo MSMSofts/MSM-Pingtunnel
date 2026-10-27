@@ -1,10 +1,20 @@
 # Changelog / تاریخچه تغییرات
 
-[README فارسی](README.md) · [English README](README.en.md) · [Releases](https://github.com/MSMSofts/Pingtunnel_manager/releases)
+[README فارسی](README.md) · [English README](README.en.md) · [Releases](https://github.com/MSMSofts/MSM-Pingtunnel/releases)
 
 این فایل از **نسخه 3.0 به بعد** تغییرات اصلی Pingtunnel Manager را ثبت می‌کند. نسخه‌ها فقط با عنوان محصول توصیف نمی‌شوند؛ تغییرات **قالب تنظیمات** و **پروتکل ارتباط بین دو VPS** نیز در هر مرحله مشخص شده‌اند.
 
-## [3.2.4](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.4) — رفع خرابی رسم منو و ترتیب گزینه‌ها
+## [3.2.5](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.2.5) — نمایش پایدار Status و بازیابی طولانی‌مدت
+
+**Config schema: 3 · Wire protocol: 4 · No re-pairing required**
+
+- خروجی Status و لاگ‌ها در منوی تعاملی تا Enter بعدی روی صفحه می‌ماند.
+- خطای دائمی دریافت ICMP و انسداد صف پردازش بیش از سه ثانیه به systemd گزارش می‌شود تا هسته بازیابی شود.
+- اگر اتصال به سرور مقابل با وجود تقاضای مداوم بیش از چهار دقیقه پاسخ ندهد، هسته بازراه‌اندازی می‌شود؛ این سیاست هنگام بیکاری فعال نیست.
+- Restart سرویس محدودیت دفعات ندارد، گزارش خطا در journal نگهداری می‌شود و Health هشدار عدم ارتباط احرازشده می‌دهد.
+- آدرس مخزن و اسکریپت‌های نصب و به‌روزرسانی با MSM-Pingtunnel هماهنگ شدند.
+
+## [3.2.4](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.2.4) — رفع خرابی رسم منو و ترتیب گزینه‌ها
 
 **Config schema: 3 · Wire protocol: 4 · No pairing/key/port changes**
 
@@ -14,7 +24,7 @@
 - حفظ نمایش زنده CPU/RAM و میانگین‌ها، تازه‌سازی ۱۰ ثانیه‌ای بدون پاک شدن انتخاب تایپی، حالت ASCII بدون رنگ، و Restart اجباری پس از Update موفق.
 - تست‌های رگرسیون برای **CRLF در حالت Raw**، ترتیب دقیق ۱۴ گزینه، طول هر خط در اندازه‌های متفاوت و حالت سرویس خاموش.
 
-## [3.2.3](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.3) — داشبورد زنده و Restart پس از Update
+## [3.2.3](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.2.3) — داشبورد زنده و Restart پس از Update
 
 **Config schema: 3 · Secure wire: 4 · Pairing root unchanged**
 
@@ -24,7 +34,7 @@
 - بدون Agent جدید، بدون تغییر رمزنگاری، پورت‌ها، Schema 3 یا Wire v4 و بدون نیاز به Pairing مجدد.
 - تست‌های واحد مستقل برای شمارنده‌های `/proc`، میانگین ۶ نمونه، تغییر PID، عدم افشای تنظیمات و UI در حالت بدون رنگ.
 
-## [3.2.2](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.2) — بازطراحی منوی ترمینال
+## [3.2.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.2.2) — بازطراحی منوی ترمینال
 
 **Config schema: 3 · Secure wire: 4 · بدون تغییر در کلید و پروتکل**
 
@@ -36,7 +46,7 @@
 
 **سازگاری:** قالب فایل `schema_version=3` و Wire v4 ثابت‌اند. از نسخه 3.2.1 به 3.2.2 نیازی به اجرای دوباره Setup یا انتقال مجدد کلید نیست؛ Restart سرویس در زمان نصب ممکن است نشست‌های جاری را قطع کند.
 
-## [3.2.1](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.1) — اصلاح هم‌زمانی و سلامت ارتباط
+## [3.2.1](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.2.1) — اصلاح هم‌زمانی و سلامت ارتباط
 
 **Config schema: 3 · Secure wire: 4 · بدون نیاز به جفت‌سازی مجدد**
 
@@ -45,12 +55,12 @@
 - ایجاد مانع شروع TCP تا پایان تأیید نشست رمزنگاری با سقف ۴۵ ثانیه، و افزایش فرصت برقراری جریان‌های TCP تا ۱۵ ثانیه.
 - تشخیص توقف غیرمنتظرهٔ Goroutineهای اصلی ICMP، دریافت و پردازش و سپردن راه‌اندازی مجدد به systemd؛ سکوت عادی شبکه به‌تنهایی موجب Restart نمی‌شود.
 - فرمان `pingtunnel health`، بررسی تازه‌بودن Heartbeat هسته Go و نظارت فرایند پس از Restart در نصب‌کننده، همراه Rollback در صورت خطا.
-- تصحیح مسیرهای انتقال مخزن به `MSMSofts/Pingtunnel_manager` و انتشار نسخه ثابت همراه با Manifest.
+- تصحیح مسیرهای انتقال مخزن به `MSMSofts/MSM-Pingtunnel` و انتشار نسخه ثابت همراه با Manifest.
 - آزمون‌های Regression برای Data Race، Pongهای نامرتب، Packet Loss پیوسته، تکرار مذاکره در فقدان پاسخ و تست‌های `go test -race`.
 
 **محدودیت مهم:** پروتکل ICMP همچنان نشانگرهای Wire v4 را دارد. برای جلوگیری از شکستن سازگاری، قالب شبکه تغییر نکرده است. این نسخه تضمین بی‌وقفه‌بودن اتصال یا عدم شناسایی ICMP نیست و آزمون عملی دو VPS هنوز لازم است.
 
-## [3.2.0](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.0) — امنیت و پایداری نشست
+## [3.2.0](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.2.0) — امنیت و پایداری نشست
 
 **Config schema: 3 · Secure wire: 4 · Linux: AMD64 / ARM64**
 
@@ -68,7 +78,7 @@
 
 فایل تنظیمات **schema 3** و کلید جفت‌سازی حفظ می‌شوند. قالب ارتباط **Wire v4** است و با 3.1 در سطح پروتکل سازگار است. Restart سرویس همچنان می‌تواند نشست‌های فعال را قطع کند.
 
-## [3.1.0](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/rust-latest) — امنیت نشست و Forward Secrecy
+## [3.1.0](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest) — امنیت نشست و Forward Secrecy
 
 **Config schema: 3 · Secure wire: 4**
 
@@ -99,4 +109,4 @@
 - **Wire compatibility** از schema جداست. هر تغییر ناسازگار در پروتکل باید شماره Wire مناسب و مسیر ارتقای هماهنگ/بدون کاهش امنیت داشته باشد.
 - باینری‌های **Go Core** و **Rust Manager** باید به‌صورت یک مجموعه منطبق منتشر شوند و نصب‌کننده قبل از جایگزینی فایل‌های فعلی، صحت آن‌ها را بررسی کند.
 - انتشارهای GitHub و موفقیت CI **جایگزین آزمایش روی دو VPS واقعی یا ممیزی رمزنگاری مستقل نیستند**.
-- درباره نسخه‌های قبل از 3.0 به [تاریخچه Git](https://github.com/MSMSofts/Pingtunnel_manager/commits/main/) مراجعه کن؛ مهاجرت از آن‌ها به‌صورت خودکار پشتیبانی نمی‌شود.
+- درباره نسخه‌های قبل از 3.0 به [تاریخچه Git](https://github.com/MSMSofts/MSM-Pingtunnel/commits/main/) مراجعه کن؛ مهاجرت از آن‌ها به‌صورت خودکار پشتیبانی نمی‌شود.
