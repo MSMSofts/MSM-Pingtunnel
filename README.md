@@ -2,15 +2,15 @@
 
 **یک تونل ICMP رمزنگاری‌شده، دو سرور، راه‌اندازی ساده و مدیریت سبک.**
 
-[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.2.4](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.4)
+[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.2.5](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.2.5)
 
-![Version](https://img.shields.io/badge/version-3.2.4-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/Pingtunnel_manager/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.2.5-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
 
 **Pingtunnel Manager** ابزاری برای نصب، جفت‌سازی، مدیریت و پایش یک تونل مبتنی بر **ICMP** میان **یک VPS ایران و یک VPS خارج** است. ترافیک برنامه‌های TCP یا UDP ابتدا وارد سرور ایران می‌شود، از طریق ICMP رمزنگاری‌شده به سرور خارج می‌رسد و در نهایت به سرویس محلی موردنظر تحویل داده می‌شود.
 
 این پروژه **به‌تنهایی سرویس VPN یا جایگزین Hysteria 2، Xray و s-ui نیست**؛ بلکه لایهٔ انتقال میان دو سرور را فراهم می‌کند.
 
-> **نسخه فعلی: 3.2.4** — مدیریت با Rust، هستهٔ انتقال با Go، تنظیمات نسخه 3 و پروتکل رمزنگاری Wire v4. قابلیت تونل معکوس و تغییر خودکار جهت هنوز پیاده‌سازی نشده است.
+> **نسخه فعلی: 3.2.5** — مدیریت با Rust، هستهٔ انتقال با Go، تنظیمات نسخه 3 و پروتکل رمزنگاری Wire v4. قابلیت تونل معکوس و تغییر خودکار جهت هنوز پیاده‌سازی نشده است.
 
 ## چرا Pingtunnel Manager؟
 
@@ -78,11 +78,11 @@
 فرمان نصب روی **هر دو VPS** یکسان است:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/Pingtunnel_manager/main/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/main/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 ~~~
 
-پیشنهاد می‌شود پیش از اجرای هر اسکریپت نصب اینترنتی، محتوای فایل دانلودشده را بررسی کنی. نصب‌کننده باینری‌های منتشرشدهٔ [v3.2.4](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.4) را همراه با SHA256 و Manifest بررسی می‌کند و قبل از جایگزینی فایل‌های موجود، تطابق نسخهٔ Manager، هسته Go و Wire Protocol را کنترل می‌کند.
+پیشنهاد می‌شود پیش از اجرای هر اسکریپت نصب اینترنتی، محتوای فایل دانلودشده را بررسی کنی. نصب‌کننده باینری‌های منتشرشدهٔ [v3.2.4](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.2.5) را همراه با SHA256 و Manifest بررسی می‌کند و قبل از جایگزینی فایل‌های موجود، تطابق نسخهٔ Manager، هسته Go و Wire Protocol را کنترل می‌کند.
 
 ### راه‌اندازی: ابتدا خارج، سپس ایران
 
@@ -129,7 +129,7 @@ sudo pingtunnel logs 100
 ~~~text
 ================================================================
   PINGTUNNEL  /  CONTROL CENTER
-  v3.2.4   |   Encrypted ICMP   |   Wire v4
+  v3.2.5   |   Encrypted ICMP   |   Wire v4
 ----------------------------------------------------------------
 LIVE TUNNEL STATUS
   Location     Foreign (service)
@@ -197,7 +197,7 @@ SECURITY & HEALTH
 
 برای بررسی نتیجه از منو گزینه‌های **1، 13، 14 و 8** را ببین؛ یا `sudo pingtunnel status`، `sudo pingtunnel security`، `sudo pingtunnel health` و `sudo pingtunnel performance` را اجرا کن.
 
-### پایش زنده CPU و حافظه در منوی نسخه 3.2.4
+### پایش زنده CPU و حافظه در منوی نسخه 3.2.5
 
 در بخش **LIVE TUNNEL OVERVIEW**، دقیقاً زیر `Service status` دو ردیف جدید دیده می‌شود:
 
@@ -269,7 +269,7 @@ SECURITY & HEALTH
 
 | نسخه | تنظیمات | پروتکل بین VPSها | سازگاری |
 | --- | --- | --- | --- |
-| **3.2.4** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | رفع نمایش منو؛ بدون تغییر شبکه |
+| **3.2.5** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | اصلاح مکث Status و بازیابی گیرنده و ارتباط بلندمدت |\n| **3.2.4** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | رفع نمایش منو؛ بدون تغییر شبکه |
 | **3.2.3** | `schema_version=3` | Wire v4 | نسخه قبل؛ پایش منابع و Restart پس از Update |
 | **3.2.2** | `schema_version=3` | Wire v4 | نسخه قبلی؛ سازگار با 3.2.4 |
 | **3.2.1** | `schema_version=3` | Wire v4 | نسخه قبلی؛ هم‌ساز با 3.2.4 |
@@ -280,9 +280,9 @@ SECURITY & HEALTH
 
 در ارتقای دو سرور، **کلید جفت‌سازی و تنظیمات v3 حفظ می‌شوند**؛ بااین‌حال سرویس‌ها ممکن است Restart شوند و اتصال‌های فعال قطع شوند. برای ارتقای نسخه‌های ناسازگار، هر دو VPS را در یک بازه نگهداری به‌روزرسانی کن. نصب‌کننده هنگام مشاهده تنظیمات قدیمیِ نامعتبر، قبل از تغییر سرویس متوقف می‌شود.
 
-> **نکته پس از انتقال مخزن:** برای به‌روزرسانی، فعلاً از دستور نصب با نشانی جدید `MSMSofts/Pingtunnel_manager` در بخش «نصب سریع» استفاده کن. برخی باینری‌های منتشرشده پیش از انتقال، ممکن است در فرمان داخلی `pingtunnel update` هنوز به نشانی قدیمی مراجعه کنند.
+> **نکته پس از انتقال مخزن:** برای به‌روزرسانی، فعلاً از دستور نصب با نشانی جدید `MSMSofts/MSM-Pingtunnel` در بخش «نصب سریع» استفاده کن. برخی باینری‌های منتشرشده پیش از انتقال، ممکن است در فرمان داخلی `pingtunnel update` هنوز به نشانی قدیمی مراجعه کنند.
 
-[جزئیات تغییرات](CHANGELOG.md) · [نسخه ثابت 3.2.4](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/v3.2.4) · [نسخه rolling](https://github.com/MSMSofts/Pingtunnel_manager/releases/tag/rust-latest)
+[جزئیات تغییرات](CHANGELOG.md) · [نسخه ثابت 3.2.5](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.2.5) · [نسخه rolling](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
 
 ## مسیر فایل‌ها
 
