@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Rust Pingtunnel Manager: release-first installer with failure rollback.
 set -Eeuo pipefail
-RELEASE="https://github.com/MSMSofts/MSM-Pingtunnel/releases/download/v3.3.1"
+RELEASE="https://github.com/MSMSofts/MSM-Pingtunnel/releases/download/v3.3.2"
 CORE_RELEASE="$RELEASE"
 MANAGER="/usr/local/bin/pingtunnel"
 CORE="/opt/pingtunnel/bin/pingtunnel"
@@ -41,8 +41,8 @@ if ! printf '%s  %s\n' "$digest" "$work/manager" | sha256sum --check --status; t
 fi
 chmod 755 "$work/manager"
 manager_version="$("$work/manager" --version)"
-if [[ "$manager_version" != "3.3.1" ]]; then
-  echo "Expected Pingtunnel Manager 3.3.1 (wire 4, config schema 3, security fixes), got: $manager_version" >&2
+if [[ "$manager_version" != "3.3.2" ]]; then
+  echo "Expected Pingtunnel Manager 3.3.2 (wire 4, config schema 3, security fixes), got: $manager_version" >&2
   echo "Check the current rust-latest release assets before retrying." >&2
   exit 1
 fi
@@ -61,7 +61,7 @@ fi
 chmod 755 "$work/core"
 # The release manifest binds the manager and core to the same tagged build.
 curl -fsSL --retry 3 "$RELEASE/release-manifest.txt" -o "$work/manifest"
-for invariant in "release=v3.3.1" "config_schema=3" "wire=4"; do
+for invariant in "release=v3.3.2" "config_schema=3" "wire=4"; do
   if ! grep -Fxq "$invariant" "$work/manifest"; then
     echo "Release manifest is missing $invariant; aborting." >&2
     exit 1
@@ -76,8 +76,8 @@ for file in "pingtunnel-manager-linux-$release_arch" "pingtunnel-core-linux-$rel
     exit 1
   fi
 done
-if [[ "$("$work/core" -security-protocol)" != "pingtunnel-go-core=3.3.1 config-schema=3 wire=4" ]]; then
-  echo "Downloaded Go core is not the matching v3.3.1 secure wire-4 build." >&2
+if [[ "$("$work/core" -security-protocol)" != "pingtunnel-go-core=3.3.2 config-schema=3 wire=4" ]]; then
+  echo "Downloaded Go core is not the matching v3.3.2 secure wire-4 build." >&2
   exit 1
 fi
 
