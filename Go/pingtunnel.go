@@ -24,7 +24,9 @@ func sendSecureControl(id,sequence int,conn icmp.PacketConn,peer *net.IPAddr,spr
    crypto.reverse.enqueue(body,time.Now())
    return
   }
-  if crypto.sec.region=="foreign" {sproto=8}
+  // A Direct-mode client Hello still needs an Echo Reply even when
+  // the foreign host was previously using Reverse.
+  if crypto.sec.region=="foreign" && sproto!=0 {sproto=8}
  }
  _=emitEcho(conn,peer,sproto,id,sequence,body)
 }
@@ -208,6 +210,11 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
         if cryptoConfig!=nil && cryptoConfig.sec!=nil &&
             cryptoConfig.sec.region=="iran" && useReverse(cryptoConfig) && int(bytes[0])==8 {
             replyReverse(conn,icmpSrcToIPAddr(srcaddr),echoId,echoSeq,cryptoConfig)
+        }
+        if cryptoConfig!=nil && cryptoConfig.reverse!=nil &&
+            cryptoConfig.sec!=nil && cryptoConfig.sec.region=="foreign" &&
+            useReverse(cryptoConfig) && my.Type==int32(MyMsg_DATA) {
+            cryptoConfig.reverse.noteUsefulFrame(time.Now())
         }
         packet := &Packet{my: my,
             src: icmpSrcToIPAddr(srcaddr),
