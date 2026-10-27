@@ -98,3 +98,46 @@ func TestReverseModeParsing(t *testing.T){
     }
     if _,err:=ParseICMPDirection("opaque");err==nil{t.Fatal("unrecognized mode accepted")}
 }
+
+func TestReverseAutoNeverFailsOverWhileIdleOrPollsHealthy(t *testing.T) {
+    start:=time.Unix(1805000000,0)
+    key:=bytes.Repeat([]byte{19},32)
+    r,_:=newReverseTransport(ICMPAuto,key,start)
+    for i:=1;i<=24;i++{
+        // A quiet reverse link may be idle for hours; it is not failed.
+        now:=start.Add(time.Duration(i)*time.Hour)
+        r.noteDemand(now,false)
+        if r.fallbackDirect(now,true,start) {
+            t.Fatalf("quiet established reverse failed over at hour %d",i)
+        }
+    }
+    // Long-lived flow, no recent application DATA but fresh signed polls:
+    // ICMP reverse direction is still usable and must stay primary.
+    baseline:=start.Add(25*time.Hour)
+    for i:=0;i<=190;i++{
+        now:=baseline.Add(time.Duration(i)*time.Second)
+        r.noteDemand(now,true)
+        if i%5==0 {r.lastValidProbe=now}
+        if r.fallbackDirect(now,true,start){
+            t.Fatalf("authenticated reverse poll path ignored at second %d",i)
+        }
+    }
+    if r.direction()!=ICMPReverse {t.Fatal("preferred reverse changed unexpectedly")}
+    d:=r.diagnostics(baseline.Add(190*time.Second))
+    if d.FallbackCount!=0||d.FallbackReason!="" {
+        t.Fatalf("unexpected failover diagnostics: %+v",d)
+    }
+}
+
+func TestReverseAutoRejectsShortDemandAndIntermittentProbeLoss(t *testing.T) {
+    start:=time.Unix(1805000000,0)
+    r,_:=newReverseTransport(ICMPAuto,bytes.Repeat([]byte{21},32),start)
+    for i:=1;i<240;i++{
+        now:=start.Add(time.Duration(i)*time.Second)
+        if i%15<4 {r.noteDemand(now,true)} else {r.noteDemand(now,false)}
+        if i%60==0 {r.lastValidProbe=now}
+        if r.fallbackDirect(now,true,start){
+            t.Fatalf("intermittent request/packet loss flipped at second %d",i)
+        }
+    }
+}
