@@ -32,6 +32,7 @@ type CryptoConfig struct {
 	Cipher cipher.AEAD
 	auto *autoCrypto
 	sec *secureSession
+ reverse *reverseICMP
 }
 
 // NewCryptoConfig creates a new crypto configuration
@@ -115,7 +116,7 @@ func (c *CryptoConfig) ReceiveSecureControl(frame []byte,now time.Time)([]byte,e
 func (c *CryptoConfig) RecoverSecureSession(now time.Time,traffic bool)bool{
  return c.sec!=nil && c.sec.recoverIfStale(now,traffic)
 }
-func (c *CryptoConfig) WriteSecureStatus(path string){if c.sec!=nil{c.sec.writeStatus(path)}}
+func (c *CryptoConfig) WriteSecureStatus(path string){if c.sec!=nil{c.writeReverseStatus(path)}}
 func (c *CryptoConfig) SecureStats()sessionStats{
  if c.sec==nil{return sessionStats{}}
  return c.sec.stats()
