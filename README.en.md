@@ -14,6 +14,16 @@ Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** betwe
 
 
 
+## Video/QUIC reverse-path tuning (v3.3.4)
+
+Foreign sends Echo Requests so that Iran can return encrypted UDP/QUIC frames and ACKs as matching Echo Replies. Earlier releases accelerated polling mostly after **Iran→Foreign authenticated DATA**, which can respond too late to predominantly **Foreign→Iran video downloads**.
+
+This release anticipates reverse-path ACK demand after successful local encrypted **Foreign→Iran DATA sends**. A quiet but open connection targets **24 ms** polling instead of 80 ms, recent downstream traffic briefly targets **16 ms or 8 ms**, and sustained authenticated Iran→Foreign DATA retains the existing **2 ms** peak. Idle polling stays low-rate. These are software scheduling targets, not transport throughput or RTT guarantees.
+
+Another fixed bottleneck: the previous 4,096-entry nonce replay cache could fill after about eight seconds at the maximum 500 signed polls/s. A 20-second window may see 10,000 legitimate polls, so the bounded nonce cache now permits **16,384 entries**, preserving HMAC verification, timestamp/replay checks and an explicit memory ceiling.
+
+`pingtunnel security` reports the **recent EWMA and maximum actual queue wait time**, oldest queued frame age, signed poll replay-cache entries/overflows on Iran, and encrypted outbound DATA count plus the selected poll period on Foreign. Collect both hosts' values while a video stalls; passing CI does not establish guaranteed playback improvement. Secure wire v4 and Reverse-first/Direct emergency fallback remain unchanged.
+
 ## ICMP Echo reflection filtering (v3.3.3)
 
 On a real two-VPS path, the overseas host was observed receiving hundreds of 44-byte ICMP Echo Replies containing a 36-byte `PTR4` payload. These are automatic Linux kernel echoes of foreign-origin Reverse poll requests, **not authenticated application ciphertext**. v3.3.3 filters only these exact-size, exact-marker Echo Replies, *after verifying the pinned peer source IP and before attempting AEAD decrypt*. Genuine `PTD4` DATA and `PTH4` handshakes remain unaffected; neither the network packet format nor session cryptography changes.
