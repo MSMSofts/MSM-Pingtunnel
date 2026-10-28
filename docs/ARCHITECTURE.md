@@ -2,10 +2,18 @@
 
 [README فارسی](../README.md) · [English README](../README.en.md) · [Security policy](../SECURITY.md)
 
-**Version:** Manager 3.3.7 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
+**Version:** Manager 3.3.8 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
 
 **خلاصه:** Pingtunnel Manager فقط دو VPS دارد. کاربر به پورت TCP/UDP سرور ایران وصل می‌شود؛ هسته Go ترافیک را در ICMP رمزنگاری‌شده به VPS خارج می‌رساند و سرور خارج آن را به پورت سرویس محلی خودش تحویل می‌دهد. Rust تنها کارهای راه‌اندازی، ذخیره تنظیمات و کنترل systemd را انجام می‌دهد.
 
+
+## Encrypted PING reflections and bounded TTL FIFO signature cache (v3.3.8)
+
+In the 3.3.7 foreign sender, only successfully encrypted application DATA Echo Requests had outbound fingerprints. Authenticated PING (and other secured PTD4 message types) use the same Echo Request pathway, so the Iran kernel can return their own original ciphertext as type-0 replies; these cannot authenticate under the foreign receive-direction AEAD key. An on-host 47-second measurement counted 34 authentication errors despite 4,277 blocked exact DATA reflections, supporting (but not proving) this hypothesis.
+
+v3.3.8 tags each outbound encrypted PTD4 Echo Request as DATA, PING or other and registers its **full encrypted payload SHA-256 plus ICMP ID/sequence** before raw socket write. The incoming foreign receive path still requires an Echo Reply, configured source IP and an exact fingerprint match within 8 seconds. Failed writes cancel registration. Only successful **application DATA** updates BBR return-poll activity; PING never promotes polling.
+
+The signature tracking cache remains a fixed 16,384-element chronological ring plus a bounded map. Each send/receive/security-status access prunes expired and canceled oldest entries amortized O(1). On capacity pressure it evicts oldest entries; an evicted signature cannot be used to suppress a packet. Metrics: `reverse_data_echo_reflections`, `reverse_ping_echo_reflections`, `reverse_other_echo_reflections`, `reverse_data_echo_cache_entries`, `reverse_echo_cache_expired`, and `reverse_echo_cache_capacity_evicted`. No plaintext is stored. All cryptography, session frame layout, polling, replay protections and Reverse-first fallback rules remain unchanged.
 
 ## Exact encrypted-data echo reflection matching (v3.3.7)
 
@@ -167,7 +175,7 @@ Rust CLI presents these through `pingtunnel security` and `pingtunnel performanc
 
 ~~~text
 Rust/
-  Cargo.toml             Rust manager package (3.3.7)
+  Cargo.toml             Rust manager package (3.3.8)
   src/main.rs            CLI, systemd and config generation
   src/setup.rs           Unified pairing wizard
 
@@ -210,7 +218,7 @@ cargo test --manifest-path Rust/Cargo.toml
 cargo build --release --manifest-path Rust/Cargo.toml
 ~~~
 
-Release builds are verified with SHA256 and a release manifest specifying **manager 3.3.7 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.3.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2); rolling assets may also exist for compatibility.
+Release builds are verified with SHA256 and a release manifest specifying **manager 3.3.8 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.3.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2); rolling assets may also exist for compatibility.
 
 ## 8. Compatibility contract and limitations
 
