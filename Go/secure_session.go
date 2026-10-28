@@ -505,6 +505,8 @@ type secureStatus struct{
  ReverseQueueDrops uint64 `json:"reverse_queue_drops"`
  ReverseWriteFailures uint64 `json:"reverse_write_failures"`
  ReversePollEchoReflections uint64 `json:"reverse_poll_echo_reflections"`
+ ReverseDataEchoReflections uint64 `json:"reverse_data_echo_reflections"`
+ ReverseDataEchoCacheEntries int `json:"reverse_data_echo_cache_entries"`
  ReverseReplayCapacityRejects uint64 `json:"reverse_replay_capacity_rejections"`
  ReversePollIntervalMs int `json:"reverse_poll_interval_ms"`
  ReverseOldestQueueAgeMs int64 `json:"reverse_oldest_queue_age_ms"`
@@ -557,6 +559,8 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.ReverseQueueDrops=diag.QueueDrops
  report.ReverseWriteFailures=diag.FailedReplies
  report.ReversePollEchoReflections=diag.ReflectedPolls
+ report.ReverseDataEchoReflections=diag.ReflectedDataEchoes
+ report.ReverseDataEchoCacheEntries=diag.OutboundEchoCacheEntries
  report.ReverseReplayCapacityRejects=diag.ReplayCapacityRejects
  report.ReversePollIntervalMs=diag.PollIntervalMillis
  report.ReverseOldestQueueAgeMs=diag.OldestQueueAgeMs
