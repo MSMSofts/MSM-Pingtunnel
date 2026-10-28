@@ -370,6 +370,8 @@ SECURITY & HEALTH
 
 > **نکته پس از انتقال مخزن:** برای به‌روزرسانی، فعلاً از دستور نصب با نشانی جدید `MSMSofts/MSM-Pingtunnel` در بخش «نصب سریع» استفاده کن. برخی باینری‌های منتشرشده پیش از انتقال، ممکن است در فرمان داخلی `pingtunnel update` هنوز به نشانی قدیمی مراجعه کنند.
 
+**آزمایش افت واقعی Reverse:** برای مقایسهٔ فریم‌های رمزنگاری‌شده در دو سرور بدون تغییر تنظیمات، [راهنمای Capture و مقایسهٔ دقیق ICMP](docs/REVERSE_PCAP_DIAGNOSTICS.md) را ببینید. این ابزار از بازتاب خودکار لینوکس صرف‌نظر می‌کند و افت را بر اساس اثرانگشت بسته گزارش می‌دهد؛ نتیجه نیازمند بررسی کامل‌بودن Capture است.
+
 [جزئیات تغییرات](CHANGELOG.md) · [نسخه ثابت 3.3.8](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.8) · [نسخه rolling](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
 
 ## مسیر فایل‌ها
