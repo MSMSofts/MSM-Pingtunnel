@@ -18,11 +18,11 @@ func TestReverseAdaptivePollCadence(t *testing.T) {
         t.Fatalf("idle interval %s",got)
     }
     r.noteUsefulFrame(now)
-    if got:=r.pollPeriod(now.Add(50*time.Millisecond),1,true);got!=16*time.Millisecond{
+    if got:=r.pollPeriod(now.Add(50*time.Millisecond),1,true);got!=12*time.Millisecond{
         t.Fatalf("isolated inbound data interval: %s",got)
     }
     r.noteUsefulFrame(now.Add(100*time.Millisecond))
-    if got:=r.pollPeriod(now.Add(150*time.Millisecond),1,true);got!=8*time.Millisecond{
+    if got:=r.pollPeriod(now.Add(150*time.Millisecond),1,true);got!=6*time.Millisecond{
         t.Fatalf("warm reverse interval %s",got)
     }
     r.noteUsefulFrame(now.Add(160*time.Millisecond))
@@ -30,8 +30,14 @@ func TestReverseAdaptivePollCadence(t *testing.T) {
     if got:=r.pollPeriod(now.Add(250*time.Millisecond),1,true);got!=2*time.Millisecond{
         t.Fatalf("sustained reverse throughput capped at %s",got)
     }
-    if got:=r.pollPeriod(now.Add(2*time.Second),1,true);got!=8*time.Millisecond{
-        t.Fatalf("recent reverse traffic cooled prematurely: %s",got)
+    if got:=r.pollPeriod(now.Add(2*time.Second),1,true);got!=2*time.Millisecond{
+        t.Fatalf("sustained return data burst cooled during jitter window: %s",got)
+    }
+    if got:=r.pollPeriod(now.Add(3*time.Second),1,true);got!=6*time.Millisecond{
+        t.Fatalf("reverse burst did not step down to 6ms: %s",got)
+    }
+    if got:=r.pollPeriod(now.Add(5*time.Second),1,true);got!=25*time.Millisecond {
+        t.Fatalf("reverse ACK activity did not cool after bounded hold: %s",got)
     }
     if got:=r.pollPeriod(now.Add(10*time.Second),1,true);got!=25*time.Millisecond{
         t.Fatalf("open QUIC return path must not wait 80ms: %s",got)
@@ -138,11 +144,14 @@ func TestReverseVideoOutboundAcceleratesReturnACKPolling(t *testing.T) {
     if got:=r.pollPeriod(start.Add(140*time.Millisecond),2,true);got!=4*time.Millisecond {
         t.Fatalf("sustained video frames should keep ACK polling responsive: %s",got)
     }
-    if got:=r.pollPeriod(start.Add(3*time.Second),2,true);got!=12*time.Millisecond {
+    if got:=r.pollPeriod(start.Add(3*time.Second),2,true);got!=4*time.Millisecond {
         t.Fatalf("short video pause must retain warm ACK cadence: %s",got)
     }
-    if got:=r.pollPeriod(start.Add(6*time.Second),2,true);got!=25*time.Millisecond {
-        t.Fatalf("stale outbound traffic must cool: %s",got)
+    if got:=r.pollPeriod(start.Add(6*time.Second),2,true);got!=12*time.Millisecond {
+        t.Fatalf("outbound data must step down to 12ms after sustained burst: %s",got)
+    }
+    if got:=r.pollPeriod(start.Add(9*time.Second),2,true);got!=25*time.Millisecond {
+        t.Fatalf("stale outbound traffic must cool back to 25ms: %s",got)
     }
     if got:=r.pollPeriod(start.Add(10*time.Second),0,true);got!=250*time.Millisecond {
         t.Fatalf("no active application must return to idle: %s",got)
@@ -190,5 +199,70 @@ func TestReverseQueueLatencyMeasuresSuccessfulWritesOnly(t *testing.T) {
     }
     if d=r.diagnostics(start.Add(330*time.Millisecond));d.DeliveredFrames!=2{
         t.Fatalf("empty poll counted as delivered DATA: %+v",d)
+    }
+}
+
+func TestReverseBBRJitterWindowIsBoundedAndRequiresRealData(t *testing.T) {
+    start:=time.Unix(1850000000,0)
+    r,_:=newReverseTransport(ICMPReverse,bytes.Repeat([]byte{33},32),start)
+    // An authenticated but idle session does not warrant permanent 500pps.
+    if got:=r.pollPeriod(start.Add(time.Minute),1,true);got!=25*time.Millisecond {
+        t.Fatalf("open but inactive UDP session should stay at 25ms: %s",got)
+    }
+    r.noteOutboundFrame(start)
+    if got:=r.pollPeriod(start.Add(100*time.Millisecond),1,true);got!=12*time.Millisecond {
+        t.Fatalf("one outbound frame must not enable maximum 2ms polling: %s",got)
+    }
+    if got:=r.pollPeriod(start.Add(9*time.Second),1,true);got!=25*time.Millisecond {
+        t.Fatalf("one stale outbound frame permanently raised ICMP poll rate: %s",got)
+    }
+    // A real sustained outbound video burst holds fast polls through a
+    // 3-second BBR ACK/congestion-recovery silence, then returns to idle.
+    for i:=0;i<5;i++{r.noteOutboundFrame(start.Add(time.Duration(i*30)*time.Millisecond))}
+    if got:=r.pollPeriod(start.Add(3*time.Second),1,true);got!=4*time.Millisecond {
+        t.Fatalf("BBR jitter guard should stay at 4ms: %s",got)
+    }
+    if got:=r.pollPeriod(start.Add(6*time.Second),1,true);got!=12*time.Millisecond {
+        t.Fatalf("BBR jitter guard must back off: %s",got)
+    }
+    if got:=r.pollPeriod(start.Add(9*time.Second),0,true);got!=250*time.Millisecond {
+        t.Fatalf("idle tunnel must return to 250ms: %s",got)
+    }
+    if got:=r.pollPeriod(start.Add(9*time.Second),0,false);got!=200*time.Millisecond {
+        t.Fatalf("handshake must retain bounded 200ms probes: %s",got)
+    }
+}
+
+func TestReverseQueueLatencyRollingP95SeparatesTransientStalls(t *testing.T) {
+    now:=time.Unix(1850000000,0)
+    r,_:=newReverseTransport(ICMPReverse,bytes.Repeat([]byte{34},32),now)
+    initial:=r.diagnostics(now)
+    if initial.MeanQueueDelayMs!=0 || initial.P95QueueDelayMs!=0 ||
+        initial.DeliveryDelaySampleCount!=0 {
+        t.Fatalf("empty queue history must be empty: %+v",initial)
+    }
+    // Simulate 120 fast successful Echo writes and eight transient
+    // one-second delays. Nearest-rank P95 must report the tail.
+    for i:=0;i<128;i++{
+        delay:=10*time.Millisecond
+        if i>=120 {delay=time.Second}
+        r.noteDeliveredFrame(now.Add(-delay),now)
+    }
+    d:=r.diagnostics(now)
+    if d.DeliveryDelaySampleCount!=128 || d.DeliveredFrames!=128 ||
+        d.MeanQueueDelayMs!=71 || d.P95QueueDelayMs!=1000 ||
+        d.VeryDelayedFrames!=8 || d.DelayedFrames!=8 {
+        t.Fatalf("rolling queue latency failed to reveal 1s spikes: %+v",d)
+    }
+    // After 128 new healthy frames, the rolling window must recover,
+    // despite the lifetime very-slow count remaining visible.
+    for i:=0;i<128;i++{
+        r.noteDeliveredFrame(now.Add(-20*time.Millisecond),now)
+    }
+    d=r.diagnostics(now)
+    if d.DeliveryDelaySampleCount!=128 || d.MeanQueueDelayMs!=20 ||
+        d.P95QueueDelayMs!=20 || d.DeliveredFrames!=256 ||
+        d.VeryDelayedFrames!=8 {
+        t.Fatalf("rolling P95 retained obsolete stall or lost lifetime stats: %+v",d)
     }
 }
