@@ -83,7 +83,7 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
         mb=ciphertext
 	}
 
-	sendEncryptedICMP(id,sequence,conn,server,sproto,mb,cryptoConfig,msgType==uint32(MyMsg_DATA))
+	sendEncryptedICMP(id,sequence,conn,server,sproto,mb,cryptoConfig,msgType)
 }
 
 // isReflectedReversePoll detects a Linux Echo Reply that copies the 36-byte
@@ -110,7 +110,7 @@ func isReflectedReverseDataEcho(crypto *CryptoConfig, icmpType byte, id,seq int,
 
 // Send an already-encrypted payload without re-wrapping MyMsg or allocating
 // a second session sequence. Used for draining authenticated pending packets.
-func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr, proto int, encrypted []byte, crypto *CryptoConfig, isData bool) {
+func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr, proto int, encrypted []byte, crypto *CryptoConfig, msgType uint32) {
  if peer==nil||len(encrypted)==0{return}
  if useReverse(crypto) {
   if crypto.sec.region=="iran" {
@@ -119,20 +119,23 @@ func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr,
   }
   proto=8
  }
- // Stage the exact encrypted signature before raw socket transmission:
- // a kernel-generated response may arrive before WriteTo finishes.
- tracked:=isData && useReverse(crypto) && crypto!=nil &&
-    crypto.sec!=nil && crypto.sec.region=="foreign" &&
+ // Track ALL encrypted Foreign-origin Echo Requests, including PING.
+ // Only app DATA can accelerate BBR/QUIC return-ACK polling.
+ tracked:=useReverse(crypto) && crypto!=nil &&
+    crypto.sec!=nil && crypto.sec.region=="foreign" && proto==8 &&
     len(encrypted)>=len(secureDataMagic) &&
     stdbytes.Equal(encrypted[:len(secureDataMagic)],secureDataMagic[:])
  var signature reverseSentEchoSignature
  var registeredAt time.Time
  if tracked {
-    signature,registeredAt=crypto.reverse.stageOutboundDataEcho(id,sequence,encrypted,time.Now())
+    kind:=reverseEchoOther
+    if msgType==uint32(MyMsg_DATA) {kind=reverseEchoDATA}
+    if msgType==uint32(MyMsg_PING) {kind=reverseEchoPING}
+    // Stage before socket write: Linux may reflect before WriteTo returns.
+    signature,registeredAt=crypto.reverse.stageOutboundEcho(id,sequence,encrypted,kind,time.Now())
  }
  if emitEcho(conn,peer,proto,id,sequence,encrypted) {
-    if tracked {
-        // Genuine Foreign->Iran DATA keeps return-ACK polling responsive.
+    if tracked && msgType==uint32(MyMsg_DATA) {
         crypto.reverse.noteOutboundFrame(time.Now())
     }
  } else if tracked {
@@ -153,7 +156,7 @@ func FlushPendingICMP(conn icmp.PacketConn, crypto *CryptoConfig) {
    for _,unsent:=range packets[i:] {crypto.sec.pushBack(unsent)}
    return
   }
-  sendEncryptedICMP(p.id,p.seq,conn,p.peer,p.proto,encrypted,crypto,true)
+  sendEncryptedICMP(p.id,p.seq,conn,p.peer,p.proto,encrypted,crypto,uint32(MyMsg_DATA))
  }
 }
 
