@@ -13,6 +13,13 @@ Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** betwe
 **Current release: 3.3.8** · Rust manager, Go core, schema **3**, secure wire **4** · **Reverse-first Auto:** Foreign starts ICMP polls; Direct is reserved for prolonged confirmed outages with client demand. Video latency improvements require measured live testing.
 
 
+## Auto Tune (proposed, not yet released)
+
+On the **Iran-side TCP client**, run `sudo pingtunnel auto-tune` or select **15) Auto Tune** in the manager menu. The live tunnel must already be authenticated. This one-shot command tests ordinary IPv4 echo latency/loss, a larger ICMP payload, and recent authenticated RTT/jitter/loss reported by the Go core. If data quality is insufficient or loss is extreme, it changes nothing.
+
+Auto Tune chooses conservative bounded overrides for `tcp_bs`, `tcp_mw`, `tcp_rst`, and `timeout`, saves the previous private configuration as `/opt/pingtunnel/conf/config.pre-autotune.json` (0600), restarts the service, and restores the previous configuration on startup/heartbeat failure. The existing Go adaptive logic continues adjusting initial settings for **new** TCP flows. Echo packet size is **not** a validated MTU or bandwidth test. Foreign-side or UDP settings, pairing material, encryption, and port/peer identity are not automatically changed. Measurements and live performance improvements need verification on the actual VPS pair.
+
+
 ## Reflected encrypted PING detection and active TTL eviction (v3.3.8)
 
 In the user's 47-second foreign-VPS measurement, filtering 4,277 exact PTD4 reflections still left 34 authentication errors (~0.72/s). Code review found that the existing outbound signature cache covered only DATA, even though foreign-origin authenticated PING and other PTD4 Echo Requests can also be reflected by the Iran Linux kernel. These are a plausible source of periodic authentication errors; the mechanism is not yet field proven.
