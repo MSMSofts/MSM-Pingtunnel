@@ -108,6 +108,17 @@ func isReflectedReverseDataEcho(crypto *CryptoConfig, icmpType byte, id,seq int,
         crypto.reverse.filterReflectedDataEcho(id,seq,data,now)
 }
 
+// Keep reflection classification separate from the DATA-only traffic hint.
+// PING is tracked for kernel-reflection filtering, but never raises the
+// adaptive poll frequency reserved for real QUIC application DATA.
+func reverseEchoKindForMessage(msgType uint32) reverseEchoKind {
+    switch msgType {
+    case uint32(MyMsg_DATA): return reverseEchoDATA
+    case uint32(MyMsg_PING): return reverseEchoPING
+    default: return reverseEchoOther
+    }
+}
+
 // Send an already-encrypted payload without re-wrapping MyMsg or allocating
 // a second session sequence. Used for draining authenticated pending packets.
 func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr, proto int, encrypted []byte, crypto *CryptoConfig, msgType uint32) {
@@ -128,9 +139,7 @@ func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr,
  var signature reverseSentEchoSignature
  var registeredAt time.Time
  if tracked {
-    kind:=reverseEchoOther
-    if msgType==uint32(MyMsg_DATA) {kind=reverseEchoDATA}
-    if msgType==uint32(MyMsg_PING) {kind=reverseEchoPING}
+    kind:=reverseEchoKindForMessage(msgType)
     // Stage before socket write: Linux may reflect before WriteTo returns.
     signature,registeredAt=crypto.reverse.stageOutboundEcho(id,sequence,encrypted,kind,time.Now())
  }
