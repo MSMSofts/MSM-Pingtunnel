@@ -14,6 +14,7 @@ use std::process::{self, Command, Stdio};
 mod setup;
 mod menu_ui;
 mod resource_monitor;
+mod auto_tune;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -88,6 +89,17 @@ fn validate(cfg: &Value) -> Result<()> {
     let bytes=STANDARD.decode(secret).map_err(|_|failure("pairing key not base64"))?;
     if bytes.len()!=32||STANDARD.encode(&bytes)!=secret{return Err(failure("pairing key must be 32 random bytes in canonical base64"));}
     if get_number(cfg,"memory_mb",0)?>1_048_576{return Err(failure("invalid memory limit"));}
+    // Restrict new optional performance overrides to safe Go core ranges.
+    for (field,default,min,max) in [
+        ("tcp_bs",1_048_576,65_536,2_097_152),
+        ("tcp_mw",20_000,256,20_000),
+        ("tcp_rst",400,300,2_400),
+        ("timeout",60,30,120),
+    ] {
+        if !(min..=max).contains(&get_number(cfg,field,default)?) {
+            return Err(failure(format!("invalid {field}: expected {min}..={max}")));
+        }
+    }
     if cfg.get("autostart").and_then(Value::as_bool).is_none(){return Err(failure("autostart must be boolean"));}
     Ok(())
 }
@@ -159,6 +171,14 @@ fn go_core_config(cfg:&Value)->Result<Value>{
         "icmp_direction":cfg.get("icmp_direction").and_then(Value::as_str).unwrap_or("auto")
     });
     if region=="iran"{
+        config["timeout"]=json!(get_number(cfg,"timeout",60)?);
+        // The client owns TCP framing; the foreign service gets these values
+        // over authenticated packets and never needs divergent local tuning.
+        if transport=="tcp" {
+            config["tcp_bs"]=json!(get_number(cfg,"tcp_bs",1_048_576)?);
+            config["tcp_mw"]=json!(get_number(cfg,"tcp_mw",20_000)?);
+            config["tcp_rst"]=json!(get_number(cfg,"tcp_rst",400)?);
+        }
         config["listen"]=json!(format!(":{port}"));
         config["server"]=json!(peer);
         // The foreign server MUST ignore this compatibility placeholder.
@@ -337,7 +357,7 @@ fn help(){
     println!("  pingtunnel            Unified menu");
     println!("  pingtunnel setup      Five questions on each VPS");
     println!("  pingtunnel key        Show existing pairing key (root only)");
-    println!("  pingtunnel validate | performance | security | health | dry-run");
+    println!("  pingtunnel validate | performance | auto-tune | security | health | dry-run");
     println!("  pingtunnel start | stop | restart | status | logs [lines]");
     println!("  pingtunnel update | uninstall [--purge]");
 }
@@ -399,7 +419,7 @@ fn menu()->Result<()>{
             menu_ui::choose(&mut monitor,display,default)?
         }else{
             print!("{}",display(monitor.current(),80,40));
-            prompt("Choose (1-14)",default)?
+            prompt("Choose (1-15)",default)?
         };
         let action=match choice.as_str(){
             "1"=>run_systemctl(&["status","pingtunnel.service","--no-pager"]),
@@ -416,7 +436,8 @@ fn menu()->Result<()>{
             "12"|"q"|"Q"=>return Ok(()),
             "13"=>show_security_status(),
             "14"=>show_health(),
-            _=>{println!("Invalid choice: use 1..14.");continue}
+            "15"=>auto_tune::run(),
+            _=>{println!("Invalid choice: use 1..15.");continue}
         };
         if let Err(e)=action{eprintln!("Operation failed: {e}");}
         // Hold command output until confirmed; otherwise the alternate-screen
@@ -590,6 +611,7 @@ fn main_inner()->Result<()>{
         "setup"=>setup::wizard(),
         "key"=>display_pair_key(),
         "performance"=>show_adaptive_status(),
+        "auto-tune"=>auto_tune::run(),
         "security"=>show_security_status(),
         "health"=>show_health(),
         "service-install"=>service_install(),
@@ -635,6 +657,7 @@ mod tests{
         assert_eq!(remote["forward_protocol"],0);
         assert_eq!(remote["icmp_direction"],"auto");
         assert_eq!(remote["peer_ip"],"198.51.100.45");
+        assert!(remote.get("tcp_bs").is_none());
     }
     #[test]
     fn no_legacy_or_unencrypted_fallback(){
@@ -644,6 +667,21 @@ mod tests{
         c.as_object_mut().unwrap().remove("pair_key");
         assert!(validate(&c).is_err());
         assert!(go_core_config(&c).is_err());
+    }
+    #[test]
+    fn performance_overrides_are_validated_and_forwarded() {
+        let mut cfg=conf("iran","tcp",443);
+        cfg["tcp_bs"]=json!(524288);
+        cfg["tcp_mw"]=json!(4096);
+        cfg["tcp_rst"]=json!(850);
+        cfg["timeout"]=json!(90);
+        let go=go_core_config(&cfg).unwrap();
+        assert_eq!(go["tcp_bs"],524288);
+        assert_eq!(go["tcp_mw"],4096);
+        assert_eq!(go["tcp_rst"],850);
+        assert_eq!(go["timeout"],90);
+        cfg["tcp_mw"]=json!(20001);
+        assert!(validate(&cfg).is_err());
     }
     #[test]
     fn mismatched_inputs_rejected(){
