@@ -96,6 +96,18 @@ func isReflectedReversePoll(crypto *CryptoConfig, icmpType byte, data []byte) bo
         stdbytes.Equal(data[:len(reverseProbeMagic)],reverseProbeMagic[:])
 }
 
+// Unlike PTR4 reflections, PTD4 Echo Replies can also be genuine encrypted
+// peer DATA. Only suppress an Echo Reply that exactly matches the full
+// ciphertext and ICMP ID/sequence of a recently transmitted request.
+// Call this only after the paired source-IP check.
+func isReflectedReverseDataEcho(crypto *CryptoConfig, icmpType byte, id,seq int, data []byte,now time.Time) bool {
+    return crypto!=nil && crypto.sec!=nil && crypto.sec.region=="foreign" &&
+        crypto.reverse!=nil && icmpType==0 &&
+        len(data)>=len(secureDataMagic) &&
+        stdbytes.Equal(data[:len(secureDataMagic)],secureDataMagic[:]) &&
+        crypto.reverse.filterReflectedDataEcho(id,seq,data,now)
+}
+
 // Send an already-encrypted payload without re-wrapping MyMsg or allocating
 // a second session sequence. Used for draining authenticated pending packets.
 func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr, proto int, encrypted []byte, crypto *CryptoConfig, isData bool) {
@@ -107,11 +119,24 @@ func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr,
   }
   proto=8
  }
- if emitEcho(conn,peer,proto,id,sequence,encrypted) && isData &&
-    useReverse(crypto) && crypto.sec.region=="foreign" {
-    // Foreign->Iran video DATA must accelerate Iran->Foreign polls carrying
-    // QUIC acknowledgements; inbound-only activity detection causes stalls.
-    crypto.reverse.noteOutboundFrame(time.Now())
+ // Stage the exact encrypted signature before raw socket transmission:
+ // a kernel-generated response may arrive before WriteTo finishes.
+ tracked:=isData && useReverse(crypto) && crypto!=nil &&
+    crypto.sec!=nil && crypto.sec.region=="foreign" &&
+    len(encrypted)>=len(secureDataMagic) &&
+    stdbytes.Equal(encrypted[:len(secureDataMagic)],secureDataMagic[:])
+ var signature reverseSentEchoSignature
+ var registeredAt time.Time
+ if tracked {
+    signature,registeredAt=crypto.reverse.stageOutboundDataEcho(id,sequence,encrypted,time.Now())
+ }
+ if emitEcho(conn,peer,proto,id,sequence,encrypted) {
+    if tracked {
+        // Genuine Foreign->Iran DATA keeps return-ACK polling responsive.
+        crypto.reverse.noteOutboundFrame(time.Now())
+    }
+ } else if tracked {
+    crypto.reverse.cancelOutboundDataEcho(signature,registeredAt)
  }
 }
 
@@ -171,6 +196,12 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
             // are NOT session ciphertext and must never be passed to AEAD.
             if isReflectedReversePoll(cryptoConfig,bytes[0],payloadData) {
                 if cryptoConfig.reverse!=nil {cryptoConfig.reverse.noteReflectedProbe()}
+                continue
+            }
+            // PTD4 itself is not a reason to drop a reply: Iran's authentic
+            // encrypted DATA/QUIC ACKs also start with PTD4. Reject only
+            // an exact reflection of our own recent outbound ciphertext.
+            if isReflectedReverseDataEcho(cryptoConfig,bytes[0],echoId,echoSeq,payloadData,now) {
                 continue
             }
             if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="iran" &&

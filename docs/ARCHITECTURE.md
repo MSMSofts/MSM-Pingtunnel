@@ -2,10 +2,18 @@
 
 [README فارسی](../README.md) · [English README](../README.en.md) · [Security policy](../SECURITY.md)
 
-**Version:** Manager 3.3.6 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
+**Version:** Manager 3.3.7 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
 
 **خلاصه:** Pingtunnel Manager فقط دو VPS دارد. کاربر به پورت TCP/UDP سرور ایران وصل می‌شود؛ هسته Go ترافیک را در ICMP رمزنگاری‌شده به VPS خارج می‌رساند و سرور خارج آن را به پورت سرویس محلی خودش تحویل می‌دهد. Rust تنها کارهای راه‌اندازی، ذخیره تنظیمات و کنترل systemd را انجام می‌دهد.
 
+
+## Exact encrypted-data echo reflection matching (v3.3.7)
+
+Linux on the Iran VPS can automatically Echo Reply a foreign-origin encrypted PTD4 Echo Request, copying its PTD4 ciphertext bytes verbatim. This can return the *foreign transmit-direction ciphertext* to the foreign receive-direction AEAD decoder. Because QUIC ACKs legitimately use PTD4 too, filtering all inbound PTD4 is unsafe. In a 10-second live capture, 1,453 of 2,047 inbound PTD4 replies were exact byte-for-byte matches of the 1,465 outbound encrypted requests; the other 594 inbound replies were unmatched (not necessarily all valid).
+
+For every successfully encrypted outgoing foreign DATA Echo Request, the transport stages a SHA-256 digest of the **complete** ciphertext plus ICMP Echo ID and sequence **before writing** the packet to its raw ICMP socket. Raw-write failure revokes registration. The structure is a fixed 16,384-slot ring and a lookup map of signatures, bounded in space; entries are eligible for matching only for 8 seconds. After verifying pinned peer source IP, the receiver discards a Type 0 Echo Reply before AEAD decrypt **only if** its full ciphertext digest and ICMP Echo ID/sequence exactly match a recent staged outbound DATA Echo Request. Real Iran→Foreign authenticated frames with distinct ciphertext cannot match by marker alone; no private session keys or plaintext are held in this cache. Matches and cache entries are reported as `reverse_data_echo_reflections` and `reverse_data_echo_cache_entries`.
+
+This reduces pointless decrypt processing and separates Linux reflections from authentication errors. It does not guarantee higher throughput, lower network loss or complete elimination of video stalls. Wire format, authenticated session, reverse polling and BBR configuration remain unchanged.
 
 ## Bounded BBR jitter polling and rolling queue-delay distribution (v3.3.6)
 
@@ -159,7 +167,7 @@ Rust CLI presents these through `pingtunnel security` and `pingtunnel performanc
 
 ~~~text
 Rust/
-  Cargo.toml             Rust manager package (3.3.6)
+  Cargo.toml             Rust manager package (3.3.7)
   src/main.rs            CLI, systemd and config generation
   src/setup.rs           Unified pairing wizard
 
@@ -202,7 +210,7 @@ cargo test --manifest-path Rust/Cargo.toml
 cargo build --release --manifest-path Rust/Cargo.toml
 ~~~
 
-Release builds are verified with SHA256 and a release manifest specifying **manager 3.3.6 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.3.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2); rolling assets may also exist for compatibility.
+Release builds are verified with SHA256 and a release manifest specifying **manager 3.3.7 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.3.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2); rolling assets may also exist for compatibility.
 
 ## 8. Compatibility contract and limitations
 

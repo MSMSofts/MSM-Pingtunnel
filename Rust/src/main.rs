@@ -514,6 +514,8 @@ fn show_security_status() -> Result<()> {
             report["reverse_mean_delivery_delay_ms"],report["reverse_p95_delivery_delay_ms"],report["reverse_delivery_delay_samples"]);
         println!("  Reverse ICMP reply write failures: {}",report["reverse_write_failures"]);
         println!("  Filtered kernel PTR4 Echo reflections: {}",report["reverse_poll_echo_reflections"]);
+        println!("  Filtered exact PTD4 Echo reflections: {}",report["reverse_data_echo_reflections"]);
+        println!("  Outbound PTD4 reflection cache entries: {}",report["reverse_data_echo_cache_entries"]);
         if let Some(drops)=report["reverse_replay_capacity_rejections"].as_u64() {
             println!("  Reverse poll replay-cache capacity rejections: {drops}");
         }

@@ -1,5 +1,17 @@
 # Changelog / تاریخچه تغییرات
 
+## [3.3.7](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.7) — Discard only exact Linux PTD4 ciphertext Echo reflections
+
+**Schema 3 · Secure wire v4 · No packet, crypto, Reverse-first or BBR configuration changes**
+
+- The user captured 3,512 ICMP PTD4 packets over 10 seconds on the overseas VPS: **1,465 outbound encrypted Echo Requests** and **2,047 inbound PTD4 Echo Replies**, of which **1,453** were byte-identical reflected copies of locally sent requests (including identical ICMP ID and sequence). The remaining 594 replies were unmatched and may contain legitimate Iran→Foreign QUIC acknowledgements.
+- Unlike the previous fixed-marker PTR4 reflection filter, the new **PTD4 filter never drops packets by magic bytes alone**: foreign tracks a SHA-256 digest of each outgoing encrypted DATA payload with its ICMP Echo ID/sequence and discards only a matching Type 0 Echo Reply from the already IP-pinned peer, before receiving-side decryption.
+- Race-safe registration is staged **before** raw socket writing; failed writes cancel registration. A bounded **16,384-entry ring/map** with an **8-second maximum reflection matching age** prevents indefinite memory growth or matching old ciphertext. Only full ciphertext digests and Echo metadata are stored, not plaintext.
+- New telemetry: `reverse_data_echo_reflections` and `reverse_data_echo_cache_entries`, shown in `pingtunnel security` as `Filtered exact PTD4 Echo reflections` and `Outbound PTD4 reflection cache entries`. Authentication-failure counters are reserved for other invalid frames.
+- Regression coverage checks exact reflected Echo frames, distinct genuine PTD4 payloads (including same ICMP ID/sequence), type/region restrictions, timeout, write rollback, memory cap/eviction and concurrent access (including race testing).
+- **Validation:** No asserted reduction in playback buffering until paired VPS installation and video re-testing; the transport still cannot guarantee zero ICMP packet loss or independent QUIC-layer reliability.
+
+
 ## [3.3.6](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.6) — BBR short-jitter Reverse polling and rolling queue-delay P95
 
 **Config schema: 3 · Secure wire: 4 · No application packet framing, encryption or BBR configuration change**

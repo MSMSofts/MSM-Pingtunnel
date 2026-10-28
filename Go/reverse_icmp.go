@@ -52,6 +52,10 @@ const (
     // Rolling successful Echo Reply send-delay history. Fixed allocation and
     // bounded sorting cost when the once-per-second status snapshot is read.
     reverseDeliveryWindow = 128
+    // Track recent outbound encrypted Echo Requests to distinguish exact
+    // Linux-generated DATA reflections from legitimate Iran->Foreign DATA.
+    reverseEchoTrackingWindow = 8 * time.Second
+    reverseEchoTrackingCapacity = 16384
 )
 
 var reverseProbeMagic = [4]byte{'P','T','R','4'}
@@ -59,6 +63,27 @@ var reverseProbeMagic = [4]byte{'P','T','R','4'}
 type reverseQueuedFrame struct {
     data []byte
     created time.Time
+}
+
+// A reflected ICMP Echo Reply copies the entire encrypted request payload.
+// Matching the whole SHA-256 ciphertext digest AND Echo ID/sequence avoids
+// dropping genuine peer DATA just because it also starts with PTD4.
+type reverseSentEchoSignature struct {
+    id uint16
+    seq uint16
+    ciphertextDigest [32]byte
+}
+type reverseSentEchoRecord struct {
+    signature reverseSentEchoSignature
+    at time.Time
+}
+
+func reverseEchoSignature(id, seq int, payload []byte) reverseSentEchoSignature {
+    return reverseSentEchoSignature{
+        id: uint16(id),
+        seq: uint16(seq),
+        ciphertextDigest: sha256.Sum256(payload),
+    }
 }
 
 type reverseTransport struct {
@@ -94,6 +119,12 @@ type reverseTransport struct {
     lastReceiveAck time.Time
     failedReplies uint64
     reflectedPolls uint64
+    reflectedDataEchoes uint64
+    // A bounded ring evicts oldest entries in O(1), without retaining
+    // ciphertext. Full-digest comparison happens only for PTD4 Echo Replies.
+    outboundEchoes map[reverseSentEchoSignature]time.Time
+    outboundEchoRing [reverseEchoTrackingCapacity]reverseSentEchoRecord
+    outboundEchoNext int
     pollPeriodMillis int
     queuePeak int
 }
@@ -354,6 +385,52 @@ func (r *reverseTransport) noteReflectedProbe() {
     r.reflectedPolls++
     r.mu.Unlock()
 }
+
+// Stage the signature BEFORE the raw socket write, because the peer's Linux
+// kernel may echo the request before WriteTo returns. Return the timestamp
+// token so a failed write can unregister only the matching registration.
+func (r *reverseTransport) stageOutboundDataEcho(id,seq int,payload []byte,now time.Time) (reverseSentEchoSignature,time.Time) {
+    key:=reverseEchoSignature(id,seq,payload)
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    if r.outboundEchoes==nil {
+        r.outboundEchoes=make(map[reverseSentEchoSignature]time.Time)
+    }
+    previous:=r.outboundEchoRing[r.outboundEchoNext]
+    if !previous.at.IsZero() {
+        if at,ok:=r.outboundEchoes[previous.signature];ok && at==previous.at {
+            delete(r.outboundEchoes,previous.signature)
+        }
+    }
+    r.outboundEchoRing[r.outboundEchoNext]=reverseSentEchoRecord{signature:key,at:now}
+    r.outboundEchoNext=(r.outboundEchoNext+1)%reverseEchoTrackingCapacity
+    r.outboundEchoes[key]=now
+    return key,now
+}
+
+func (r *reverseTransport) cancelOutboundDataEcho(key reverseSentEchoSignature,at time.Time) {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    if recorded,ok:=r.outboundEchoes[key];ok && recorded==at {
+        delete(r.outboundEchoes,key)
+    }
+}
+
+// Match only a byte-exact echo of our previously transmitted secure DATA.
+// A genuine peer frame uses independent AEAD direction keys and will not
+// match the sender ciphertext digest. This does not attempt to decrypt,
+// replay or alter data; it only eliminates our own reflected packets.
+func (r *reverseTransport) filterReflectedDataEcho(id,seq int,payload []byte,now time.Time) bool {
+    key:=reverseEchoSignature(id,seq,payload)
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    at,ok:=r.outboundEchoes[key]
+    if !ok || now.Before(at) || now.Sub(at)>reverseEchoTrackingWindow {
+        return false
+    }
+    r.reflectedDataEchoes++
+    return true
+}
 func (r *reverseTransport) recordPollInterval(period time.Duration) {
     r.mu.Lock();defer r.mu.Unlock()
     r.pollPeriodMillis=int(period/time.Millisecond)
@@ -455,6 +532,8 @@ type reverseDiagnostics struct {
     QueueDrops uint64
     FailedReplies uint64
     ReflectedPolls uint64
+    ReflectedDataEchoes uint64
+    OutboundEchoCacheEntries int
     ReplayCapacityRejects uint64
     PollIntervalMillis int
     LastUsefulFrameAgeSeconds int64
@@ -490,6 +569,8 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
     return reverseDiagnostics{Pending:len(r.pending),PendingBytes:r.pendingBytes,
         QueuePeak:r.queuePeak,QueueDrops:r.drops,FailedReplies:r.failedReplies,
         ReflectedPolls:r.reflectedPolls,
+        ReflectedDataEchoes:r.reflectedDataEchoes,
+        OutboundEchoCacheEntries:len(r.outboundEchoes),
         ReplayCapacityRejects:r.replayCapacityRejects,
         PollIntervalMillis:r.pollPeriodMillis,LastUsefulFrameAgeSeconds:age,
         FallbackCount:r.fallbackCount,FallbackReason:r.lastFallbackReason,
