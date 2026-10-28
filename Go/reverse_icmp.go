@@ -9,6 +9,7 @@ import (
     "crypto/sha256"
     "encoding/binary"
     "errors"
+    "sort"
     "sync"
     "time"
 )
@@ -48,6 +49,9 @@ const (
     reverseFrameTTL = 12 * time.Second
     reverseQueueMaxFrames = 256
     reverseQueueMaxBytes = 2 * 1024 * 1024
+    // Rolling successful Echo Reply send-delay history. Fixed allocation and
+    // bounded sorting cost when the once-per-second status snapshot is read.
+    reverseDeliveryWindow = 128
 )
 
 var reverseProbeMagic = [4]byte{'P','T','R','4'}
@@ -83,6 +87,10 @@ type reverseTransport struct {
     maxDeliveredQueueDelayMs int64
     deliveredFrames uint64
     delayedFrames uint64
+    veryDelayedFrames uint64
+    deliveryDelaySamples [reverseDeliveryWindow]uint32
+    deliveryDelaySampleCount int
+    deliveryDelaySampleNext int
     lastReceiveAck time.Time
     failedReplies uint64
     reflectedPolls uint64
@@ -380,26 +388,29 @@ func (r *reverseTransport) pollPeriod(now time.Time,activeConns int,ready bool) 
     if !ready {
         period=200*time.Millisecond
     } else {
-        // An open UDP session must not need to wait 80 ms for each return
-        // opportunity during QUIC handshake/congestion window recovery.
+        // Under BBR/QUIC, a short application pause is not an idle
+        // connection: ACKs and loss-recovery packets still need return
+        // polling. Keep the previously authenticated burst warm for a
+        // bounded jitter window; never run at 2ms solely because a socket
+        // remains open.
         if activeConns>0 {period=25*time.Millisecond}
         ageIn:=now.Sub(r.lastUsefulFrame)
         if !r.lastUsefulFrame.IsZero() && ageIn>=0 {
             switch {
-            case r.usefulBurst>=4 && ageIn<1200*time.Millisecond:
+            case r.usefulBurst>=4 && ageIn<2400*time.Millisecond:
                 period=2*time.Millisecond
-            case r.usefulBurst>=2 && ageIn<3*time.Second:
-                if period>8*time.Millisecond {period=8*time.Millisecond}
-            case ageIn<3*time.Second:
-                if period>16*time.Millisecond {period=16*time.Millisecond}
+            case r.usefulBurst>=2 && ageIn<4500*time.Millisecond:
+                if period>6*time.Millisecond {period=6*time.Millisecond}
+            case ageIn<4500*time.Millisecond:
+                if period>12*time.Millisecond {period=12*time.Millisecond}
             }
         }
         ageOut:=now.Sub(r.lastOutboundData)
         if !r.lastOutboundData.IsZero() && ageOut>=0 {
             switch {
-            case r.outboundBurst>=4 && ageOut<2500*time.Millisecond:
+            case r.outboundBurst>=4 && ageOut<4500*time.Millisecond:
                 if period>4*time.Millisecond {period=4*time.Millisecond}
-            case ageOut<5*time.Second:
+            case ageOut<8*time.Second:
                 if period>12*time.Millisecond {period=12*time.Millisecond}
             }
         }
@@ -418,6 +429,24 @@ func (r *reverseTransport) noteDeliveredFrame(created,now time.Time) {
     r.lastDeliveredQueueDelayMs=ms
     if ms>r.maxDeliveredQueueDelayMs {r.maxDeliveredQueueDelayMs=ms}
     if delay>=250*time.Millisecond {r.delayedFrames++}
+    if delay>=time.Second {r.veryDelayedFrames++}
+    // A rolling distribution is more useful for intermittent video stalls
+    // than a maximum from hours ago. Exclude failed socket writes and
+    // never refresh the original enqueue time when retrying.
+    r.deliveryDelaySamples[r.deliveryDelaySampleNext]=uint32(ms)
+    r.deliveryDelaySampleNext=(r.deliveryDelaySampleNext+1)%reverseDeliveryWindow
+    if r.deliveryDelaySampleCount<reverseDeliveryWindow {r.deliveryDelaySampleCount++}
+}
+
+func (r *reverseTransport) queueDelaySummaryLocked() (average,p95 int64) {
+    n:=r.deliveryDelaySampleCount
+    if n==0{return 0,0}
+    samples:=make([]uint32,n)
+    copy(samples,r.deliveryDelaySamples[:n])
+    var sum uint64
+    for _,v:=range samples {sum+=uint64(v)}
+    sort.Slice(samples,func(i,j int)bool{return samples[i]<samples[j]})
+    return int64(sum/uint64(n)),int64(samples[(n*95+99)/100-1])
 }
 type reverseDiagnostics struct {
     Pending int
@@ -436,6 +465,10 @@ type reverseDiagnostics struct {
     MaxQueueDelayMs int64
     DeliveredFrames uint64
     DelayedFrames uint64
+    VeryDelayedFrames uint64
+    MeanQueueDelayMs int64
+    P95QueueDelayMs int64
+    DeliveryDelaySampleCount int
     LastOutboundDataAgeMs int64
 }
 func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
@@ -453,6 +486,7 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         if d<0{d=0}
         outboundAge=int64(d/time.Millisecond)
     }
+    avgDelay,p95Delay:=r.queueDelaySummaryLocked()
     return reverseDiagnostics{Pending:len(r.pending),PendingBytes:r.pendingBytes,
         QueuePeak:r.queuePeak,QueueDrops:r.drops,FailedReplies:r.failedReplies,
         ReflectedPolls:r.reflectedPolls,
@@ -461,7 +495,10 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         FallbackCount:r.fallbackCount,FallbackReason:r.lastFallbackReason,
         OldestQueueAgeMs:oldest,LastQueueDelayMs:r.lastDeliveredQueueDelayMs,
         MaxQueueDelayMs:r.maxDeliveredQueueDelayMs,DeliveredFrames:r.deliveredFrames,
-        DelayedFrames:r.delayedFrames,LastOutboundDataAgeMs:outboundAge}
+        DelayedFrames:r.delayedFrames,VeryDelayedFrames:r.veryDelayedFrames,
+        MeanQueueDelayMs:avgDelay,P95QueueDelayMs:p95Delay,
+        DeliveryDelaySampleCount:r.deliveryDelaySampleCount,
+        LastOutboundDataAgeMs:outboundAge}
 }
 
 // Observed inbound authenticated reverse probes are separately reported.
