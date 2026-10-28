@@ -75,14 +75,14 @@ def simulate():
     for n,b in enumerate(data[:10]):
         echo = bytearray(b)
         echo[14+20] = 0  # ICMP Echo Reply, keep exact ID/seq/payload
-        iran.append((EPOCH+SKEW+(30+n*0.1)*SEC,bytes(echo)))
+        iran.append((EPOCH+SKEW+int((30+n*0.1)*SEC),bytes(echo)))
         if n>0:
-            foreign.append((EPOCH+(30+n*0.1)*SEC+PROP,bytes(echo)))
+            foreign.append((EPOCH+int((30+n*0.1)*SEC)+PROP,bytes(echo)))
     # Kernel responses to some outbound PTR4 polls.
     for n in range(15):
         b = packet(I,F,0,300+n,b"PTR4"+bytes([n])*32)
-        iran.append((EPOCH+SKEW+(40+n*0.1)*SEC,b))
-        foreign.append((EPOCH+(40+n*0.1)*SEC+PROP,b))
+        iran.append((EPOCH+SKEW+int((40+n*0.1)*SEC),b))
+        foreign.append((EPOCH+int((40+n*0.1)*SEC)+PROP,b))
     return foreign, iran
 
 class CompareTests(unittest.TestCase):
