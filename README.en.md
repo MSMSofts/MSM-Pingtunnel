@@ -366,6 +366,8 @@ Upgrading both VPSs is recommended during a maintenance window. The manager pres
 
 > **Repository transfer note:** For updates, use the canonical installer URL under `MSMSofts/MSM-Pingtunnel` shown in the Install section. Earlier manager binaries may still use the former repository owner in the built-in `pingtunnel update` URL.
 
+**Measure actual Reverse ICMP carrier delivery:** [two-VPS packet capture and exact-match analysis](docs/REVERSE_PCAP_DIAGNOSTICS.md). No daemon or BBR changes; compare full encrypted Echo fingerprints and exclude kernel reflections. Validate local capture completeness before calling missing frames network loss.
+
 [Version history](CHANGELOG.md) · [Pinned release](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.8) · [Rolling assets](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
 
 ## Important paths

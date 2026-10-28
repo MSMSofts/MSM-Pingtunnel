@@ -1,0 +1,28 @@
+name: Reverse ICMP pcap diagnostics tests
+on:
+  pull_request:
+    paths:
+      - "Source/reverse_pcap_compare.py"
+      - "Source/tests/test_reverse_pcap_compare.py"
+      - ".github/workflows/reverse-diagnostics.yml"
+  push:
+    branches: [main]
+    paths:
+      - "Source/reverse_pcap_compare.py"
+      - "Source/tests/test_reverse_pcap_compare.py"
+      - ".github/workflows/reverse-diagnostics.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pcap-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate syntax
+        run: python3 -m py_compile Source/reverse_pcap_compare.py Source/tests/test_reverse_pcap_compare.py
+      - name: Synthetic PCAP regression suite
+        run: python3 -m unittest discover -s Source/tests -p "test_reverse_pcap_compare.py" -v
