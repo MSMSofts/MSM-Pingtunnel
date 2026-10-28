@@ -205,17 +205,6 @@ def cohorts(foreign: Capture, iran: Capture, skew: int, guard_s: float):
     frecv = by_source(foreign, "I0")
     return fsend, irecv, isend, frecv, groups
 
-def summarize(sender, receiver, label, marker, reflected=None, bucket=5):
-    records = [p for p in sender.values() if p.marker == marker and
-               (reflected is None or (p.echo_key in reflected) == (reflected is not False))]
-    if reflected is False:
-        records = [p for p in sender.values() if p.marker == marker and p.echo_key not in summarize.reflection_set]
-    matched = sum(1 for p in records if p.key in receiver)
-    missing = len(records) - matched
-    ratio = 100 * missing / len(records) if records else None
-    return {"name": label, "sent": len(records), "received": matched,
-            "missing": missing, "unmatched_pct": ratio, "records": records}
-
 def pretty(result):
     pct = "n/a" if result["unmatched_pct"] is None else f'{result["unmatched_pct"]:.2f}%'
     return (f'{result["name"]:<35} {result["sent"]:>8} '
