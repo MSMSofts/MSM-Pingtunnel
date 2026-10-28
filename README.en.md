@@ -2,16 +2,24 @@
 
 **A lightweight, encrypted ICMP tunnel between exactly two Linux VPSs, with a five-question setup wizard.**
 
-[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.3.6](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.6)
+[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.3.7](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.7)
 
-![Version](https://img.shields.io/badge/version-3.3.6-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.3.7-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
 
 Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** between an **Iran-side VPS** and an **overseas VPS**. Local TCP or UDP traffic enters the Iran VPS, travels inside authenticated, encrypted ICMP packets, and is forwarded by the overseas VPS to its configured local service.
 
 **This is a transport layer—not a standalone VPN server.** Services such as Hysteria 2, s-ui or other TCP/UDP applications run and are configured separately.
 
-**Current release: 3.3.6** · Rust manager, Go core, schema **3**, secure wire **4** · **Reverse-first Auto:** Foreign starts ICMP polls; Direct is reserved for prolonged confirmed outages with client demand. Video latency improvements require measured live testing.
+**Current release: 3.3.7** · Rust manager, Go core, schema **3**, secure wire **4** · **Reverse-first Auto:** Foreign starts ICMP polls; Direct is reserved for prolonged confirmed outages with client demand. Video latency improvements require measured live testing.
 
+
+## Exact-match filtering of reflected encrypted DATA (v3.3.7)
+
+On a live overseas VPS, an inbound/outbound 10-second ICMP capture identified **1,453 byte-exact reflected Echo Replies among 2,047 inbound PTD4 responses**, matched to the foreign-origin Echo Requests using complete encrypted payload bytes and ICMP Echo ID/sequence. These Linux kernel reflections are **not new authenticated peer DATA**; the remaining 594 unmatched replies may carry valid Iran→Foreign QUIC ACKs and must not be filtered by marker alone.
+
+v3.3.7 tracks outgoing encrypted PTD4 signatures (SHA-256 over the **entire** ciphertext plus Echo ID and sequence) *before the raw socket send*, in a bounded **16,384-entry** ring with an **8-second** match window; failed writes cancel their registrations. Only a byte-exact reflected Type 0 Echo Reply from the already pinned peer IP is discarded before AEAD decryption. Different encrypted payloads, legitimate handshakes and foreign-origin Echo Requests remain unaffected. The manager now reports `Filtered exact PTD4 Echo reflections` and `Outbound PTD4 reflection cache entries` separately from actual authentication failures.
+
+No secure wire, encryption, reverse-first priority or poll schedule change. **Playback improvement is not assumed; verify on the deployed VPS pair**.
 
 ## BBR/QUIC short-stall reverse polling and recent queue-delay P95 (v3.3.6)
 
@@ -326,6 +334,7 @@ These features **do not guarantee uninterrupted VPN sessions**, live adaptation 
 
 | Version | Config schema | Wire format | Compatibility |
 | --- | --- | --- | --- |
+| **3.3.7** | 3 | **v4** (`PTH4/PTD4`) | Drop only exact tracked PTD4 kernel echoes; bounded full-ciphertext signatures and independent diagnostics |
 | **3.3.6** | 3 | **v4** (`PTH4/PTD4`) | BBR jitter-window return polling and rolling 128-send queue latency mean/P95 |
 | **3.3.5** | 3 | **v4** (`PTH4/PTD4`) | Correct sustained 500/s Reverse poll replay-cache capacity; bounded authentication nonce memory |
 | **3.3.4** | 3 | **v4** (`PTH4/PTD4`) | Bidirectional DATA-aware poll pacing and queue wait telemetry |
@@ -348,7 +357,7 @@ Upgrading both VPSs is recommended during a maintenance window. The manager pres
 
 > **Repository transfer note:** For updates, use the canonical installer URL under `MSMSofts/MSM-Pingtunnel` shown in the Install section. Earlier manager binaries may still use the former repository owner in the built-in `pingtunnel update` URL.
 
-[Version history](CHANGELOG.md) · [Pinned release](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.6) · [Rolling assets](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
+[Version history](CHANGELOG.md) · [Pinned release](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.7) · [Rolling assets](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
 
 ## Important paths
 
@@ -374,7 +383,7 @@ Upgrading both VPSs is recommended during a maintenance window. The manager pres
 
 ## Scope & limitations
 
-**Not provided in v3.3.6:** high availability, multiple VPSs, simultaneous TCP+UDP forwarding through one tunnel, guaranteed filtering resistance, or independent security audit. Reverse/Auto passed CI tests but requires a real two-VPS integration test. Previously, v3.2.4 did not support reverse forwarding; see the changelog.
+**Not provided in v3.3.7:** high availability, multiple VPSs, simultaneous TCP+UDP forwarding through one tunnel, guaranteed filtering resistance, or independent security audit. Reverse/Auto passed CI tests but requires a real two-VPS integration test. Previously, v3.2.4 did not support reverse forwarding; see the changelog.
 
 **Still required before high-assurance deployment:** testing two real VPSs with ICMP packet loss/jitter, Hysteria 2 end-to-end testing, restart/upgrade interruption testing, and independent cryptographic review.
 
