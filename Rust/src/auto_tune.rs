@@ -103,7 +103,7 @@ fn tunnel_samples() -> Option<Samples> {
     Some(sample)
 }
 
-fn calculate(s: Samples, large_packets_ok: bool) -> Option<Plan> {
+fn calculate(s: Samples, large_packets_ok: Option<bool>) -> Option<Plan> {
     if !s.rtt_ms.is_finite() || s.rtt_ms <= 0.0 || s.rtt_ms > 10000.0
         || !s.jitter_ms.is_finite() || s.jitter_ms < 0.0 || s.jitter_ms > 10000.0
         || !s.loss.is_finite() || !(0.0..0.5).contains(&s.loss)
@@ -119,7 +119,7 @@ fn calculate(s: Samples, large_packets_ok: bool) -> Option<Plan> {
     };
     // ICMP packet-size success is only a rough path-quality signal, NOT
     // a bandwidth measurement or an exact tunnel MTU discovery.
-    if !large_packets_ok {
+    if large_packets_ok == Some(false) {
         buffer_bytes = buffer_bytes.min(256*1024);
         window = window.min(4096);
     }
@@ -174,12 +174,16 @@ pub(crate) fn run() -> Result<()> {
         },
         (None, None) => return Err(failure("Insufficient network samples; no settings were changed.")),
     };
-    let large_ok = large_ping.is_some_and(|value| value.loss <= 0.2);
+    // When every ordinary echo probe is filtered, lack of a large-packet
+    // response says nothing about the encrypted tunnel's packet-size limit.
+    let large_ok = if normal_ping.is_some() {
+        Some(large_ping.is_some_and(|value| value.loss <= 0.2))
+    } else { None };
     let plan = calculate(quality, large_ok)
         .ok_or_else(|| failure("Loss, RTT or jitter is too high/invalid to tune safely; no settings changed."))?;
     println!("RTT {:.1} ms | jitter {:.1} ms | loss {:.1}% | large-echo {}",
         quality.rtt_ms, quality.jitter_ms, quality.loss*100.0,
-        if large_ok {"passed"} else {"unconfirmed"});
+        match large_ok { Some(true) => "passed", Some(false) => "not confirmed", None => "not tested" });
     println!("Profile: {} | TCP buffer {} KiB | window {} | resend {} ms | timeout {} s",
         plan.profile, plan.buffer_bytes/1024, plan.window, plan.resend_ms, plan.timeout_secs);
 
@@ -229,19 +233,20 @@ mod tests {
     #[test]
     fn choose_bounded_conservative_profiles() {
         let good = Samples { rtt_ms: 40.0, jitter_ms: 5.0, loss: 0.0, count: 8 };
-        let fast = calculate(good, true).unwrap();
+        let fast = calculate(good, Some(true)).unwrap();
         assert_eq!(fast.profile, "responsive");
         assert_eq!(fast.window, 12000);
-        assert_eq!(calculate(good, false).unwrap().buffer_bytes, 256*1024);
-        let degraded = calculate(Samples { rtt_ms: 650.0, jitter_ms: 130.0, loss: 0.2, count: 8 }, false).unwrap();
+        assert_eq!(calculate(good, Some(false)).unwrap().buffer_bytes, 256*1024);
+        assert_eq!(calculate(good, None).unwrap().buffer_bytes, 1024*1024);
+        let degraded = calculate(Samples { rtt_ms: 650.0, jitter_ms: 130.0, loss: 0.2, count: 8 }, Some(false)).unwrap();
         assert_eq!(degraded.profile, "conservative");
         assert!(degraded.resend_ms <= 2400);
         assert_eq!(degraded.timeout_secs, 120);
     }
     #[test]
     fn bad_or_insufficient_samples_never_tune() {
-        assert!(calculate(Samples { rtt_ms: f64::NAN, jitter_ms: 1.0, loss: 0.0, count: 8 }, true).is_none());
-        assert!(calculate(Samples { rtt_ms: 100.0, jitter_ms: 10.0, loss: 0.7, count: 8 }, true).is_none());
-        assert!(calculate(Samples { rtt_ms: 100.0, jitter_ms: 10.0, loss: 0.0, count: 1 }, true).is_none());
+        assert!(calculate(Samples { rtt_ms: f64::NAN, jitter_ms: 1.0, loss: 0.0, count: 8 }, None).is_none());
+        assert!(calculate(Samples { rtt_ms: 100.0, jitter_ms: 10.0, loss: 0.7, count: 8 }, None).is_none());
+        assert!(calculate(Samples { rtt_ms: 100.0, jitter_ms: 10.0, loss: 0.0, count: 1 }, None).is_none());
     }
 }
