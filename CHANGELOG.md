@@ -1,5 +1,17 @@
 # Changelog / تاریخچه تغییرات
 
+## [3.3.6](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.6) — BBR short-jitter Reverse polling and rolling queue-delay P95
+
+**Config schema: 3 · Secure wire: 4 · No application packet framing, encryption or BBR configuration change**
+
+- The foreign poller retains quick return opportunities for QUIC ACK/loss recovery during 1–3-second video stalls: sustained authenticated Iran→Foreign DATA keeps 2ms target pacing for up to 2.4s; sustained successfully written Foreign→Iran DATA keeps 4ms for up to 4.5s before stepping down to 6/12/25ms. Only actual DATA refreshes the windows; a single outbound frame cannot trigger 2ms polling; idle and handshake cadences stay at 250ms and 200ms.
+- Iran's Reverse queue diagnostics now include `reverse_mean_delivery_delay_ms`, `reverse_p95_delivery_delay_ms`, `reverse_delivery_delay_samples` and `reverse_very_delayed_frames`. The bounded 128-frame ring contains **successful socket writes only**. Mean and nearest-rank P95 cover the most recent successful sends, rather than the lifetime maximum.
+- Failed Echo Reply writes, empty polls and expired queued frames do not count as deliveries. Failed frames retain their original queue deadline and can be retried in order.
+- New tests cover steady active-but-idle sessions, short BBR jitters, gradual cool-down, idle recovery and transient 1-second queue-delay P95 spikes versus an all-healthy rolling window.
+- Retains v3.3.5's replay cache capacity fix and v3.3.3's kernel Echo reflection filtering, unchanged Reverse-first Auto behavior and emergency-only Direct fallback.
+- **Field limitation:** Better buffering is a hypothesis, not an established result. Compare video playback and P95 on both VPSs; low queue residence does not rule out ICMP loss or Hysteria's QUIC congestion behavior.
+
+
 ## [3.3.5](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.5) — Prevent Reverse poll replay-cache saturation
 
 **Config schema: 3 · Secure wire: 4 · No external packet layout or cryptographic changes**

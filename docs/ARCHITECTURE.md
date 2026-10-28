@@ -2,10 +2,16 @@
 
 [README فارسی](../README.md) · [English README](../README.en.md) · [Security policy](../SECURITY.md)
 
-**Version:** Manager 3.3.5 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
+**Version:** Manager 3.3.6 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
 
 **خلاصه:** Pingtunnel Manager فقط دو VPS دارد. کاربر به پورت TCP/UDP سرور ایران وصل می‌شود؛ هسته Go ترافیک را در ICMP رمزنگاری‌شده به VPS خارج می‌رساند و سرور خارج آن را به پورت سرویس محلی خودش تحویل می‌دهد. Rust تنها کارهای راه‌اندازی، ذخیره تنظیمات و کنترل systemd را انجام می‌دهد.
 
+
+## Bounded BBR jitter polling and rolling queue-delay distribution (v3.3.6)
+
+The foreign reverse poll scheduler requires real successfully written outbound DATA or authenticated incoming DATA before sustaining high poll rates. Its fast intervals now survive short 1–3s QUIC/BBR ACK-silence and congestion-recovery gaps without indefinitely polling at the 2ms ceiling: 2ms for 2.4s after bursts of incoming DATA; 4ms for up to 4.5s after outbound DATA bursts; then 6/12/25ms as those hints expire. Empty reflected PTR4 Echo Replies and mere socket existence never refresh these windows. Negotiation/idle pacing remains 200/250ms. These intervals are targets only and do not prevent ICMP carrier packet loss.
+
+In Iran, each successful encrypted-data Echo Reply stores its enqueue-to-socket-write residence time in a bounded 128-element ring. A status snapshot computes the integer mean and nearest-rank P95 over those recent sends, plus a cumulative counter of 1s+ send queue delays. The ring uses no per-frame allocation; read-time sorting is bounded. Failed writes preserve original enqueue timestamps and do not become successful measurements. A successful socket send does not prove end-to-end delivery; use these stats with foreign authenticated receive age and network capture when investigating stalls.
 
 ## Replay nonce cache capacity during high-rate Reverse polling (v3.3.5)
 
@@ -153,7 +159,7 @@ Rust CLI presents these through `pingtunnel security` and `pingtunnel performanc
 
 ~~~text
 Rust/
-  Cargo.toml             Rust manager package (3.3.5)
+  Cargo.toml             Rust manager package (3.3.6)
   src/main.rs            CLI, systemd and config generation
   src/setup.rs           Unified pairing wizard
 
@@ -196,7 +202,7 @@ cargo test --manifest-path Rust/Cargo.toml
 cargo build --release --manifest-path Rust/Cargo.toml
 ~~~
 
-Release builds are verified with SHA256 and a release manifest specifying **manager 3.3.5 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.3.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2); rolling assets may also exist for compatibility.
+Release builds are verified with SHA256 and a release manifest specifying **manager 3.3.6 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.3.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2); rolling assets may also exist for compatibility.
 
 ## 8. Compatibility contract and limitations
 

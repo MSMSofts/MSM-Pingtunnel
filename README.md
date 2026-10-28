@@ -2,16 +2,24 @@
 
 **یک تونل ICMP رمزنگاری‌شده، دو سرور، راه‌اندازی ساده و مدیریت سبک.**
 
-[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.3.5](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.5)
+[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.3.6](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.6)
 
-![Version](https://img.shields.io/badge/version-3.3.5-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.3.6-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
 
 **Pingtunnel Manager** ابزاری برای نصب، جفت‌سازی، مدیریت و پایش یک تونل مبتنی بر **ICMP** میان **یک VPS ایران و یک VPS خارج** است. ترافیک برنامه‌های TCP یا UDP ابتدا وارد سرور ایران می‌شود، از طریق ICMP رمزنگاری‌شده به سرور خارج می‌رسد و در نهایت به سرویس محلی موردنظر تحویل داده می‌شود.
 
 این پروژه **به‌تنهایی سرویس VPN یا جایگزین Hysteria 2، Xray و s-ui نیست**؛ بلکه لایهٔ انتقال میان دو سرور را فراهم می‌کند.
 
-> **نسخه فعلی: 3.3.5** — مدیریت Rust و هسته Go، Config Schema 3 و Wire v4. جهت پیش‌فرض **Auto با اولویت ثابت Reverse** است؛ Direct فقط در شرایط اختلال طولانی و تقاضای واقعی فعال می‌شود. بهبود سرعتِ این نسخه نیازمند اندازه‌گیری میدانی است.
+> **نسخه فعلی: 3.3.6** — مدیریت Rust و هسته Go، Config Schema 3 و Wire v4. جهت پیش‌فرض **Auto با اولویت ثابت Reverse** است؛ Direct فقط در شرایط اختلال طولانی و تقاضای واقعی فعال می‌شود. بهبود سرعتِ این نسخه نیازمند اندازه‌گیری میدانی است.
 
+
+## پایداری Poll در وقفه‌های کوتاه BBR و تحلیل P95 — نسخهٔ 3.3.6
+
+در ترافیک واقعی ویدیو/QUIC، وقفهٔ ۱ تا ۳ ثانیه‌ای می‌تواند با ACKهای تأخیری یا بازیابی ازدحام همراه باشد. در این نسخه، فقط پس از مشاهدهٔ **بسته‌های واقعی DATA** در هر سمت، بازهٔ گرمِ Poll معکوس کمی طولانی‌تر حفظ می‌شود: ۲ میلی‌ثانیه بعد از جریان پرتعداد برگشتی تا حدود ۲٫۴ ثانیه، و ۴ میلی‌ثانیه بعد از جریان پرتعداد خارج→ایران تا حدود ۴٫۵ ثانیه. سپس به‌ترتیب با مراحل ۶/۱۲/۲۵ میلی‌ثانیه به حالت آرام برمی‌گردد؛ ۲۵۰ میلی‌ثانیه برای بیکاری و ۲۰۰ میلی‌ثانیه برای مذاکره ثابت‌اند. این مقادیر هدف زمان‌بندی هستند، نه تضمین Packet Loss یا سرعت شبکه.
+
+در `sudo pingtunnel security` روی ایران، آمار **میانگین و P95 زمان ماندن در صفِ ۱۲۸ ارسال موفق اخیر**، تعداد نمونه‌ها و شمارندهٔ تجمعی ارسالهای با انتظار حداقل یک ثانیه در دسترس است. خطای نوشتن Echo Reply در این نمونه‌ها وارد نمی‌شود. این متریک‌ها به **موفقیت نوشتن در Socket** اشاره دارند، نه تأیید دریافت توسط سرور خارج. هنگام توقف ویدیو، اگر P95 صف پایین است ولی ویدیو مکث می‌کند، باید افت ICMP در مسیر، MTU و رفتار BBR را بررسی کرد.
+
+قالب پروتکل Wire v4، تنظیمات BBR کاربر، Replay protection و اولویت Reverse تغییر نکرده‌اند. برای ارزیابی اثر واقعی این نسخه باید هر دو VPS ارتقا یابند و مکث Shorts دوباره سنجیده شود.
 
 ## رفع وقفه‌های دوره‌ای Poll در نسخهٔ 3.3.5
 
@@ -322,6 +330,7 @@ SECURITY & HEALTH
 
 | نسخه | تنظیمات | پروتکل بین VPSها | سازگاری |
 | --- | --- | --- | --- |
+| **3.3.6** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | پنجرهٔ تطبیقی Poll برای مکث کوتاه BBR و میانگین/P95 تأخیر صف ۱۲۸ ارسال موفق اخیر |
 | **3.3.5** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | رفع اشباع حافظهٔ Replay هنگام ۵۰۰ Poll بر ثانیه؛ ثبت دفعات رد درخواست و تست ۱۰هزار Poll معتبر |
 | **3.3.4** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | سرعت تطبیقی متناسب با جریان ویدیو و اندازه‌گیری واقعی تأخیر صف |
 | **3.3.3** | `schema_version=3` | Wire v4 (`PTH4/PTD4`) | حذف بازتاب Echo Poll از رمزگشا، ثبت آمار مستقل، تست‌های بدون تغییر Wire |
@@ -343,7 +352,7 @@ SECURITY & HEALTH
 
 > **نکته پس از انتقال مخزن:** برای به‌روزرسانی، فعلاً از دستور نصب با نشانی جدید `MSMSofts/MSM-Pingtunnel` در بخش «نصب سریع» استفاده کن. برخی باینری‌های منتشرشده پیش از انتقال، ممکن است در فرمان داخلی `pingtunnel update` هنوز به نشانی قدیمی مراجعه کنند.
 
-[جزئیات تغییرات](CHANGELOG.md) · [نسخه ثابت 3.3.5](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.5) · [نسخه rolling](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
+[جزئیات تغییرات](CHANGELOG.md) · [نسخه ثابت 3.3.6](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.6) · [نسخه rolling](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/rust-latest)
 
 ## مسیر فایل‌ها
 
@@ -366,7 +375,7 @@ SECURITY & HEALTH
 
 ## محدودیت‌های فعلی و برنامه توسعه
 
-**محدودیت‌های نسخه 3.3.5:** چند VPS و HA، انتقال هم‌زمان TCP و UDP در یک نمونه، تضمین مقابله با DoS حجمی یا فیلترینگ و ممیزی مستقل رمزنگاری هنوز ارائه نشده‌اند. قابلیت Reverse/Auto در CI تست شده ولی تست میدانی دو VPS لازم است.
+**محدودیت‌های نسخه 3.3.6:** چند VPS و HA، انتقال هم‌زمان TCP و UDP در یک نمونه، تضمین مقابله با DoS حجمی یا فیلترینگ و ممیزی مستقل رمزنگاری هنوز ارائه نشده‌اند. قابلیت Reverse/Auto در CI تست شده ولی تست میدانی دو VPS لازم است.
 
 **بررسی‌های ضروری پیش از استفاده گسترده:** آزمایش ICMP روی دو VPS واقعی، تست عملی Hysteria 2، تزریق Packet Loss/Jitter، آزمون Restart و ارتقای دوطرفه، و ممیزی مستقل پروتکل رمزنگاری.
 

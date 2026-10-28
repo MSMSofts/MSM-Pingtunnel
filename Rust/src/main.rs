@@ -509,6 +509,9 @@ fn show_security_status() -> Result<()> {
         println!("  Reverse oldest waiting frame: {} ms",report["reverse_oldest_queue_age_ms"]);
         println!("  Reverse last/max send queue delay: {} / {} ms",report["reverse_last_delivery_delay_ms"],report["reverse_max_delivery_delay_ms"]);
         println!("  Reverse delivered/slow (>250ms) frames: {} / {}",report["reverse_delivered_frames"],report["reverse_delayed_frames"]);
+        println!("  Reverse very slow (>1s) frames: {}",report["reverse_very_delayed_frames"]);
+        println!("  Reverse successful send queue delay mean/P95 (last 128): {} / {} ms ({} samples)",
+            report["reverse_mean_delivery_delay_ms"],report["reverse_p95_delivery_delay_ms"],report["reverse_delivery_delay_samples"]);
         println!("  Reverse ICMP reply write failures: {}",report["reverse_write_failures"]);
         println!("  Filtered kernel PTR4 Echo reflections: {}",report["reverse_poll_echo_reflections"]);
         if let Some(drops)=report["reverse_replay_capacity_rejections"].as_u64() {
