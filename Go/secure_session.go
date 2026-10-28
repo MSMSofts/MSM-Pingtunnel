@@ -506,6 +506,10 @@ type secureStatus struct{
  ReverseWriteFailures uint64 `json:"reverse_write_failures"`
  ReversePollEchoReflections uint64 `json:"reverse_poll_echo_reflections"`
  ReverseDataEchoReflections uint64 `json:"reverse_data_echo_reflections"`
+ ReversePingEchoReflections uint64 `json:"reverse_ping_echo_reflections"`
+ ReverseOtherEchoReflections uint64 `json:"reverse_other_echo_reflections"`
+ ReverseEchoCacheExpired uint64 `json:"reverse_echo_cache_expired"`
+ ReverseEchoCacheCapacityEvicted uint64 `json:"reverse_echo_cache_capacity_evicted"`
  ReverseDataEchoCacheEntries int `json:"reverse_data_echo_cache_entries"`
  ReverseReplayCapacityRejects uint64 `json:"reverse_replay_capacity_rejections"`
  ReversePollIntervalMs int `json:"reverse_poll_interval_ms"`
@@ -560,6 +564,10 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.ReverseWriteFailures=diag.FailedReplies
  report.ReversePollEchoReflections=diag.ReflectedPolls
  report.ReverseDataEchoReflections=diag.ReflectedDataEchoes
+ report.ReversePingEchoReflections=diag.ReflectedPingEchoes
+ report.ReverseOtherEchoReflections=diag.ReflectedOtherEchoes
+ report.ReverseEchoCacheExpired=diag.ExpiredEchoSignatures
+ report.ReverseEchoCacheCapacityEvicted=diag.CapacityEvictedEchoSignatures
  report.ReverseDataEchoCacheEntries=diag.OutboundEchoCacheEntries
  report.ReverseReplayCapacityRejects=diag.ReplayCapacityRejects
  report.ReversePollIntervalMs=diag.PollIntervalMillis
