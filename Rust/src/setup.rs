@@ -106,7 +106,7 @@ pub(crate) fn wizard() -> Result<()> {
     let port: u16 = prompt(label, &suggested.to_string())?.parse().map_err(|_| failure("Port must be numeric."))?;
     if port == 0 {return Err(failure("Port must be in 1..65535."));}
 
-    let cfg = json!({
+    let mut cfg = json!({
         "schema_version":SCHEMA,
         "region":region,
         "peer_ip":peer,
@@ -117,6 +117,17 @@ pub(crate) fn wizard() -> Result<()> {
         "memory_mb":0,
         "autostart":true
     });
+    // Keep tested performance settings when setup is rerun for the same
+    // physical peer and transport; a changed path needs a fresh tune.
+    if let Some(ref old) = previous {
+        if get_string(old,"region")==Some(region)
+            && get_string(old,"peer_ip")==Some(peer.as_str())
+            && get_string(old,"transport")==Some(transport) {
+            for key in ["tcp_bs","tcp_mw","tcp_rst","timeout"] {
+                if let Some(value)=old.get(key) { cfg[key]=value.clone(); }
+            }
+        }
+    }
     validate(&cfg)?;
     println!("\nSummary:");
     println!("  This server: {region} | Peer: {peer}");
