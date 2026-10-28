@@ -73,11 +73,12 @@ def simulate():
     # Of 10 kernel PTD4 mirror Echo Replies, nine arrive at Foreign. Since
     # Echo type differs from outbound F8, match by ICMP ID/seq/ciphertext.
     for n,b in enumerate(data[:10]):
-        echo = bytearray(b)
-        echo[14+20] = 0  # ICMP Echo Reply, keep exact ID/seq/payload
-        iran.append((EPOCH+SKEW+int((30+n*0.1)*SEC),bytes(echo)))
+        # Linux reply reverses IPv4 source/destination while copying the
+        # complete ICMP Echo ID, sequence and encrypted payload verbatim.
+        echo = packet(I,F,0,100+n,b"PTD4"+bytes([n])*48)
+        iran.append((EPOCH+SKEW+int((30+n*0.1)*SEC),echo))
         if n>0:
-            foreign.append((EPOCH+int((30+n*0.1)*SEC)+PROP,bytes(echo)))
+            foreign.append((EPOCH+int((30+n*0.1)*SEC)+PROP,echo))
     # Kernel responses to some outbound PTR4 polls.
     for n in range(15):
         b = packet(I,F,0,300+n,b"PTR4"+bytes([n])*32)
