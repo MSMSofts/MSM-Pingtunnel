@@ -1,5 +1,18 @@
 # Changelog / تاریخچه تغییرات
 
+## [3.3.8](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.8) — Exact encrypted PING echo filtering and active TTL signature pruning
+
+**Schema 3 · Secure wire v4 · No encryption, protocol layout, Reverse-first or BBR changes**
+
+- In a 47-second foreign-VPS playback test, the v3.3.7 PTD4 DATA reflection filter removed **4,277** exact Echo reflections while **34 authentication errors** remained (~0.72 errors/s). The foreign host periodically emits authenticated PING messages as encrypted PTD4 Echo Requests; v3.3.7 tracked only DATA, leaving PING and other secure-message kernel reflections unmatched. This is a plausible error source, not yet independently proven.
+- The foreign sender now stages an exact **full-ciphertext SHA-256 + ICMP ID + Echo sequence** signature for all outbound **encrypted PTD4 Echo Requests** (DATA, PING, other). Matching still requires the correct pinned peer address, Type 0 Echo Reply and an 8-second TTL. Different encrypted Iran→Foreign frames, including Hysteria/QUIC ACKs, continue to pass through normal AEAD verification.
+- Crucially, **only real outbound DATA** accelerates adaptive reverse polling; tracking PING/KICK does not alter the existing 2/4/6/12/25 ms DATA-driven schedule.
+- Fixed the stale cache diagnostic: a bounded 16,384-entry chronological ring now reclaims expired/canceled oldest signatures on send, receive and status reads, O(1) amortized. Full-capacity eviction still removes the oldest remaining signature. Failed socket writes cancel their registrations.
+- Separate diagnostics: `reverse_data_echo_reflections`, `reverse_ping_echo_reflections`, `reverse_other_echo_reflections`, `reverse_echo_cache_expired`, `reverse_echo_cache_capacity_evicted`, and active `reverse_data_echo_cache_entries`.
+- Go regressions test Ping-vs-DATA classification, exact type/id/sequence/ciphertext matching, no accidental BBR poll acceleration, TTL expiration under steady load and idle, bounded capacity eviction, failure rollback and concurrent tracking under race detection.
+- **Limit:** An improved error rate or video playback must be verified after installing on both real VPSs. Nothing here proves zero ICMP loss or fixes all QUIC stalls.
+
+
 ## [3.3.7](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.7) — Discard only exact Linux PTD4 ciphertext Echo reflections
 
 **Schema 3 · Secure wire v4 · No packet, crypto, Reverse-first or BBR configuration changes**

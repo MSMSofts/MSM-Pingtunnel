@@ -52,8 +52,8 @@ const (
     // Rolling successful Echo Reply send-delay history. Fixed allocation and
     // bounded sorting cost when the once-per-second status snapshot is read.
     reverseDeliveryWindow = 128
-    // Track recent outbound encrypted Echo Requests to distinguish exact
-    // Linux-generated DATA reflections from legitimate Iran->Foreign DATA.
+    // Track recent outbound encrypted Echo Requests (DATA and PING) to
+    // distinguish byte-identical Linux echoes from legitimate peer DATA.
     reverseEchoTrackingWindow = 8 * time.Second
     reverseEchoTrackingCapacity = 16384
 )
@@ -73,9 +73,18 @@ type reverseSentEchoSignature struct {
     seq uint16
     ciphertextDigest [32]byte
 }
+type reverseEchoKind uint8
+
+const (
+    reverseEchoDATA reverseEchoKind = iota
+    reverseEchoPING
+    reverseEchoOther
+)
+
 type reverseSentEchoRecord struct {
     signature reverseSentEchoSignature
     at time.Time
+    kind reverseEchoKind
 }
 
 func reverseEchoSignature(id, seq int, payload []byte) reverseSentEchoSignature {
@@ -120,11 +129,17 @@ type reverseTransport struct {
     failedReplies uint64
     reflectedPolls uint64
     reflectedDataEchoes uint64
-    // A bounded ring evicts oldest entries in O(1), without retaining
-    // ciphertext. Full-digest comparison happens only for PTD4 Echo Replies.
-    outboundEchoes map[reverseSentEchoSignature]time.Time
+    reflectedPingEchoes uint64
+    reflectedOtherEchoes uint64
+    expiredEchoSignatures uint64
+    capacityEvictedEchoSignatures uint64
+    // The ring is chronological, bounded, and contains no ciphertext.
+    // A head/tail cursor lets us prune expired signatures in O(1)
+    // amortized time instead of retaining dead entries until wraparound.
+    outboundEchoes map[reverseSentEchoSignature]reverseSentEchoRecord
     outboundEchoRing [reverseEchoTrackingCapacity]reverseSentEchoRecord
-    outboundEchoNext int
+    outboundEchoHead int
+    outboundEchoCount int
     pollPeriodMillis int
     queuePeak int
 }
@@ -386,49 +401,93 @@ func (r *reverseTransport) noteReflectedProbe() {
     r.mu.Unlock()
 }
 
-// Stage the signature BEFORE the raw socket write, because the peer's Linux
-// kernel may echo the request before WriteTo returns. Return the timestamp
-// token so a failed write can unregister only the matching registration.
-func (r *reverseTransport) stageOutboundDataEcho(id,seq int,payload []byte,now time.Time) (reverseSentEchoSignature,time.Time) {
+// A peer may reflect an encrypted Echo Request without carrying any new
+// authenticated payload. Prune chronological tracking entries, including
+// canceled writes, whenever a send, receive or status snapshot touches this
+// cache. This keeps the map empty after eight seconds of real inactivity.
+func (r *reverseTransport) pruneOutboundEchoesLocked(now time.Time) {
+    for r.outboundEchoCount>0 {
+        record:=r.outboundEchoRing[r.outboundEchoHead]
+        active,ok:=r.outboundEchoes[record.signature]
+        expired:=!now.Before(record.at) && now.Sub(record.at)>reverseEchoTrackingWindow
+        // A canceled or replaced record at the head can be reclaimed at
+        // once, without blocking later entries.
+        if ok && active.at.Equal(record.at) && !expired {break}
+        if ok && active.at.Equal(record.at) {
+            delete(r.outboundEchoes,record.signature)
+            if expired {r.expiredEchoSignatures++}
+        }
+        r.outboundEchoRing[r.outboundEchoHead]=reverseSentEchoRecord{}
+        r.outboundEchoHead=(r.outboundEchoHead+1)%reverseEchoTrackingCapacity
+        r.outboundEchoCount--
+    }
+}
+
+// Stage BEFORE socket WriteTo: the Linux echo may be delivered before the
+// write returns. Do not retain plaintext, only a full-ciphertext SHA-256
+// digest with the original ICMP Echo ID and sequence.
+func (r *reverseTransport) stageOutboundEcho(id,seq int,payload []byte,kind reverseEchoKind,now time.Time) (reverseSentEchoSignature,time.Time) {
     key:=reverseEchoSignature(id,seq,payload)
     r.mu.Lock()
     defer r.mu.Unlock()
     if r.outboundEchoes==nil {
-        r.outboundEchoes=make(map[reverseSentEchoSignature]time.Time)
+        r.outboundEchoes=make(map[reverseSentEchoSignature]reverseSentEchoRecord)
     }
-    previous:=r.outboundEchoRing[r.outboundEchoNext]
-    if !previous.at.IsZero() {
-        if at,ok:=r.outboundEchoes[previous.signature];ok && at==previous.at {
-            delete(r.outboundEchoes,previous.signature)
+    // Concurrent sends can acquire the lock in a different order from their
+    // timestamp capture. Keep the FIFO timestamps monotone for safe expiry.
+    if r.outboundEchoCount>0 {
+        last:=r.outboundEchoRing[(r.outboundEchoHead+r.outboundEchoCount-1)%reverseEchoTrackingCapacity]
+        if now.Before(last.at) {now=last.at}
+    }
+    r.pruneOutboundEchoesLocked(now)
+    if r.outboundEchoCount==reverseEchoTrackingCapacity {
+        old:=r.outboundEchoRing[r.outboundEchoHead]
+        if current,ok:=r.outboundEchoes[old.signature];ok && current.at.Equal(old.at) {
+            delete(r.outboundEchoes,old.signature)
+            r.capacityEvictedEchoSignatures++
         }
+        r.outboundEchoRing[r.outboundEchoHead]=reverseSentEchoRecord{}
+        r.outboundEchoHead=(r.outboundEchoHead+1)%reverseEchoTrackingCapacity
+        r.outboundEchoCount--
     }
-    r.outboundEchoRing[r.outboundEchoNext]=reverseSentEchoRecord{signature:key,at:now}
-    r.outboundEchoNext=(r.outboundEchoNext+1)%reverseEchoTrackingCapacity
-    r.outboundEchoes[key]=now
+    record:=reverseSentEchoRecord{signature:key,at:now,kind:kind}
+    slot:=(r.outboundEchoHead+r.outboundEchoCount)%reverseEchoTrackingCapacity
+    r.outboundEchoRing[slot]=record
+    r.outboundEchoCount++
+    r.outboundEchoes[key]=record
     return key,now
+}
+
+// Keep narrow helpers used by existing DATA regression tests.
+func (r *reverseTransport) stageOutboundDataEcho(id,seq int,payload []byte,now time.Time) (reverseSentEchoSignature,time.Time) {
+    return r.stageOutboundEcho(id,seq,payload,reverseEchoDATA,now)
 }
 
 func (r *reverseTransport) cancelOutboundDataEcho(key reverseSentEchoSignature,at time.Time) {
     r.mu.Lock()
     defer r.mu.Unlock()
-    if recorded,ok:=r.outboundEchoes[key];ok && recorded==at {
+    if record,ok:=r.outboundEchoes[key];ok && record.at.Equal(at) {
         delete(r.outboundEchoes,key)
     }
 }
 
-// Match only a byte-exact echo of our previously transmitted secure DATA.
-// A genuine peer frame uses independent AEAD direction keys and will not
-// match the sender ciphertext digest. This does not attempt to decrypt,
-// replay or alter data; it only eliminates our own reflected packets.
+// Filter only an exact reflection of a recent foreign-origin encrypted
+// request. The current Iran->Foreign AEAD has independent direction keys;
+// real ACK frames must not be discarded based on the PTD4 prefix alone.
 func (r *reverseTransport) filterReflectedDataEcho(id,seq int,payload []byte,now time.Time) bool {
     key:=reverseEchoSignature(id,seq,payload)
     r.mu.Lock()
     defer r.mu.Unlock()
-    at,ok:=r.outboundEchoes[key]
-    if !ok || now.Before(at) || now.Sub(at)>reverseEchoTrackingWindow {
+    r.pruneOutboundEchoesLocked(now)
+    record,ok:=r.outboundEchoes[key]
+    if !ok || now.Before(record.at) || now.Sub(record.at)>reverseEchoTrackingWindow {
         return false
     }
-    r.reflectedDataEchoes++
+    switch record.kind {
+    case reverseEchoDATA: r.reflectedDataEchoes++
+    case reverseEchoPING: r.reflectedPingEchoes++
+    default: r.reflectedOtherEchoes++
+    }
     return true
 }
 func (r *reverseTransport) recordPollInterval(period time.Duration) {
@@ -533,7 +592,11 @@ type reverseDiagnostics struct {
     FailedReplies uint64
     ReflectedPolls uint64
     ReflectedDataEchoes uint64
+    ReflectedPingEchoes uint64
+    ReflectedOtherEchoes uint64
     OutboundEchoCacheEntries int
+    ExpiredEchoSignatures uint64
+    CapacityEvictedEchoSignatures uint64
     ReplayCapacityRejects uint64
     PollIntervalMillis int
     LastUsefulFrameAgeSeconds int64
@@ -552,6 +615,7 @@ type reverseDiagnostics struct {
 }
 func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
     r.mu.Lock();defer r.mu.Unlock()
+    r.pruneOutboundEchoesLocked(now)
     age:=int64(-1)
     if !r.lastUsefulFrame.IsZero() {age=int64(now.Sub(r.lastUsefulFrame).Seconds());if age<0{age=0}}
     oldest:=int64(0)
@@ -570,7 +634,11 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         QueuePeak:r.queuePeak,QueueDrops:r.drops,FailedReplies:r.failedReplies,
         ReflectedPolls:r.reflectedPolls,
         ReflectedDataEchoes:r.reflectedDataEchoes,
+        ReflectedPingEchoes:r.reflectedPingEchoes,
+        ReflectedOtherEchoes:r.reflectedOtherEchoes,
         OutboundEchoCacheEntries:len(r.outboundEchoes),
+        ExpiredEchoSignatures:r.expiredEchoSignatures,
+        CapacityEvictedEchoSignatures:r.capacityEvictedEchoSignatures,
         ReplayCapacityRejects:r.replayCapacityRejects,
         PollIntervalMillis:r.pollPeriodMillis,LastUsefulFrameAgeSeconds:age,
         FallbackCount:r.fallbackCount,FallbackReason:r.lastFallbackReason,
