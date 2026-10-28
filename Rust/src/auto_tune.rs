@@ -108,14 +108,18 @@ fn calculate(s: Samples, large_packets_ok: Option<bool>) -> Option<Plan> {
         || !s.jitter_ms.is_finite() || s.jitter_ms < 0.0 || s.jitter_ms > 10000.0
         || !s.loss.is_finite() || !(0.0..0.5).contains(&s.loss)
         || s.count < 3 { return None; }
-    let stressed = s.loss >= 0.15 || s.rtt_ms >= 350.0 || s.jitter_ms >= 110.0;
-    let moderate = s.loss >= 0.04 || s.rtt_ms >= 160.0 || s.jitter_ms >= 40.0;
+    // High baseline RTT alone does not justify shrinking the TCP window:
+    // long-haul paths often have high bandwidth-delay products.
+    let stressed = s.loss >= 0.15
+        || (s.jitter_ms >= 80.0 && s.jitter_ms >= s.rtt_ms*0.5);
+    let moderate = s.loss >= 0.04
+        || (s.jitter_ms >= 30.0 && s.jitter_ms >= s.rtt_ms*0.25);
     let (profile, mut buffer_bytes, mut window) = if stressed {
-        ("conservative", 256*1024, 2048)
+        ("conservative", 256*1024, 4096)
     } else if moderate {
-        ("balanced", 512*1024, 4096)
+        ("balanced", 512*1024, 8192)
     } else {
-        ("responsive", 1024*1024, 12000)
+        ("responsive", 1024*1024, 20000)
     };
     // ICMP packet-size success is only a rough path-quality signal, NOT
     // a bandwidth measurement or an exact tunnel MTU discovery.
@@ -126,7 +130,7 @@ fn calculate(s: Samples, large_packets_ok: Option<bool>) -> Option<Plan> {
     let multiplier = if s.loss >= 0.04 { 1.3 } else { 1.0 };
     let resend_ms = ((s.rtt_ms + 4.0*s.jitter_ms + 80.0)*multiplier)
         .round().clamp(350.0, 2400.0) as u64;
-    let timeout_secs = if stressed { 120 } else if moderate { 90 } else { 60 };
+    let timeout_secs = if stressed { 120 } else if moderate || s.rtt_ms >= 350.0 { 90 } else { 60 };
     Some(Plan { profile, buffer_bytes, window, resend_ms, timeout_secs })
 }
 
@@ -235,7 +239,12 @@ mod tests {
         let good = Samples { rtt_ms: 40.0, jitter_ms: 5.0, loss: 0.0, count: 8 };
         let fast = calculate(good, Some(true)).unwrap();
         assert_eq!(fast.profile, "responsive");
-        assert_eq!(fast.window, 12000);
+        assert_eq!(fast.window, 20000);
+        // A stable long-distance link should not lose its send window.
+        let distant = Samples { rtt_ms: 500.0, jitter_ms: 12.0, loss: 0.0, count: 10 };
+        let distant_plan = calculate(distant, None).unwrap();
+        assert_eq!(distant_plan.window, 20000);
+        assert_eq!(distant_plan.timeout_secs, 90);
         assert_eq!(calculate(good, Some(false)).unwrap().buffer_bytes, 256*1024);
         assert_eq!(calculate(good, None).unwrap().buffer_bytes, 1024*1024);
         let degraded = calculate(Samples { rtt_ms: 650.0, jitter_ms: 130.0, loss: 0.2, count: 8 }, Some(false)).unwrap();
