@@ -731,6 +731,19 @@ fn main() {
 #[cfg(test)]
 mod tests{
     use super::*;
+
+    #[test]
+    fn uninstall_helpers_remove_files_and_directories_idempotently() {
+        let root = std::env::temp_dir().join(format!("pingtunnel-uninstall-test-{}", process::id()));
+        let file = root.join("stale-runtime.json");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&file, b"stale").unwrap();
+        remove_known_file(file.to_str().unwrap()).unwrap();
+        remove_known_file(file.to_str().unwrap()).unwrap();
+        assert!(!file.exists());
+        remove_known_dir(root.to_str().unwrap()).unwrap();
+        remove_known_dir(root.to_str().unwrap()).unwrap();
+    }
     fn conf(region:&str,protocol:&str,port:u16)->Value{
         json!({"schema_version":3,"region":region,"peer_ip":"198.51.100.45",
             "pair_key":STANDARD.encode([7u8;32]),
