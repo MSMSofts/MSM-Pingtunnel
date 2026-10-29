@@ -2,18 +2,18 @@
 
 **یک تونل ICMP رمزنگاری‌شده، دو سرور، راه‌اندازی ساده و مدیریت سبک.**
 
-[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.3.8](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.8)
+[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.3.9](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.9)
 
-![Version](https://img.shields.io/badge/version-3.3.8-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.3.9-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
 
 **Pingtunnel Manager** ابزاری برای نصب، جفت‌سازی، مدیریت و پایش یک تونل مبتنی بر **ICMP** میان **یک VPS ایران و یک VPS خارج** است. ترافیک برنامه‌های TCP یا UDP ابتدا وارد سرور ایران می‌شود، از طریق ICMP رمزنگاری‌شده به سرور خارج می‌رسد و در نهایت به سرویس محلی موردنظر تحویل داده می‌شود.
 
 این پروژه **به‌تنهایی سرویس VPN یا جایگزین Hysteria 2، Xray و s-ui نیست**؛ بلکه لایهٔ انتقال میان دو سرور را فراهم می‌کند.
 
-> **نسخه فعلی: 3.3.8** — مدیریت Rust و هسته Go، Config Schema 3 و Wire v4. جهت پیش‌فرض **Auto با اولویت ثابت Reverse** است؛ Direct فقط در شرایط اختلال طولانی و تقاضای واقعی فعال می‌شود. بهبود سرعتِ این نسخه نیازمند اندازه‌گیری میدانی است.
+> **نسخهٔ بعدی: 3.3.9** — مدیریت Rust و هسته Go، Config Schema 3 و Wire v4. جهت پیش‌فرض **Auto با اولویت ثابت Reverse** است؛ Direct فقط در شرایط اختلال طولانی و تقاضای واقعی فعال می‌شود. بهبود سرعتِ این نسخه نیازمند اندازه‌گیری میدانی است.
 
 
-## تنظیم خودکار کیفیت مسیر (Auto Tune — در حال بررسی)
+## تنظیم خودکار TCP/UDP بر مبنای ارتباط احرازشده (Auto Tune — نسخهٔ 3.3.9)
 
 قابلیت Auto Tune برای **تانل TCP و UDP سمت سرور ایران** از گزینهٔ **15) Auto Tune** یا دستور `sudo pingtunnel auto-tune` قابل اجراست. برای پیش‌نمایش بدون ذخیره یا راه‌اندازی مجدد، از `sudo pingtunnel auto-tune --dry-run` استفاده کنید. پیش از اجرا باید نشست رمزنگاری‌شده با سرور مقابل احراز هویت شده باشد. برنامه تنها بر اساس حداقل ۸ نمونهٔ RTT **احراز هویت‌شدهٔ تانل** در پنجرهٔ متحرک ۲ دقیقه‌ای (آخرین نمونه در ۳۵ ثانیهٔ گذشته) تصمیم می‌گیرد. Ping معمولی و بستهٔ بزرگ‌تر فقط برای تشخیص نمایش داده می‌شوند و روی انتخاب تنظیمات اثر ندارند. در صورت نبود نمونهٔ کافی یا شرایط بسیار نامناسب، هیچ تغییری اعمال نمی‌کند.
 
