@@ -91,14 +91,14 @@ fn tunnel_samples() -> Option<Samples> {
 }
 
 fn parse_tunnel_samples(value: &Value) -> Option<Samples> {
-    let count = usize::try_from(value["rtt_samples"].as_u64()?).ok()?;
-    // A freshly rewritten status file can still contain hour-old RTT values.
-    // Only authenticated pongs observed in the last 35 seconds are useful.
+    // At least eight actual Pongs in the last two minutes, not merely eight
+    // since process startup. Ignore stale smoothed history entirely.
+    let count = usize::try_from(value["recent_rtt_samples"].as_u64()?).ok()?;
     let age = value["last_rtt_sample_age_seconds"].as_i64()?;
     if count < 8 || !(0..=35).contains(&age) { return None; }
     let sample = Samples {
-        rtt_ms: value["rtt_ms"].as_f64()?,
-        jitter_ms: value["jitter_ms"].as_f64()?,
+        rtt_ms: value["recent_rtt_ms"].as_f64()?,
+        jitter_ms: value["recent_jitter_ms"].as_f64()?,
         loss: value["probe_loss_estimate"].as_f64()?,
         count,
     };
@@ -226,7 +226,7 @@ pub(crate) fn run(dry_run: bool) -> Result<()> {
     // Raw ICMP echoes may be filtered or independently rate-limited, and
     // neither proves encrypted-tunnel delivery. They are diagnostic only.
     let quality = baseline.ok_or_else(|| failure(
-        "Insufficient recent authenticated RTT samples (need 8, last within 35s); no settings changed."))?;
+        "Insufficient authenticated RTT samples (need 8 within 120s; last within 35s); no settings changed."))?;
     if let Some(echo)=normal_ping {
         println!("Ordinary echo diagnostic: RTT {:.1} ms, loss {:.1}% (not used for tuning).",
             echo.rtt_ms,echo.loss*100.0);
@@ -348,7 +348,7 @@ mod tests {
     #[test]
     fn refuses_stale_or_insufficient_authenticated_rtt_samples() {
         let mut status=json!({
-            "rtt_samples":12, "rtt_ms":84.0, "jitter_ms":11.0,
+            "recent_rtt_samples":12, "recent_rtt_ms":84.0, "recent_jitter_ms":11.0,
             "probe_loss_estimate":0.03, "last_rtt_sample_age_seconds":2
         });
         assert!(parse_tunnel_samples(&status).is_some());
@@ -357,9 +357,9 @@ mod tests {
         status["last_rtt_sample_age_seconds"]=json!(-1);
         assert!(parse_tunnel_samples(&status).is_none());
         status["last_rtt_sample_age_seconds"]=json!(4);
-        status["rtt_samples"]=json!(3);
+        status["recent_rtt_samples"]=json!(3);
         assert!(parse_tunnel_samples(&status).is_none());
-        status["rtt_samples"]=json!(12);
+        status["recent_rtt_samples"]=json!(12);
         status.as_object_mut().unwrap().remove("last_rtt_sample_age_seconds");
         assert!(parse_tunnel_samples(&status).is_none());
     }
