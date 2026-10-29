@@ -488,6 +488,9 @@ fn menu()->Result<()>{
             "15"=>auto_tune::run(false),
             _=>{println!("Invalid choice: use 1..15.");continue}
         };
+        if choice=="11" && action.is_ok() && !Path::new("/usr/local/bin/pingtunnel").exists() {
+            return Ok(());
+        }
         if let Err(e)=action{eprintln!("Operation failed: {e}");}
         // Hold command output until confirmed; otherwise the alternate-screen
         // menu instantly erases status, logs and diagnostics.
