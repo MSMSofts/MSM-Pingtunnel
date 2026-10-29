@@ -15,7 +15,10 @@ type AdaptiveFrameSettings struct {
  Window int
  ResendMs int
 }
+type adaptiveRecentRTT struct { at time.Time; ms float64 }
 type AdaptivePerformance struct {
+ recent [16]adaptiveRecentRTT
+ recentNext uint64
  mu sync.Mutex
  outstanding []time.Time
  samples uint64
@@ -59,6 +62,8 @@ func (a *AdaptivePerformance) OnPong(sent, received time.Time) {
  }
  a.samples++
  a.lastPongAt=received
+ a.recent[a.recentNext%uint64(len(a.recent))]=adaptiveRecentRTT{at:received,ms:rtt}
+ a.recentNext++
  a.lossScore*=0.82
  a.misses=0
  spike:=a.samples>=4 && rtt>math.Max(250,a.baseMs*2.5)
@@ -128,6 +133,9 @@ type adaptiveStatus struct {
  Profile string `json:"profile"`
  Samples uint64 `json:"rtt_samples"`
  LastSampleAgeSeconds int64 `json:"last_rtt_sample_age_seconds"`
+ RecentSamples uint64 `json:"recent_rtt_samples"`
+ RecentRTTMs float64 `json:"recent_rtt_ms"`
+ RecentJitterMs float64 `json:"recent_jitter_ms"`
  RTTMs float64 `json:"rtt_ms"`
  JitterMs float64 `json:"jitter_ms"`
  LossEstimate float64 `json:"probe_loss_estimate"`
@@ -135,10 +143,32 @@ type adaptiveStatus struct {
  Window int `json:"next_tcp_window"`
  ExistingSessions string `json:"existing_sessions"`
 }
+// A bounded two-minute window prevents a new Pong from making a very old
+// historical RTT average appear representative of current conditions.
+func (a *AdaptivePerformance) recentMeasurementsLocked(now time.Time) (uint64,float64,float64) {
+ var count uint64
+ var total,jitter,previous float64
+ var seen bool
+ start:=uint64(0)
+ if a.recentNext>uint64(len(a.recent)) {start=a.recentNext-uint64(len(a.recent))}
+ for i:=start;i<a.recentNext;i++{
+  item:=a.recent[i%uint64(len(a.recent))]
+  if item.at.IsZero() || now.Sub(item.at)>120*time.Second {continue}
+  count++
+  total+=item.ms
+  if seen {jitter+=math.Abs(item.ms-previous)}
+  previous=item.ms
+  seen=true
+ }
+ if count==0 {return 0,0,0}
+ if count>1 {jitter/=float64(count-1)}
+ return count,math.Round(total/float64(count)*10)/10,math.Round(jitter*10)/10
+}
 func (a *AdaptivePerformance) Status(bufferBytes,maxWindow,rto int) adaptiveStatus {
  a.mu.Lock();defer a.mu.Unlock()
  p:=a.parametersLocked(bufferBytes,maxWindow,rto)
  profile:="learning"
+ recentCount,recentRtt,recentJitter:=a.recentMeasurementsLocked(time.Now())
  age:=int64(-1)
  if !a.lastPongAt.IsZero() {
   since:=time.Since(a.lastPongAt)
@@ -148,6 +178,7 @@ func (a *AdaptivePerformance) Status(bufferBytes,maxWindow,rto int) adaptiveStat
  if a.degraded {profile="degraded"} else if a.samples>0 {profile="stable"}
  return adaptiveStatus{
   Profile:profile, Samples:a.samples, LastSampleAgeSeconds:age,
+  RecentSamples:recentCount,RecentRTTMs:recentRtt,RecentJitterMs:recentJitter,
   RTTMs:math.Round(a.srttMs*10)/10,
   JitterMs:math.Round(a.jitterMs*10)/10,
   LossEstimate:math.Round(a.lossScore*1000)/1000,
