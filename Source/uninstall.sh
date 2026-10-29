@@ -32,6 +32,10 @@ else
   [[ "$approval" == "YES" ]] || { echo "Cancelled without changes."; exit 0; }
 fi
 
+if ! command -v systemctl >/dev/null 2>&1; then
+  echo "systemctl is required to verify the Pingtunnel service is stopped." >&2
+  exit 1
+fi
 if command -v systemctl >/dev/null 2>&1; then
   systemctl stop pingtunnel.service >/dev/null 2>&1 || true
   if systemctl is-active --quiet pingtunnel.service; then
@@ -42,6 +46,7 @@ if command -v systemctl >/dev/null 2>&1; then
 fi
 
 rm -f -- /etc/systemd/system/pingtunnel.service
+rm -f -- /etc/systemd/system/multi-user.target.wants/pingtunnel.service
 rm -rf -- /etc/systemd/system/pingtunnel.service.d
 
 if command -v systemctl >/dev/null 2>&1; then
