@@ -573,6 +573,12 @@ fn show_security_status() -> Result<()> {
     println!("  Pending key renegotiation: {}",report["pending_rekey"]);
     println!("  Replays rejected: {}",report["replay_drops"]);
     println!("  Authentication failures: {}",report["authentication_failures"]);
+    if let Some(failed)=report["icmp_write_failures"].as_u64() {
+        println!("  ICMP socket write failures (all paths): {failed}");
+    }
+    if let Some(oversize)=report["icmp_write_emsgsize"].as_u64() {
+        println!("  ICMP EMSGSIZE / message-too-long errors: {oversize}");
+    }
     println!("  Recovery handshakes: {}",report["recoveries"]);
     println!("  Queued data frames: {}",report["pending_packets"]);
     println!("  Expired/overflow data frames: {}",report["expired_or_overflow_packets"]);
