@@ -208,11 +208,20 @@ fn core_restarted_since(started: SystemTime, previous_pid: Option<u32>) -> bool 
     false
 }
 
-pub(crate) fn run(dry_run: bool) -> Result<()> {
+// probe_loss_estimate is a PING/PONG timeout EWMA, not application loss.
+// This conservative gate prevents changes when the path is already degraded.
+fn safe_to_apply(s: Samples) -> bool {
+    s.count >= 8 && s.rtt_ms.is_finite() && s.rtt_ms > 0.0 && s.rtt_ms <= 800.0
+        && s.jitter_ms.is_finite() && s.jitter_ms >= 0.0 && s.jitter_ms <= 150.0
+        && s.loss.is_finite() && (0.0..=0.10).contains(&s.loss)
+}
+
+pub(crate) fn run(apply: bool) -> Result<()> {
     root_required()?;
     let original = load_config()?;
     if get_string(&original, "region") != Some("iran") {
-        return Err(failure("Auto Tune is only supported on the Iran-side forwarding client."));
+        println!("Auto Tune is Iran-side only. This foreign relay is unchanged (no probes, writes or restarts).");
+        return Ok(());
     }
     let transport = get_string(&original, "transport").unwrap();
     require_authenticated_path()?;
@@ -238,14 +247,21 @@ pub(crate) fn run(dry_run: bool) -> Result<()> {
     let large_ok = if normal_ping.is_some() {
         Some(large_ping.is_some_and(|value| value.loss <= 0.2))
     } else { None };
-    println!("RTT {:.1} ms | jitter {:.1} ms | loss {:.1}% | large-echo {}",
+    println!("RTT {:.1} ms | jitter {:.1} ms | probe-loss EWMA score {:.1}% (not UDP loss) | large-echo {}",
         quality.rtt_ms, quality.jitter_ms, quality.loss*100.0,
         match large_ok { Some(true) => "passed", Some(false) => "not confirmed", None => "not tested" });
 
+    // Restarting the Go core interrupts live QUIC/VPN sessions.
+    // Only an explicit --apply may write config or restart the service.
+    if apply && !safe_to_apply(quality) {
+        return Err(failure("Path too degraded or unstable for safe Auto Tune; no changes or restarts."));
+    }
     let mut updated = original.clone();
     if transport == "tcp" {
-        let plan = calculate_tcp(quality)
-            .ok_or_else(|| failure("Unreliable network measurements; no TCP settings changed."))?;
+        let Some(plan) = calculate_tcp(quality) else {
+            if !apply { println!("No safe TCP plan for these measurements; no changes made."); return Ok(()); }
+            return Err(failure("Unreliable network measurements; no TCP settings changed."));
+        };
         println!("TCP profile: {} | buffer {} KiB | window {} | resend {} ms | timeout {} s",
             plan.profile, plan.buffer_bytes/1024, plan.window, plan.resend_ms, plan.timeout_secs);
         updated["tcp_bs"] = json!(plan.buffer_bytes);
@@ -253,8 +269,10 @@ pub(crate) fn run(dry_run: bool) -> Result<()> {
         updated["tcp_rst"] = json!(plan.resend_ms);
         updated["timeout"] = json!(plan.timeout_secs);
     } else {
-        let plan = calculate_udp(quality)
-            .ok_or_else(|| failure("Unreliable network measurements; no UDP settings changed."))?;
+        let Some(plan) = calculate_udp(quality) else {
+            if !apply { println!("No safe UDP plan for these measurements; no changes made."); return Ok(()); }
+            return Err(failure("Unreliable network measurements; no UDP settings changed."));
+        };
         println!("UDP profile: {} | socket buffer {} KiB | idle timeout {} s",
             plan.profile, plan.socket_buffer_bytes/1024, plan.timeout_secs);
         println!("UDP socket queue preference is sent to the foreign peer over authenticated DATA frames.");
@@ -266,10 +284,12 @@ pub(crate) fn run(dry_run: bool) -> Result<()> {
         println!("Already using these values; no restart required.");
         return Ok(());
     }
-    if dry_run {
-        println!("Preview only: settings, service and backup are unchanged.");
+    if !apply {
+        println!("PREVIEW ONLY: no configuration writes, peer changes or service restarts.");
+        println!("To apply during a maintenance window (disconnects live sessions): sudo pingtunnel auto-tune --apply");
         return Ok(());
     }
+    println!("Applying explicit --apply request; active VPN sessions will be interrupted by a core restart.");
     // Stop if the authenticated path disappeared while the active probes ran.
     require_authenticated_path()?;
     let previous_bytes = fs::read(CONFIG)?;
@@ -280,10 +300,11 @@ pub(crate) fn run(dry_run: bool) -> Result<()> {
     let applied = apply_config();
     if applied.is_ok() && core_restarted_since(started, previous_pid) {
         println!("Saved and restarted. Previous private config: {BACKUP}");
+        println!("Authenticated Go heartbeat restored. This does NOT prove end-to-end VPN/UDP delivery; verify application traffic.");
         if transport == "tcp" {
             println!("The Go adaptive controller will continue adjusting new TCP sessions.");
         } else {
-            println!("UDP socket buffers are applied locally and on compatible foreign peers (subject to OS limits).");
+            println!("UDP socket buffers are applied locally and on new compatible foreign UDP associations (subject to OS limits).");
         }
         return Ok(());
     }
@@ -344,6 +365,15 @@ mod tests {
         assert!(calculate_udp(Samples { loss: 0.75, ..stable }).is_none());
         assert!(calculate_udp(Samples { jitter_ms: f64::NAN, ..stable }).is_none());
         assert!(calculate_udp(Samples { count: 2, ..stable }).is_none());
+    }
+    #[test]
+    fn applying_requires_stable_authenticated_samples() {
+        let stable = Samples { rtt_ms: 45.0, jitter_ms: 8.0, loss: 0.02, count: 12 };
+        assert!(safe_to_apply(stable));
+        assert!(!safe_to_apply(Samples { count: 7, ..stable }));
+        assert!(!safe_to_apply(Samples { loss: 0.65, ..stable }));
+        assert!(!safe_to_apply(Samples { rtt_ms: 2500.0, ..stable }));
+        assert!(!safe_to_apply(Samples { jitter_ms: 300.0, ..stable }));
     }
     #[test]
     fn refuses_stale_or_insufficient_authenticated_rtt_samples() {
