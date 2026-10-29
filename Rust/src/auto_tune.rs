@@ -1,4 +1,4 @@
-//! One-shot, conservative tuning for the Iran-side TCP forwarding client.
+//! One-shot, conservative tuning for the Iran-side TCP/UDP forwarding client.
 //! Uses authenticated tunnel RTT/jitter and independent IPv4 echo probes.
 //! Never changes pairing, security mode, peer identity, ports or ICMP direction.
 use crate::{apply_config, atomic_save, failure, get_string, load_config, root_required,
@@ -21,7 +21,7 @@ struct Samples {
 }
 
 #[derive(Debug, PartialEq)]
-struct Plan {
+struct TcpPlan {
     profile: &'static str,
     buffer_bytes: u64,
     window: u64,
@@ -103,7 +103,7 @@ fn tunnel_samples() -> Option<Samples> {
     Some(sample)
 }
 
-fn calculate(s: Samples, large_packets_ok: Option<bool>) -> Option<Plan> {
+fn calculate_tcp(s: Samples, large_packets_ok: Option<bool>) -> Option<TcpPlan> {
     if !s.rtt_ms.is_finite() || s.rtt_ms <= 0.0 || s.rtt_ms > 10000.0
         || !s.jitter_ms.is_finite() || s.jitter_ms < 0.0 || s.jitter_ms > 10000.0
         || !s.loss.is_finite() || !(0.0..0.5).contains(&s.loss)
@@ -131,7 +131,39 @@ fn calculate(s: Samples, large_packets_ok: Option<bool>) -> Option<Plan> {
     let resend_ms = ((s.rtt_ms + 4.0*s.jitter_ms + 80.0)*multiplier)
         .round().clamp(350.0, 2400.0) as u64;
     let timeout_secs = if stressed { 120 } else if moderate || s.rtt_ms >= 350.0 { 90 } else { 60 };
-    Some(Plan { profile, buffer_bytes, window, resend_ms, timeout_secs })
+    Some(TcpPlan { profile, buffer_bytes, window, resend_ms, timeout_secs })
+}
+
+#[derive(Debug, PartialEq)]
+struct UdpPlan {
+    profile: &'static str,
+    socket_buffer_bytes: u64,
+    timeout_secs: u64,
+}
+
+// UDP packets have no TCP frame window or RTO. Only tune socket queue
+// capacity and idle connection lifetime; the kernel can cap SO_RCVBUF/SO_SNDBUF.
+// This cannot repair upstream packet loss, change PMTU, or guarantee throughput.
+fn calculate_udp(s: Samples) -> Option<UdpPlan> {
+    if !s.rtt_ms.is_finite() || !(0.0..=10000.0).contains(&s.rtt_ms)
+        || s.rtt_ms == 0.0
+        || !s.jitter_ms.is_finite() || !(0.0..=10000.0).contains(&s.jitter_ms)
+        || !s.loss.is_finite() || !(0.0..0.5).contains(&s.loss)
+        || s.count < 3 { return None; }
+    let stressed = s.loss >= 0.15
+        || (s.jitter_ms >= 80.0 && s.jitter_ms >= s.rtt_ms*0.5);
+    let moderate = s.loss >= 0.04
+        || (s.jitter_ms >= 30.0 && s.jitter_ms >= s.rtt_ms*0.25);
+    let (profile, socket_buffer_bytes, timeout_secs) = if stressed {
+        ("loss-tolerant", 1024*1024, 120)
+    } else if moderate {
+        ("balanced", 512*1024, 90)
+    } else {
+        // A larger local socket queue is useful for brief UDP bursts, but
+        // should remain small on consistently responsive links.
+        ("low-latency", 256*1024, if s.rtt_ms >= 350.0 { 90 } else { 60 })
+    };
+    Some(UdpPlan { profile, socket_buffer_bytes, timeout_secs })
 }
 
 fn core_restarted_since(started: SystemTime) -> bool {
@@ -151,10 +183,10 @@ fn core_restarted_since(started: SystemTime) -> bool {
 pub(crate) fn run() -> Result<()> {
     root_required()?;
     let original = load_config()?;
-    if get_string(&original, "region") != Some("iran")
-        || get_string(&original, "transport") != Some("tcp") {
-        return Err(failure("Auto Tune currently applies only to the Iran-side TCP client; UDP/foreign settings are unchanged."));
+    if get_string(&original, "region") != Some("iran") {
+        return Err(failure("Auto Tune is only supported on the Iran-side forwarding client."));
     }
+    let transport = get_string(&original, "transport").unwrap();
     require_authenticated_path()?;
     let peer = get_string(&original, "peer_ip").unwrap();
     println!("Auto Tune: measuring authenticated tunnel RTT and IPv4 echo replies to {peer}...");
@@ -183,19 +215,29 @@ pub(crate) fn run() -> Result<()> {
     let large_ok = if normal_ping.is_some() {
         Some(large_ping.is_some_and(|value| value.loss <= 0.2))
     } else { None };
-    let plan = calculate(quality, large_ok)
-        .ok_or_else(|| failure("Loss, RTT or jitter is too high/invalid to tune safely; no settings changed."))?;
     println!("RTT {:.1} ms | jitter {:.1} ms | loss {:.1}% | large-echo {}",
         quality.rtt_ms, quality.jitter_ms, quality.loss*100.0,
         match large_ok { Some(true) => "passed", Some(false) => "not confirmed", None => "not tested" });
-    println!("Profile: {} | TCP buffer {} KiB | window {} | resend {} ms | timeout {} s",
-        plan.profile, plan.buffer_bytes/1024, plan.window, plan.resend_ms, plan.timeout_secs);
 
     let mut updated = original.clone();
-    updated["tcp_bs"] = json!(plan.buffer_bytes);
-    updated["tcp_mw"] = json!(plan.window);
-    updated["tcp_rst"] = json!(plan.resend_ms);
-    updated["timeout"] = json!(plan.timeout_secs);
+    if transport == "tcp" {
+        let plan = calculate_tcp(quality, large_ok)
+            .ok_or_else(|| failure("Unreliable network measurements; no TCP settings changed."))?;
+        println!("TCP profile: {} | buffer {} KiB | window {} | resend {} ms | timeout {} s",
+            plan.profile, plan.buffer_bytes/1024, plan.window, plan.resend_ms, plan.timeout_secs);
+        updated["tcp_bs"] = json!(plan.buffer_bytes);
+        updated["tcp_mw"] = json!(plan.window);
+        updated["tcp_rst"] = json!(plan.resend_ms);
+        updated["timeout"] = json!(plan.timeout_secs);
+    } else {
+        let plan = calculate_udp(quality)
+            .ok_or_else(|| failure("Unreliable network measurements; no UDP settings changed."))?;
+        println!("UDP profile: {} | socket buffer {} KiB | idle timeout {} s",
+            plan.profile, plan.socket_buffer_bytes/1024, plan.timeout_secs);
+        println!("No UDP datagram size or remote service settings will be changed.");
+        updated["udp_buf"] = json!(plan.socket_buffer_bytes);
+        updated["timeout"] = json!(plan.timeout_secs);
+    }
     if updated == original {
         println!("Already using these values; no restart required.");
         return Ok(());
@@ -209,7 +251,11 @@ pub(crate) fn run() -> Result<()> {
     let applied = apply_config();
     if applied.is_ok() && core_restarted_since(started) {
         println!("Saved and restarted. Previous private config: {BACKUP}");
-        println!("The Go adaptive controller will continue adjusting new TCP sessions.");
+        if transport == "tcp" {
+            println!("The Go adaptive controller will continue adjusting new TCP sessions.");
+        } else {
+            println!("UDP socket buffer is applied locally (subject to OS limits); no TCP framing settings are touched.");
+        }
         return Ok(());
     }
     // Do not leave a broken service or changed secrets/ports behind on failure.
@@ -237,20 +283,39 @@ mod tests {
     #[test]
     fn choose_bounded_conservative_profiles() {
         let good = Samples { rtt_ms: 40.0, jitter_ms: 5.0, loss: 0.0, count: 8 };
-        let fast = calculate(good, Some(true)).unwrap();
+        let fast = calculate_tcp(good, Some(true)).unwrap();
         assert_eq!(fast.profile, "responsive");
         assert_eq!(fast.window, 20000);
         // A stable long-distance link should not lose its send window.
         let distant = Samples { rtt_ms: 500.0, jitter_ms: 12.0, loss: 0.0, count: 10 };
-        let distant_plan = calculate(distant, None).unwrap();
+        let distant_plan = calculate_tcp(distant, None).unwrap();
         assert_eq!(distant_plan.window, 20000);
         assert_eq!(distant_plan.timeout_secs, 90);
-        assert_eq!(calculate(good, Some(false)).unwrap().buffer_bytes, 256*1024);
-        assert_eq!(calculate(good, None).unwrap().buffer_bytes, 1024*1024);
-        let degraded = calculate(Samples { rtt_ms: 650.0, jitter_ms: 130.0, loss: 0.2, count: 8 }, Some(false)).unwrap();
+        assert_eq!(calculate_tcp(good, Some(false)).unwrap().buffer_bytes, 256*1024);
+        assert_eq!(calculate_tcp(good, None).unwrap().buffer_bytes, 1024*1024);
+        let degraded = calculate_tcp(Samples { rtt_ms: 650.0, jitter_ms: 130.0, loss: 0.2, count: 8 }, Some(false)).unwrap();
         assert_eq!(degraded.profile, "conservative");
         assert!(degraded.resend_ms <= 2400);
         assert_eq!(degraded.timeout_secs, 120);
+    }
+    #[test]
+    fn udp_plan_is_bounded_and_not_tcp_shaped() {
+        let stable = Samples { rtt_ms: 35.0, jitter_ms: 2.0, loss: 0.0, count: 12 };
+        let plan = calculate_udp(stable).unwrap();
+        assert_eq!(plan.profile,"low-latency");
+        assert_eq!(plan.socket_buffer_bytes, 262144);
+        assert_eq!(plan.timeout_secs, 60);
+        let high_rtt = Samples { rtt_ms: 520.0, jitter_ms: 4.0, loss: 0.0, count: 12 };
+        assert_eq!(calculate_udp(high_rtt).unwrap().timeout_secs, 90);
+        let moderate = Samples { rtt_ms: 120.0, jitter_ms: 15.0, loss: 0.06, count: 12 };
+        assert_eq!(calculate_udp(moderate).unwrap().socket_buffer_bytes, 524288);
+        let poor = Samples { rtt_ms: 400.0, jitter_ms: 140.0, loss: 0.18, count: 12 };
+        let poor_plan = calculate_udp(poor).unwrap();
+        assert_eq!(poor_plan.socket_buffer_bytes, 1048576);
+        assert_eq!(poor_plan.timeout_secs, 120);
+        assert!(calculate_udp(Samples { loss: 0.75, ..stable }).is_none());
+        assert!(calculate_udp(Samples { jitter_ms: f64::NAN, ..stable }).is_none());
+        assert!(calculate_udp(Samples { count: 2, ..stable }).is_none());
     }
     #[test]
     fn bad_or_insufficient_samples_never_tune() {
