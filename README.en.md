@@ -1,5 +1,13 @@
 # Pingtunnel Manager
 
+## Unreleased safety hardening (development branch)
+
+- Menu **15) Auto Tune** and `sudo pingtunnel auto-tune` now **preview only**. On Foreign, Auto Tune returns without probing, changing configuration or restarting anything.
+- Iran-side changes require `sudo pingtunnel auto-tune --apply` during a maintenance window; this **restarts** the core and interrupts live sessions. Degraded RTT/jitter/probe-loss EWMA blocks all writes. Authentication does not prove VPN application delivery.
+- `sudo pingtunnel uninstall` cleans up the service, binaries, dedicated drop-ins and runtime files while preserving the private pairing configuration. `sudo pingtunnel uninstall --purge` needs a typed `PURGE` confirmation and permanently removes keys, config and logs.
+- These changes are **not** a verified fix for the reported v3.3.9 UDP-quality regression. Continue using the known-working v3.3.8 deployment until controlled tests pass. See [Safety and uninstall guide](docs/SAFE_TUNING_AND_UNINSTALL.md).
+
+
 **A lightweight, encrypted ICMP tunnel between exactly two Linux VPSs, with a five-question setup wizard.**
 
 [فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.3.9](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.9)
