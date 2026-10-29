@@ -581,6 +581,13 @@ fn show_security_status() -> Result<()> {
     if let Some(oversize)=report["icmp_write_emsgsize"].as_u64() {
         println!("  ICMP EMSGSIZE / message-too-long errors: {oversize}");
     }
+    if let (Some(sent), Some(received), Some(dropped))=(
+        report["icmp_fragmented_datagrams"].as_u64(),
+        report["icmp_reassembled_datagrams"].as_u64(),
+        report["icmp_fragment_drops"].as_u64()) {
+        println!("  Segmented outgoing / reassembled inbound messages: {sent} / {received}");
+        println!("  Expired/invalid incomplete assemblies: {dropped}");
+    }
     println!("  Recovery handshakes: {}",report["recoveries"]);
     println!("  Queued data frames: {}",report["pending_packets"]);
     println!("  Expired/overflow data frames: {}",report["expired_or_overflow_packets"]);
