@@ -88,7 +88,10 @@ fn require_authenticated_path() -> Result<()> {
 fn tunnel_samples() -> Option<Samples> {
     let value = fresh_status(PERF_STATUS, 15)?;
     let count = usize::try_from(value["rtt_samples"].as_u64()?).ok()?;
-    if count < 8 { return None; }
+    // A freshly rewritten status file can still contain hour-old RTT values.
+    // Only authenticated pongs observed in the last 35 seconds are useful.
+    let age = value["last_rtt_sample_age_seconds"].as_i64()?;
+    if count < 8 || !(0..=35).contains(&age) { return None; }
     let sample = Samples {
         rtt_ms: value["rtt_ms"].as_f64()?,
         jitter_ms: value["jitter_ms"].as_f64()?,
@@ -103,7 +106,7 @@ fn tunnel_samples() -> Option<Samples> {
     Some(sample)
 }
 
-fn calculate_tcp(s: Samples, large_packets_ok: Option<bool>) -> Option<TcpPlan> {
+fn calculate_tcp(s: Samples) -> Option<TcpPlan> {
     if !s.rtt_ms.is_finite() || s.rtt_ms <= 0.0 || s.rtt_ms > 10000.0
         || !s.jitter_ms.is_finite() || s.jitter_ms < 0.0 || s.jitter_ms > 10000.0
         || !s.loss.is_finite() || !(0.0..0.5).contains(&s.loss)
@@ -114,19 +117,15 @@ fn calculate_tcp(s: Samples, large_packets_ok: Option<bool>) -> Option<TcpPlan> 
         || (s.jitter_ms >= 80.0 && s.jitter_ms >= s.rtt_ms*0.5);
     let moderate = s.loss >= 0.04
         || (s.jitter_ms >= 30.0 && s.jitter_ms >= s.rtt_ms*0.25);
-    let (profile, mut buffer_bytes, mut window) = if stressed {
+    let (profile, buffer_bytes, window) = if stressed {
         ("conservative", 256*1024, 4096)
     } else if moderate {
         ("balanced", 512*1024, 8192)
     } else {
         ("responsive", 1024*1024, 20000)
     };
-    // ICMP packet-size success is only a rough path-quality signal, NOT
-    // a bandwidth measurement or an exact tunnel MTU discovery.
-    if large_packets_ok == Some(false) {
-        buffer_bytes = buffer_bytes.min(256*1024);
-        window = window.min(4096);
-    }
+    // Ordinary ICMP packet-size probes are NOT a bandwidth or path-MTU test;
+    // never adjust TCP memory/window sizes from them.
     let multiplier = if s.loss >= 0.04 { 1.3 } else { 1.0 };
     let resend_ms = ((s.rtt_ms + 4.0*s.jitter_ms + 80.0)*multiplier)
         .round().clamp(350.0, 2400.0) as u64;
@@ -166,16 +165,41 @@ fn calculate_udp(s: Samples) -> Option<UdpPlan> {
     Some(UdpPlan { profile, socket_buffer_bytes, timeout_secs })
 }
 
-fn core_restarted_since(started: SystemTime) -> bool {
-    for _ in 0..8 {
+fn service_main_pid() -> Option<u32> {
+    let output=Command::new("systemctl")
+        .args(["show", "pingtunnel.service", "--property=MainPID", "--value"])
+        .output().ok()?;
+    if !output.status.success() { return None; }
+    let pid=String::from_utf8_lossy(&output.stdout).trim().parse::<u32>().ok()?;
+    (pid>0).then_some(pid)
+}
+
+fn authenticated_status(state: &Value) -> bool {
+    state["state"].as_str()==Some("authenticated")
+        && state["region"].as_str()==Some("iran")
+        && state["wire_version"].as_i64()==Some(4)
+        && state["config_schema"].as_i64()==Some(3)
+        && state["last_valid_age_seconds"].as_i64().is_some_and(|age| (0..=20).contains(&age))
+}
+
+fn core_restarted_since(started: SystemTime, previous_pid: Option<u32>) -> bool {
+    // An active systemd unit and freshly touched file alone do not prove
+    // successful re-pairing. Require a new core process and authenticated
+    // return traffic within a bounded 45-second window.
+    for _ in 0..45 {
         thread::sleep(Duration::from_secs(1));
         let live = Command::new("systemctl")
             .args(["is-active", "--quiet", "pingtunnel.service"])
-            .status().map(|s| s.success()).unwrap_or(false);
-        let heartbeat = fs::metadata(SECURITY_STATUS).ok()
+            .status().is_ok_and(|status| status.success());
+        let pid=service_main_pid();
+        let new_process=pid.is_some() && pid!=previous_pid;
+        let fresh=fs::metadata(SECURITY_STATUS).ok()
             .and_then(|m| m.modified().ok())
-            .map(|t| t.duration_since(started).is_ok()).unwrap_or(false);
-        if live && heartbeat { return true; }
+            .is_some_and(|t| t.duration_since(started).is_ok());
+        if live && new_process && fresh &&
+            fresh_status(SECURITY_STATUS, 5).as_ref().is_some_and(authenticated_status) {
+            return true;
+        }
     }
     false
 }
@@ -193,23 +217,16 @@ pub(crate) fn run() -> Result<()> {
     let baseline = tunnel_samples();
     let normal_ping = probe(peer, 56, 8);
     let large_ping = probe(peer, 1180, 5);
-    let quality = match (baseline, normal_ping) {
-        (Some(tunnel), Some(echo)) => Samples {
-            rtt_ms: tunnel.rtt_ms,
-            jitter_ms: tunnel.jitter_ms,
-            loss: tunnel.loss.max(echo.loss),
-            count: tunnel.count,
-        },
-        (Some(tunnel), None) => {
-            println!("Standard ICMP echo unavailable; using authenticated tunnel measurements.");
-            tunnel
-        },
-        (None, Some(echo)) => {
-            println!("Authenticated RTT history is too short; using ICMP echo measurements.");
-            echo
-        },
-        (None, None) => return Err(failure("Insufficient network samples; no settings were changed.")),
-    };
+    // Raw ICMP echoes may be filtered or independently rate-limited, and
+    // neither proves encrypted-tunnel delivery. They are diagnostic only.
+    let quality = baseline.ok_or_else(|| failure(
+        "Insufficient recent authenticated RTT samples (need 8, last within 35s); no settings changed."))?;
+    if let Some(echo)=normal_ping {
+        println!("Ordinary echo diagnostic: RTT {:.1} ms, loss {:.1}% (not used for tuning).",
+            echo.rtt_ms,echo.loss*100.0);
+    } else {
+        println!("Ordinary echo diagnostic unavailable (does not penalize encrypted tunnel).");
+    }
     // When every ordinary echo probe is filtered, lack of a large-packet
     // response says nothing about the encrypted tunnel's packet-size limit.
     let large_ok = if normal_ping.is_some() {
@@ -221,7 +238,7 @@ pub(crate) fn run() -> Result<()> {
 
     let mut updated = original.clone();
     if transport == "tcp" {
-        let plan = calculate_tcp(quality, large_ok)
+        let plan = calculate_tcp(quality)
             .ok_or_else(|| failure("Unreliable network measurements; no TCP settings changed."))?;
         println!("TCP profile: {} | buffer {} KiB | window {} | resend {} ms | timeout {} s",
             plan.profile, plan.buffer_bytes/1024, plan.window, plan.resend_ms, plan.timeout_secs);
@@ -234,7 +251,8 @@ pub(crate) fn run() -> Result<()> {
             .ok_or_else(|| failure("Unreliable network measurements; no UDP settings changed."))?;
         println!("UDP profile: {} | socket buffer {} KiB | idle timeout {} s",
             plan.profile, plan.socket_buffer_bytes/1024, plan.timeout_secs);
-        println!("No UDP datagram size or remote service settings will be changed.");
+        println!("UDP socket queue preference is sent to the foreign peer over authenticated DATA frames.");
+        println!("No UDP datagram size, MTU, target port or peer identity changes.");
         updated["udp_buf"] = json!(plan.socket_buffer_bytes);
         updated["timeout"] = json!(plan.timeout_secs);
     }
@@ -247,14 +265,15 @@ pub(crate) fn run() -> Result<()> {
     let previous_bytes = fs::read(CONFIG)?;
     atomic_save(Path::new(BACKUP), &previous_bytes, 0o600)?;
     store_config(&updated)?;
+    let previous_pid = service_main_pid();
     let started = SystemTime::now();
     let applied = apply_config();
-    if applied.is_ok() && core_restarted_since(started) {
+    if applied.is_ok() && core_restarted_since(started, previous_pid) {
         println!("Saved and restarted. Previous private config: {BACKUP}");
         if transport == "tcp" {
             println!("The Go adaptive controller will continue adjusting new TCP sessions.");
         } else {
-            println!("UDP socket buffer is applied locally (subject to OS limits); no TCP framing settings are touched.");
+            println!("UDP socket buffers are applied locally and on compatible foreign peers (subject to OS limits).");
         }
         return Ok(());
     }
@@ -263,7 +282,7 @@ pub(crate) fn run() -> Result<()> {
     let restored = apply_config();
     match restored {
         Ok(()) => Err(failure(format!("Auto Tune service check failed ({}); previous configuration restored.",
-            applied.err().map(|e| e.to_string()).unwrap_or_else(|| "no new Go heartbeat".into())))),
+            applied.err().map(|e| e.to_string()).unwrap_or_else(|| "no authenticated heartbeat from the restarted Go core".into())))),
         Err(err) => Err(failure(format!("Auto Tune failed AND rollback restart failed: {err}. Previous JSON restored; inspect systemd immediately."))),
     }
 }
@@ -283,17 +302,16 @@ mod tests {
     #[test]
     fn choose_bounded_conservative_profiles() {
         let good = Samples { rtt_ms: 40.0, jitter_ms: 5.0, loss: 0.0, count: 8 };
-        let fast = calculate_tcp(good, Some(true)).unwrap();
+        let fast = calculate_tcp(good).unwrap();
         assert_eq!(fast.profile, "responsive");
         assert_eq!(fast.window, 20000);
         // A stable long-distance link should not lose its send window.
         let distant = Samples { rtt_ms: 500.0, jitter_ms: 12.0, loss: 0.0, count: 10 };
-        let distant_plan = calculate_tcp(distant, None).unwrap();
+        let distant_plan = calculate_tcp(distant).unwrap();
         assert_eq!(distant_plan.window, 20000);
         assert_eq!(distant_plan.timeout_secs, 90);
-        assert_eq!(calculate_tcp(good, Some(false)).unwrap().buffer_bytes, 256*1024);
-        assert_eq!(calculate_tcp(good, None).unwrap().buffer_bytes, 1024*1024);
-        let degraded = calculate_tcp(Samples { rtt_ms: 650.0, jitter_ms: 130.0, loss: 0.2, count: 8 }, Some(false)).unwrap();
+        assert_eq!(calculate_tcp(good).unwrap().buffer_bytes, 1024*1024);
+        let degraded = calculate_tcp(Samples { rtt_ms: 650.0, jitter_ms: 130.0, loss: 0.2, count: 8 }).unwrap();
         assert_eq!(degraded.profile, "conservative");
         assert!(degraded.resend_ms <= 2400);
         assert_eq!(degraded.timeout_secs, 120);
@@ -319,8 +337,8 @@ mod tests {
     }
     #[test]
     fn bad_or_insufficient_samples_never_tune() {
-        assert!(calculate_tcp(Samples { rtt_ms: f64::NAN, jitter_ms: 1.0, loss: 0.0, count: 8 }, None).is_none());
-        assert!(calculate_tcp(Samples { rtt_ms: 100.0, jitter_ms: 10.0, loss: 0.7, count: 8 }, None).is_none());
-        assert!(calculate_tcp(Samples { rtt_ms: 100.0, jitter_ms: 10.0, loss: 0.0, count: 1 }, None).is_none());
+        assert!(calculate_tcp(Samples { rtt_ms: f64::NAN, jitter_ms: 1.0, loss: 0.0, count: 8 }).is_none());
+        assert!(calculate_tcp(Samples { rtt_ms: 100.0, jitter_ms: 10.0, loss: 0.7, count: 8 }).is_none());
+        assert!(calculate_tcp(Samples { rtt_ms: 100.0, jitter_ms: 10.0, loss: 0.0, count: 1 }).is_none());
     }
 }
