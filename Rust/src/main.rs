@@ -364,7 +364,7 @@ fn help(){
     println!("  pingtunnel            Unified menu");
     println!("  pingtunnel setup      Five questions on each VPS");
     println!("  pingtunnel key        Show existing pairing key (root only)");
-    println!("  pingtunnel validate | performance | auto-tune | security | health | dry-run");
+    println!("  pingtunnel validate | performance | auto-tune [--dry-run] | security | health | dry-run");
     println!("  pingtunnel start | stop | restart | status | logs [lines]");
     println!("  pingtunnel update | uninstall [--purge]");
 }
@@ -443,7 +443,7 @@ fn menu()->Result<()>{
             "12"|"q"|"Q"=>return Ok(()),
             "13"=>show_security_status(),
             "14"=>show_health(),
-            "15"=>auto_tune::run(),
+            "15"=>auto_tune::run(false),
             _=>{println!("Invalid choice: use 1..15.");continue}
         };
         if let Err(e)=action{eprintln!("Operation failed: {e}");}
@@ -568,15 +568,35 @@ fn show_adaptive_status() -> Result<()> {
     match fs::read(PERF_STATUS) {
         Ok(bytes) => {
             let data: Value = serde_json::from_slice(&bytes)?;
+            let mode=load_config().ok()
+                .and_then(|cfg|cfg["transport"].as_str().map(str::to_owned))
+                .unwrap_or_else(||"unknown".into());
             println!("Adaptive Performance (Go core, automatic)");
             println!("  Profile: {}", data["profile"].as_str().unwrap_or("unknown"));
             println!("  RTT: {} ms", data["rtt_ms"]);
             println!("  Jitter: {} ms", data["jitter_ms"]);
             println!("  Probe loss estimate: {}", data["probe_loss_estimate"]);
-            println!("  Next TCP retransmission: {} ms", data["next_tcp_resend_ms"]);
-            println!("  Next TCP window: {}", data["next_tcp_window"]);
             println!("  Samples: {}", data["rtt_samples"]);
-            println!("  Existing TCP streams retain native BB congestion control.");
+            if let Some(age)=data["last_rtt_sample_age_seconds"].as_i64() {
+                println!("  Last authenticated RTT sample: {}",
+                    if age<0 {"never".into()}else{format!("{age}s ago")});
+            } else {
+                println!("  WARNING: Go core does not report RTT sample freshness.");
+            }
+            if mode=="tcp" {
+                println!("  Next TCP retransmission: {} ms", data["next_tcp_resend_ms"]);
+                println!("  Next TCP window: {}", data["next_tcp_window"]);
+                println!("  Existing TCP streams retain native BB congestion control.");
+            } else if mode=="udp" {
+                let cfg=load_config()?;
+                let buffer=get_number(&cfg,"udp_buf",0)?;
+                let idle=get_number(&cfg,"timeout",60)?;
+                println!("  UDP receive/send buffer requested: {}",
+                    if buffer==0{"OS default".into()}else{format!("{buffer} bytes")});
+                println!("  UDP idle timeout: {idle}s");
+                println!("  Actual kernel queue sizes can be lower than requested.");
+                println!("  TCP retransmission/window values do not apply to UDP.");
+            }
             Ok(())
         }
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
@@ -618,7 +638,12 @@ fn main_inner()->Result<()>{
         "setup"=>setup::wizard(),
         "key"=>display_pair_key(),
         "performance"=>show_adaptive_status(),
-        "auto-tune"=>auto_tune::run(),
+        "auto-tune"=>{
+            if args.len()>2 || args.get(1).is_some_and(|s|s!="--dry-run") {
+                return Err(failure("Usage: pingtunnel auto-tune [--dry-run]"));
+            }
+            auto_tune::run(args.get(1).is_some_and(|s|s=="--dry-run"))
+        },
         "security"=>show_security_status(),
         "health"=>show_health(),
         "service-install"=>service_install(),
