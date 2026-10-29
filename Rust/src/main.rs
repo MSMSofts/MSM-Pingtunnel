@@ -369,6 +369,8 @@ fn uninstall(purge: bool) -> Result<()> {
     let _ = run_systemctl(&["disable", "pingtunnel.service"]);
 
     remove_known_file(UNIT)?;
+    // systemctl disable can fail after a partial uninstall has removed the unit.
+    remove_known_file("/etc/systemd/system/multi-user.target.wants/pingtunnel.service")?;
     // Remove every Pingtunnel-specific drop-in, not merely memory.conf.
     remove_known_dir("/etc/systemd/system/pingtunnel.service.d")?;
     run_systemctl(&["daemon-reload"])?;
