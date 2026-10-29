@@ -200,6 +200,26 @@ func (p *Server) processPacket(packet *Packet) {
 	}
 }
 
+// The TCP frame-buffer field is repurposed only in UDP-mode packets to
+// carry an authenticated socket queue preference without changing wire v4.
+// Old clients send zero and keep OS defaults. Never trust unbounded values.
+func udpSocketPreferenceFromPacket(tcpmode int32, buffer int32) int {
+    if tcpmode != 0 || buffer < 64*1024 || buffer > 2*1024*1024 {
+        return 0
+    }
+    return int(buffer)
+}
+
+func applyPeerUDPQueue(conn *net.UDPConn, bytes int) {
+    if conn == nil || bytes == 0 { return }
+    if err:=conn.SetReadBuffer(bytes);err!=nil {
+        loggo.Info("Peer UDP socket receive buffer unavailable: %s",err)
+    }
+    if err:=conn.SetWriteBuffer(bytes);err!=nil {
+        loggo.Info("Peer UDP socket send buffer unavailable: %s",err)
+    }
+}
+
 func (p *Server) processDataPacketNewConn(id string, packet *Packet) *ServerConn {
 
 	loggo.Info("start add new connect  %s %s", id, packet.my.Target)
@@ -271,6 +291,8 @@ func (p *Server) processDataPacketNewConn(id string, packet *Packet) *ServerConn
 				return nil
 			}
 
+            applyPeerUDPQueue(association.UDPConn,
+                udpSocketPreferenceFromPacket(packet.my.Tcpmode,packet.my.TcpmodeBuffersize))
 			localConn := &ServerConn{
 				timeout:        (int)(packet.my.Timeout),
 				conn:           association.UDPConn,
@@ -298,6 +320,8 @@ func (p *Server) processDataPacketNewConn(id string, packet *Packet) *ServerConn
 			return nil
 		}
 		targetConn := c.(*net.UDPConn)
+        applyPeerUDPQueue(targetConn,
+            udpSocketPreferenceFromPacket(packet.my.Tcpmode,packet.my.TcpmodeBuffersize))
 		ipaddrTarget := targetConn.RemoteAddr().(*net.UDPAddr)
 
 		localConn := &ServerConn{timeout: (int)(packet.my.Timeout), conn: targetConn, ipaddrTarget: ipaddrTarget, id: id, rproto: (int)(packet.my.Rproto), tcpmode: (int)(packet.my.Tcpmode), udpTargetAddr: addr}
