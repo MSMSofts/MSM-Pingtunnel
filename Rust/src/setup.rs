@@ -123,7 +123,7 @@ pub(crate) fn wizard() -> Result<()> {
         if get_string(old,"region")==Some(region)
             && get_string(old,"peer_ip")==Some(peer.as_str())
             && get_string(old,"transport")==Some(transport) {
-            for key in ["tcp_bs","tcp_mw","tcp_rst","timeout"] {
+            for key in ["tcp_bs","tcp_mw","tcp_rst","udp_buf","timeout"] {
                 if let Some(value)=old.get(key) { cfg[key]=value.clone(); }
             }
         }
