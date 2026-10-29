@@ -1,5 +1,13 @@
 # Changelog / تاریخچه تغییرات
 
+## [3.3.10 preview] — Authenticated ICMP packet segmentation and safe maintenance
+
+- Keep full serialized UDP datagrams but independently AEAD-authenticate chunks of large protobuf messages. Bound each IPv4/ICMP packet to 1200 bytes, reconstruct only complete datagrams with 3-second TTL and 2 MiB bounded reassembly memory.
+- Preserve the original encrypted wire frame for small messages. Big messages require **both VPSs on 3.3.10**: older receivers cannot decode this authenticated fragment payload extension. There is no claim of cross-version UDP compatibility or zero network packet loss.
+- Independent Auto Tune preview/explicit apply and robust uninstall from hardening PR #30; kernel ICMP write, fragmentation and incomplete-group counters in `pingtunnel security`.
+- v3.3.10 is a **preview release** pending real end-to-end Exclave/Reels and MTU comparisons. Do not run on just one side; retain v3.3.8 rollback.
+
+
 ## Unreleased — Safety hardening (not a v3.3.9 hotfix)
 
 - Auto Tune becomes preview-only by default. An explicit `--apply` is necessary for a disruptive restart; Foreign exits without side effects.
