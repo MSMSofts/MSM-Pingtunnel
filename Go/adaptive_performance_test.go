@@ -132,3 +132,21 @@ func TestAdaptiveLastRTTMeasurementAge(t *testing.T) {
  sampleAdaptive(a,old,100*time.Millisecond)
  if age:=a.Status(1<<20,20000,400).LastSampleAgeSeconds;age<50 {t.Fatalf("stale measurement appeared fresh: %d",age)}
 }
+
+// Auto Tune must never use old RTT averages after a long idle period.
+func TestRecentAdaptiveRTTWindowExcludesOldHistory(t *testing.T) {
+ a:=NewAdaptivePerformance()
+ base:=time.Now().Add(-5*time.Minute)
+ for i:=0;i<12;i++{sampleAdaptive(a,base.Add(time.Duration(i)*time.Second),20*time.Millisecond)}
+ old:=a.Status(1<<20,20000,400)
+ if old.RecentSamples!=0 {t.Fatalf("old RTT samples treated as recent: %+v",old)}
+ for i:=0;i<9;i++{
+  at:=time.Now().Add(time.Duration(i)*time.Millisecond)
+  sampleAdaptive(a,at,120*time.Millisecond)
+ }
+ st:=a.Status(1<<20,20000,400)
+ if st.RecentSamples!=9 || st.RecentRTTMs<119 || st.RecentRTTMs>121 {
+  t.Fatalf("recent samples contaminated by historical RTT: %+v",st)
+ }
+ if st.RecentJitterMs>2 {t.Fatalf("unexpected stable-path jitter: %+v",st)}
+}
