@@ -812,7 +812,10 @@ func (p *Client) Accept() error {
 		clientConn.activeSendUnixNano.Store(now.UnixNano())
 		sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), p.targetAddr, clientConn.id, (uint32)(MyMsg_DATA), bytes[:n],
 			SEND_PROTO, RECV_PROTO, p.key,
-			clientConn.tcpmode, 0, 0, 0, 0, 0,
+            // Reuse the existing framing buffer field only when tcpmode=0
+            // as an authenticated preference for the foreign UDP socket.
+            // Wire v4 layout is unchanged; older peers safely ignore it.
+			clientConn.tcpmode, p.udpSocketBuffer, 0, 0, 0, 0,
 			p.timeout, p.cryptoConfig)
 
 		
