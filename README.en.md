@@ -1,5 +1,17 @@
 # Pingtunnel Manager
 
+## v3.3.10 preview — avoid kernel ICMP fragmentation
+
+Large UDP/QUIC messages are split **before encryption** into independently
+authenticated chunks and reconstructed only after every chunk passes AEAD
+verification and replay checks. IPv4 target packet size: **1200 bytes**.
+This does **not** change eth0 MTU or the application QUIC/BBR configuration;
+Auto Tune socket-buffer preferences remain independent. **Both VPS cores
+must be upgraded together**, or older peers will drop large fragmented
+messages. The actual reduction of Instagram Reels stalls remains to be
+verified on live VPSs. [Design, tests and limitations](docs/ICMP_DATAGRAM_SEGMENTATION.md).
+
+
 ## Unreleased safety hardening (development branch)
 
 - Menu **15) Auto Tune** and `sudo pingtunnel auto-tune` now **preview only**. On Foreign, Auto Tune returns without probing, changing configuration or restarting anything.
@@ -10,15 +22,15 @@
 
 **A lightweight, encrypted ICMP tunnel between exactly two Linux VPSs, with a five-question setup wizard.**
 
-[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.3.9](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.9)
+[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.3.9](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.10)
 
-![Version](https://img.shields.io/badge/version-3.3.9-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.3.10--preview-f59e0b) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
 
 Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** between an **Iran-side VPS** and an **overseas VPS**. Local TCP or UDP traffic enters the Iran VPS, travels inside authenticated, encrypted ICMP packets, and is forwarded by the overseas VPS to its configured local service.
 
 **This is a transport layer—not a standalone VPN server.** Services such as Hysteria 2, s-ui or other TCP/UDP applications run and are configured separately.
 
-**Next release: 3.3.9** · Rust manager, Go core, schema **3**, secure wire **4** · **Reverse-first Auto:** Foreign starts ICMP polls; Direct is reserved for prolonged confirmed outages with client demand. Video latency improvements require measured live testing.
+**Prior release: 3.3.9** · Rust manager, Go core, schema **3**, secure wire **4** · **Reverse-first Auto:** Foreign starts ICMP polls; Direct is reserved for prolonged confirmed outages with client demand. Video latency improvements require measured live testing.
 
 
 ## Authenticated TCP/UDP Auto Tune (v3.3.9)
