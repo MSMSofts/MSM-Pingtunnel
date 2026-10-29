@@ -326,35 +326,77 @@ fn update() -> Result<()> {
     Ok(())
 }
 
+// A missing path is normal for partially uninstalled or interrupted installs.
+fn remove_known_file(path: &str) -> Result<()> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(failure(format!("Cannot remove {path}: {e}"))),
+    }
+}
+
+fn remove_known_dir(path: &str) -> Result<()> {
+    match fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(failure(format!("Cannot remove directory {path}: {e}"))),
+    }
+}
+
 fn uninstall(purge: bool) -> Result<()> {
     root_required()?;
-    println!("Stop and remove the Pingtunnel service and binaries?");
-    if prompt("Confirm (type YES)", "no")? != "YES" {
-        println!("Cancelled.");
-        return Ok(());
-    }
-    let _ = run_systemctl(&["stop", "pingtunnel.service"]);
-    let _ = run_systemctl(&["disable", "pingtunnel.service"]);
-    for path in [UNIT, DROPIN, "/etc/systemd/system/pingtunnel.service.d"] {
-        let p = Path::new(path);
-        if p.is_file() {
-            fs::remove_file(p)?;
-        } else if p.is_dir() {
-            let _ = fs::remove_dir(p);
+    if purge {
+        println!("PERMANENT PURGE: removes pairing keys, configuration and all Pingtunnel data.");
+        if prompt("Type PURGE to confirm", "")? != "PURGE" {
+            println!("Cancelled. No changes made.");
+            return Ok(());
+        }
+    } else {
+        println!("Uninstall binaries and service; keep pairing configuration and private keys.");
+        if prompt("Type YES to confirm", "")? != "YES" {
+            println!("Cancelled. No changes made.");
+            return Ok(());
         }
     }
-    let _ = run_systemctl(&["daemon-reload"]);
-    let _ = fs::remove_file("/usr/local/bin/pingtunnel");
-    let _ = fs::remove_file("/usr/local/bin/install_pingtunnel.py");
-    let _ = fs::remove_file("/run/pingtunnel.pid");
-    let _ = fs::remove_file("/opt/pingtunnel/run_pingtunnel.py");
+    // A partially uninstalled host may have no unit. Stop is best-effort,
+    // but never delete the executable while the unit is still active.
+    let _ = run_systemctl(&["stop", "pingtunnel.service"]);
+    if Command::new("systemctl")
+        .args(["is-active", "--quiet", "pingtunnel.service"])
+        .status().is_ok_and(|status| status.success()) {
+        return Err(failure("Service is still active; refusing to remove a running tunnel."));
+    }
+    let _ = run_systemctl(&["disable", "pingtunnel.service"]);
+
+    remove_known_file(UNIT)?;
+    // Remove every Pingtunnel-specific drop-in, not merely memory.conf.
+    remove_known_dir("/etc/systemd/system/pingtunnel.service.d")?;
+    run_systemctl(&["daemon-reload"])?;
+    let _ = run_systemctl(&["reset-failed", "pingtunnel.service"]);
+
+    // Run-time files are not configuration and must not survive uninstall.
+    for path in [
+        CORE_CONFIG,
+        PERF_STATUS,
+        SECURITY_STATUS,
+        "/run/pingtunnel.pid",
+        "/usr/local/bin/install_pingtunnel.py",
+        "/opt/pingtunnel/run_pingtunnel.py",
+    ] {
+        remove_known_file(path)?;
+    }
+    remove_known_dir("/opt/pingtunnel/bin")?;
     if purge {
-        let _ = fs::remove_dir_all("/opt/pingtunnel");
-        let _ = fs::remove_dir_all("/var/log/pingtunnel");
-        println!("Removed application, configuration, and logs.");
+        remove_known_dir("/opt/pingtunnel")?;
+        remove_known_dir("/var/log/pingtunnel")?;
+    }
+    // Remove the manager last so a partial failure remains repairable.
+    remove_known_file("/usr/local/bin/pingtunnel")?;
+    if purge {
+        println!("Pingtunnel purged: service, binaries, runtime files and private config removed.");
     } else {
-        let _ = fs::remove_dir_all("/opt/pingtunnel/bin");
-        println!("Uninstalled. Kept /opt/pingtunnel/conf/config.json and existing logs.");
+        println!("Pingtunnel uninstalled. Pairing config kept in /opt/pingtunnel/conf/config.json.");
+        println!("Use: pingtunnel uninstall --purge (before uninstall) for permanent config removal.");
     }
     Ok(())
 }
@@ -364,9 +406,9 @@ fn help(){
     println!("  pingtunnel            Unified menu");
     println!("  pingtunnel setup      Five questions on each VPS");
     println!("  pingtunnel key        Show existing pairing key (root only)");
-    println!("  pingtunnel validate | performance | auto-tune [--dry-run] | security | health | dry-run");
+    println!("  pingtunnel validate | performance | auto-tune [--dry-run | --apply] | security | health | dry-run");
     println!("  pingtunnel start | stop | restart | status | logs [lines]");
-    println!("  pingtunnel update | uninstall [--purge]");
+    println!("  pingtunnel update | uninstall [--purge]  (permanent purge requires PURGE confirmation)");
 }
 
 fn display_pair_key()->Result<()>{
@@ -639,10 +681,12 @@ fn main_inner()->Result<()>{
         "key"=>display_pair_key(),
         "performance"=>show_adaptive_status(),
         "auto-tune"=>{
-            if args.len()>2 || args.get(1).is_some_and(|s|s!="--dry-run") {
-                return Err(failure("Usage: pingtunnel auto-tune [--dry-run]"));
+            if args.len()>2 || args.get(1).is_some_and(|s|s!="--dry-run" && s!="--apply") {
+                return Err(failure("Usage: pingtunnel auto-tune [--dry-run | --apply]"));
             }
-            auto_tune::run(args.get(1).is_some_and(|s|s=="--dry-run"))
+            // Default and --dry-run are safe previews. Only explicit --apply
+            // is allowed to persist settings and restart the Go core.
+            auto_tune::run(args.get(1).is_some_and(|s|s=="--apply"))
         },
         "security"=>show_security_status(),
         "health"=>show_health(),
@@ -654,7 +698,12 @@ fn main_inner()->Result<()>{
         "status"=>run_systemctl(&["status","pingtunnel.service","--no-pager"]),
         "logs"=>logs(args.get(1).map(String::as_str).unwrap_or("100")),
         "update"=>update(),
-        "uninstall"=>uninstall(args.get(1).map(String::as_str)==Some("--purge")),
+        "uninstall"=>{
+            if args.len()>2 || args.get(1).is_some_and(|s|s!="--purge") {
+                return Err(failure("Usage: pingtunnel uninstall [--purge]"));
+            }
+            uninstall(args.get(1).map(String::as_str)==Some("--purge"))
+        },
         "version"|"--version"=>{println!("{}",env!("CARGO_PKG_VERSION"));Ok(())},
         "help"|"--help"|"-h"=>{help();Ok(())},
         _=>{help();Err(failure(format!("Unknown command: {sub}")))}
