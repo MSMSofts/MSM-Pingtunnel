@@ -319,8 +319,8 @@ mod tests {
     }
     #[test]
     fn bad_or_insufficient_samples_never_tune() {
-        assert!(calculate(Samples { rtt_ms: f64::NAN, jitter_ms: 1.0, loss: 0.0, count: 8 }, None).is_none());
-        assert!(calculate(Samples { rtt_ms: 100.0, jitter_ms: 10.0, loss: 0.7, count: 8 }, None).is_none());
-        assert!(calculate(Samples { rtt_ms: 100.0, jitter_ms: 10.0, loss: 0.0, count: 1 }, None).is_none());
+        assert!(calculate_tcp(Samples { rtt_ms: f64::NAN, jitter_ms: 1.0, loss: 0.0, count: 8 }, None).is_none());
+        assert!(calculate_tcp(Samples { rtt_ms: 100.0, jitter_ms: 10.0, loss: 0.7, count: 8 }, None).is_none());
+        assert!(calculate_tcp(Samples { rtt_ms: 100.0, jitter_ms: 10.0, loss: 0.0, count: 1 }, None).is_none());
     }
 }
