@@ -80,13 +80,13 @@ const DIAGNOSTIC: [(u8, &str, &str); 2] = [
 ];
 const MAINTENANCE: [(u8, &str, &str); 3] = [
     (10, "Update", "Upgrade + restart tunnel"),
-    (11, "Uninstall", "Remove program"),
+    (11, "Uninstall", "Remove binaries; keep pairing config"),
     (12, "Exit", "Close menu"),
 ];
 const SECURITY: [(u8, &str, &str); 3] = [
     (13, "Security", "Replay and recovery"),
     (14, "Health", "Core heartbeat"),
-    (15, "Auto Tune", "Test path; tune TCP/UDP"),
+    (15, "Auto Tune", "Safe preview (Iran only)"),
 ];
 
 fn options(out: &mut String, section: &str, entries: &[(u8, &str, &str)],
