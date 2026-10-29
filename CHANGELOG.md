@@ -1,5 +1,17 @@
 # Changelog / تاریخچه تغییرات
 
+## [3.3.9](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.9) — Authenticated TCP/UDP path Auto Tune
+
+**Schema 3 · Secure wire v4 · No cryptographic, pairing or ICMP direction changes**
+
+- New option **15) Auto Tune** and `pingtunnel auto-tune [--dry-run]` on the Iran client: tests ordinary/sized IPv4 ICMP as *diagnostics* and only tunes from **8 authenticated RTT observations within 120 seconds**, newest within 35 seconds. Existing Go RTT estimator and online TCP congestion stay active.
+- Conservative bounded TCP buffer/window/RTO/idle-timeout profiles; UDP socket read/write buffers and UDP idle-timeout profiles, without assigning TCP framing semantics to UDP.
+- For authenticated UDP traffic only, the existing (previously unused) TCP buffer value carries an optional bounded UDP socket queue preference to new foreign cores. No protobuf field or wire-version change; old peers ignore the preference. Foreign-side loopback/proxied UDP sockets use it subject to kernel caps. Datagram MTU and QUIC/Hysteria application congestion are not modified.
+- Before changes, save a 0600 configuration backup; after restart require new systemd PID, fresh Go status and authenticated return traffic within 45 seconds. Restore prior settings on failure. CLI preview makes no changes.
+- Strong input/peer bounds, transport-specific CLI diagnostics, compatible Setup persistence, Rust/Go regression coverage, Go race tests, and AMD64/ARM64 builds. **Live two-VPS throughput, loss and jitter benchmarking remains necessary; measured optimal performance is not guaranteed.**
+- Installer, manager, Go core and CI release manifest all agree on v3.3.9. Upgrade both peers for foreign-side UDP socket preference support.
+
+
 ## [3.3.8](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.8) — Exact encrypted PING echo filtering and active TTL signature pruning
 
 **Schema 3 · Secure wire v4 · No encryption, protocol layout, Reverse-first or BBR changes**

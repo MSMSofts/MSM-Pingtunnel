@@ -86,6 +86,9 @@ Usage:
     -tcp      设置是否按tcp模式转发，默认0为udp模式，1为tcp模式
               Set whether to forward in tcp mode, default 0 is udp mode, 1 is tcp mode
 
+    -udp_buf  udp client socket receive/send queue size in bytes (0 = OS default)
+              Local kernel may cap the requested size; does not change UDP payload MTU.
+
     -tcp_bs   tcp模式发送接收缓冲区大小，默认1MB
               tcp mode buffer size, default 1MB
 
@@ -146,6 +149,7 @@ func main() {
 	encryption := flag.String("encrypt", "", "encryption mode: aes128, aes256, chacha20")
 	encryptionKey := flag.String("encrypt-key", "", "encryption key (base64 or passphrase)")
 	tcpmode := flag.Int("tcp", 0, "tcp mode")
+	udpBuffer := flag.Int("udp_buf", 0, "UDP listener socket buffer bytes (0 uses OS default)")
 	tcpmode_buffersize := flag.Int("tcp_bs", 1*1024*1024, "tcp mode buffer size")
 	tcpmode_maxwin := flag.Int("tcp_mw", 20000, "tcp mode max win")
 	tcpmode_resend_timems := flag.Int("tcp_rst", 400, "tcp mode resend time ms")
@@ -180,7 +184,7 @@ func main() {
 	flag.Parse()
 
     if *protocolInfo {
-        fmt.Println("pingtunnel-go-core=3.3.8 config-schema=3 wire=4")
+        fmt.Println("pingtunnel-go-core=3.3.9 config-schema=3 wire=4")
         return
     }
 	if *showVersion || *showVersionLong {
@@ -237,6 +241,9 @@ func main() {
 		if !setFlags["tcp"] && cfg.TCPMode != 0 {
 			*tcpmode = cfg.TCPMode
 		}
+        if !setFlags["udp_buf"] && cfg.UDPBufferSize != 0 {
+            *udpBuffer = cfg.UDPBufferSize
+        }
 		if !setFlags["tcp_bs"] && cfg.TCPBufferSize != 0 {
 			*tcpmode_buffersize = cfg.TCPBufferSize
 		}
@@ -426,6 +433,10 @@ func main() {
 			loggo.Error("ERROR: %s", err.Error())
 			os.Exit(1)
 		}
+        if err := c.SetUDPBufferSize(*udpBuffer); err != nil {
+            fmt.Fprintf(os.Stderr, "Invalid UDP socket buffer: %v\n", err)
+            os.Exit(1)
+        }
 		loggo.Info("Client Listen %s (%s) Server %s (%s) TargetPort %s ICMP Listen %s", c.Addr(), c.IPAddr(),
 			c.ServerAddr(), c.ServerIPAddr(), c.TargetAddr(), c.ICMPAddr())
 		err = c.Run()

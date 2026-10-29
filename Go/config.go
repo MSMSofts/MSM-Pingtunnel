@@ -22,6 +22,7 @@ type Config struct {
 	ICMPDirection    string `json:"icmp_direction,omitempty"`
 	FixedTarget      string `json:"fixed_target,omitempty"`
 	ForwardProtocol  int    `json:"forward_protocol,omitempty"`
+	UDPBufferSize    int    `json:"udp_buf,omitempty"`
 	TCPMode          int    `json:"tcp,omitempty"`
 	TCPBufferSize    int    `json:"tcp_bs,omitempty"`
 	TCPMaxWin        int    `json:"tcp_mw,omitempty"`

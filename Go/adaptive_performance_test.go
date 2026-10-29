@@ -90,6 +90,9 @@ func TestAdaptiveStatusIsSecretFreeAndPrivate(t *testing.T) {
  var value map[string]interface{}
  if err=json.Unmarshal(raw,&value);err!=nil{t.Fatal(err)}
  if value["rtt_samples"]!=float64(1) || value["profile"]!="stable" {t.Fatalf("unexpected status: %s",raw)}
+ if age,ok:=value["last_rtt_sample_age_seconds"].(float64);!ok||age<0||age>3 {
+   t.Fatalf("recent authenticated RTT sample not reported correctly: %v",value)
+ }
 }
 
 func TestContinuousPingsWithoutPongsRegistersLoss(t *testing.T){
@@ -119,4 +122,31 @@ func TestReorderedPongsForSeparateOutstandingPings(t *testing.T){
  a.OnPong(base.Add(time.Second),base.Add(time.Second+80*time.Millisecond))
  st:=a.Status(1<<20,20000,400)
  if st.Samples!=2||st.LossEstimate!=0{t.Fatalf("valid reordered pong ignored: %+v",st)}
+}
+
+// A fresh JSON heartbeat is not proof the last RTT measurement is fresh.
+func TestAdaptiveLastRTTMeasurementAge(t *testing.T) {
+ a:=NewAdaptivePerformance()
+ if age:=a.Status(1<<20,20000,400).LastSampleAgeSeconds;age!=-1 {t.Fatalf("unmeasured RTT has age %d",age)}
+ old:=time.Now().Add(-55*time.Second)
+ sampleAdaptive(a,old,100*time.Millisecond)
+ if age:=a.Status(1<<20,20000,400).LastSampleAgeSeconds;age<50 {t.Fatalf("stale measurement appeared fresh: %d",age)}
+}
+
+// Auto Tune must never use old RTT averages after a long idle period.
+func TestRecentAdaptiveRTTWindowExcludesOldHistory(t *testing.T) {
+ a:=NewAdaptivePerformance()
+ base:=time.Now().Add(-5*time.Minute)
+ for i:=0;i<12;i++{sampleAdaptive(a,base.Add(time.Duration(i)*time.Second),20*time.Millisecond)}
+ old:=a.Status(1<<20,20000,400)
+ if old.RecentSamples!=0 {t.Fatalf("old RTT samples treated as recent: %+v",old)}
+ for i:=0;i<9;i++{
+  at:=time.Now().Add(time.Duration(i)*time.Millisecond)
+  sampleAdaptive(a,at,120*time.Millisecond)
+ }
+ st:=a.Status(1<<20,20000,400)
+ if st.RecentSamples!=9 || st.RecentRTTMs<119 || st.RecentRTTMs>121 {
+  t.Fatalf("recent samples contaminated by historical RTT: %+v",st)
+ }
+ if st.RecentJitterMs>2 {t.Fatalf("unexpected stable-path jitter: %+v",st)}
 }

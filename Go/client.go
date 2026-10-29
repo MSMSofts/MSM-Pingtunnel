@@ -1,6 +1,7 @@
 package pingtunnel
 
 import (
+	"fmt"
 	"github.com/esrrhs/gohome/common"
 	"github.com/esrrhs/gohome/loggo"
 	"github.com/esrrhs/gohome/network"
@@ -93,6 +94,7 @@ type Client struct {
 	rproto                int
 	key                   int
 	tcpmode               int
+	udpSocketBuffer       int
 	tcpmode_buffersize    int
 	tcpmode_maxwin        int
 	tcpmode_resend_timems int
@@ -159,6 +161,19 @@ type ClientConn struct {
 
 func (p *Client) nextSequence() int {
  return int(p.sequence.Add(1)&0xffff)
+}
+
+// SetUDPBufferSize configures only local UDP socket queues, not packet sizes.
+// Zero preserves OS defaults. TCP framing and UDP payloads are unaffected.
+func (p *Client) SetUDPBufferSize(bytes int) error {
+    if bytes != 0 && (bytes < 64*1024 || bytes > 2*1024*1024) {
+        return fmt.Errorf("udp_buf must be 0 or 65536..2097152 bytes")
+    }
+    if bytes != 0 && p.tcpmode != 0 {
+        return fmt.Errorf("udp_buf cannot be used in TCP mode")
+    }
+    p.udpSocketBuffer = bytes
+    return nil
 }
 
 func (p *Client) Addr() string {
@@ -306,6 +321,17 @@ func (p *Client) Run() error {
 			loggo.Error("Error listening for udp packets: %s", err.Error())
 			return err
 		}
+        if p.udpSocketBuffer > 0 {
+            if err := listener.SetReadBuffer(p.udpSocketBuffer); err != nil {
+                listener.Close()
+                return fmt.Errorf("set UDP receive buffer: %w", err)
+            }
+            if err := listener.SetWriteBuffer(p.udpSocketBuffer); err != nil {
+                listener.Close()
+                return fmt.Errorf("set UDP send buffer: %w", err)
+            }
+            loggo.Info("UDP socket buffer requested: %d bytes (subject to kernel caps)", p.udpSocketBuffer)
+        }
 		p.listenConn = listener
 	}
 
@@ -786,7 +812,10 @@ func (p *Client) Accept() error {
 		clientConn.activeSendUnixNano.Store(now.UnixNano())
 		sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), p.targetAddr, clientConn.id, (uint32)(MyMsg_DATA), bytes[:n],
 			SEND_PROTO, RECV_PROTO, p.key,
-			clientConn.tcpmode, 0, 0, 0, 0, 0,
+            // Reuse the existing framing buffer field only when tcpmode=0
+            // as an authenticated preference for the foreign UDP socket.
+            // Wire v4 layout is unchanged; older peers safely ignore it.
+			clientConn.tcpmode, p.udpSocketBuffer, 0, 0, 0, 0,
 			p.timeout, p.cryptoConfig)
 
 		

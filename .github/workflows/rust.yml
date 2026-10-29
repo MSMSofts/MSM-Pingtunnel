@@ -85,7 +85,7 @@ jobs:
           cp Go/*.go upstream/
           cp Go/cmd/main.go upstream/cmd/main.go
           cd upstream
-          gofmt -w crypto.go auto_crypto.go auto_crypto_test.go adaptive_performance.go adaptive_performance_test.go client.go server.go server_policy.go config.go pairing_v3_test.go secure_session.go secure_session_test.go security_hardening_test.go link_watchdog.go link_watchdog_test.go reverse_icmp.go reverse_icmp_test.go reverse_echo_reflection_test.go reverse_data_echo_reflection_test.go reverse_ping_echo_reflection_test.go reverse_integration_test.go reverse_optimization_test.go reverse_replay_load_test.go reverse_runtime.go pingtunnel.go cmd/main.go
+          gofmt -w crypto.go auto_crypto.go auto_crypto_test.go adaptive_performance.go adaptive_performance_test.go udp_tuning_test.go client.go server.go server_policy.go config.go pairing_v3_test.go secure_session.go secure_session_test.go security_hardening_test.go link_watchdog.go link_watchdog_test.go reverse_icmp.go reverse_icmp_test.go reverse_echo_reflection_test.go reverse_data_echo_reflection_test.go reverse_ping_echo_reflection_test.go reverse_integration_test.go reverse_optimization_test.go reverse_replay_load_test.go reverse_runtime.go pingtunnel.go cmd/main.go
       - name: Run upstream and auto crypto tests
         run: |
           cd upstream
@@ -95,7 +95,7 @@ jobs:
         run: |
           cd upstream
           go build -o /tmp/pingtunnel-security-verify ./cmd
-          test "$(/tmp/pingtunnel-security-verify -security-protocol)" = "pingtunnel-go-core=3.3.8 config-schema=3 wire=4"
+          test "$(/tmp/pingtunnel-security-verify -security-protocol)" = "pingtunnel-go-core=3.3.9 config-schema=3 wire=4"
           if /tmp/pingtunnel-security-verify -c /tmp/does-not-exist-pingtunnel-config.json; then
             echo "Go core returned success for an invalid config" >&2
             exit 1
@@ -138,15 +138,15 @@ jobs:
       - name: Build release compatibility manifest
         run: |
           {
-            printf 'release=v3.3.8\nconfig_schema=3\nwire=4\n'
+            printf 'release=v3.3.9\nconfig_schema=3\nwire=4\n'
             printf 'upstream_go=df16e52771ee67f1f9770ec68763b425672a36fc\n'
             printf 'source_commit=%s\n' "$GITHUB_SHA"
             (cd dist && sha256sum pingtunnel-core-linux-* pingtunnel-manager-linux-* | grep -v '\.sha256') 
           } > dist/release-manifest.txt
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v3.3.8
-          name: Pingtunnel Manager 3.3.8 — secure wire v4
+          tag_name: v3.3.9
+          name: Pingtunnel Manager 3.3.9 — secure wire v4
           prerelease: false
           make_latest: false
           files: dist/*

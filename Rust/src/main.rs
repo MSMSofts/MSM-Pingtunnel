@@ -14,6 +14,7 @@ use std::process::{self, Command, Stdio};
 mod setup;
 mod menu_ui;
 mod resource_monitor;
+mod auto_tune;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -88,6 +89,21 @@ fn validate(cfg: &Value) -> Result<()> {
     let bytes=STANDARD.decode(secret).map_err(|_|failure("pairing key not base64"))?;
     if bytes.len()!=32||STANDARD.encode(&bytes)!=secret{return Err(failure("pairing key must be 32 random bytes in canonical base64"));}
     if get_number(cfg,"memory_mb",0)?>1_048_576{return Err(failure("invalid memory limit"));}
+    // Restrict new optional performance overrides to safe Go core ranges.
+    let udp_buffer=get_number(cfg,"udp_buf",0)?;
+    if udp_buffer!=0 && !(65_536..=2_097_152).contains(&udp_buffer) {
+        return Err(failure("invalid udp_buf: use 0 or 65536..=2097152 bytes"));
+    }
+    for (field,default,min,max) in [
+        ("tcp_bs",1_048_576,65_536,2_097_152),
+        ("tcp_mw",20_000,256,20_000),
+        ("tcp_rst",400,300,2_400),
+        ("timeout",60,30,120),
+    ] {
+        if !(min..=max).contains(&get_number(cfg,field,default)?) {
+            return Err(failure(format!("invalid {field}: expected {min}..={max}")));
+        }
+    }
     if cfg.get("autostart").and_then(Value::as_bool).is_none(){return Err(failure("autostart must be boolean"));}
     Ok(())
 }
@@ -159,6 +175,17 @@ fn go_core_config(cfg:&Value)->Result<Value>{
         "icmp_direction":cfg.get("icmp_direction").and_then(Value::as_str).unwrap_or("auto")
     });
     if region=="iran"{
+        config["timeout"]=json!(get_number(cfg,"timeout",60)?);
+        // The client owns TCP framing; the foreign service gets these values
+        // over authenticated packets and never needs divergent local tuning.
+        if transport=="tcp" {
+            config["tcp_bs"]=json!(get_number(cfg,"tcp_bs",1_048_576)?);
+            config["tcp_mw"]=json!(get_number(cfg,"tcp_mw",20_000)?);
+            config["tcp_rst"]=json!(get_number(cfg,"tcp_rst",400)?);
+        } else {
+            let buf=get_number(cfg,"udp_buf",0)?;
+            if buf>0 {config["udp_buf"]=json!(buf);}
+        }
         config["listen"]=json!(format!(":{port}"));
         config["server"]=json!(peer);
         // The foreign server MUST ignore this compatibility placeholder.
@@ -337,7 +364,7 @@ fn help(){
     println!("  pingtunnel            Unified menu");
     println!("  pingtunnel setup      Five questions on each VPS");
     println!("  pingtunnel key        Show existing pairing key (root only)");
-    println!("  pingtunnel validate | performance | security | health | dry-run");
+    println!("  pingtunnel validate | performance | auto-tune [--dry-run] | security | health | dry-run");
     println!("  pingtunnel start | stop | restart | status | logs [lines]");
     println!("  pingtunnel update | uninstall [--purge]");
 }
@@ -399,7 +426,7 @@ fn menu()->Result<()>{
             menu_ui::choose(&mut monitor,display,default)?
         }else{
             print!("{}",display(monitor.current(),80,40));
-            prompt("Choose (1-14)",default)?
+            prompt("Choose (1-15)",default)?
         };
         let action=match choice.as_str(){
             "1"=>run_systemctl(&["status","pingtunnel.service","--no-pager"]),
@@ -416,7 +443,8 @@ fn menu()->Result<()>{
             "12"|"q"|"Q"=>return Ok(()),
             "13"=>show_security_status(),
             "14"=>show_health(),
-            _=>{println!("Invalid choice: use 1..14.");continue}
+            "15"=>auto_tune::run(false),
+            _=>{println!("Invalid choice: use 1..15.");continue}
         };
         if let Err(e)=action{eprintln!("Operation failed: {e}");}
         // Hold command output until confirmed; otherwise the alternate-screen
@@ -540,15 +568,35 @@ fn show_adaptive_status() -> Result<()> {
     match fs::read(PERF_STATUS) {
         Ok(bytes) => {
             let data: Value = serde_json::from_slice(&bytes)?;
+            let mode=load_config().ok()
+                .and_then(|cfg|cfg["transport"].as_str().map(str::to_owned))
+                .unwrap_or_else(||"unknown".into());
             println!("Adaptive Performance (Go core, automatic)");
             println!("  Profile: {}", data["profile"].as_str().unwrap_or("unknown"));
             println!("  RTT: {} ms", data["rtt_ms"]);
             println!("  Jitter: {} ms", data["jitter_ms"]);
             println!("  Probe loss estimate: {}", data["probe_loss_estimate"]);
-            println!("  Next TCP retransmission: {} ms", data["next_tcp_resend_ms"]);
-            println!("  Next TCP window: {}", data["next_tcp_window"]);
             println!("  Samples: {}", data["rtt_samples"]);
-            println!("  Existing TCP streams retain native BB congestion control.");
+            if let Some(age)=data["last_rtt_sample_age_seconds"].as_i64() {
+                println!("  Last authenticated RTT sample: {}",
+                    if age<0 {"never".into()}else{format!("{age}s ago")});
+            } else {
+                println!("  WARNING: Go core does not report RTT sample freshness.");
+            }
+            if mode=="tcp" {
+                println!("  Next TCP retransmission: {} ms", data["next_tcp_resend_ms"]);
+                println!("  Next TCP window: {}", data["next_tcp_window"]);
+                println!("  Existing TCP streams retain native BB congestion control.");
+            } else if mode=="udp" {
+                let cfg=load_config()?;
+                let buffer=get_number(&cfg,"udp_buf",0)?;
+                let idle=get_number(&cfg,"timeout",60)?;
+                println!("  UDP receive/send buffer requested: {}",
+                    if buffer==0{"OS default".into()}else{format!("{buffer} bytes")});
+                println!("  UDP idle timeout: {idle}s");
+                println!("  Actual kernel queue sizes can be lower than requested.");
+                println!("  TCP retransmission/window values do not apply to UDP.");
+            }
             Ok(())
         }
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
@@ -590,6 +638,12 @@ fn main_inner()->Result<()>{
         "setup"=>setup::wizard(),
         "key"=>display_pair_key(),
         "performance"=>show_adaptive_status(),
+        "auto-tune"=>{
+            if args.len()>2 || args.get(1).is_some_and(|s|s!="--dry-run") {
+                return Err(failure("Usage: pingtunnel auto-tune [--dry-run]"));
+            }
+            auto_tune::run(args.get(1).is_some_and(|s|s=="--dry-run"))
+        },
         "security"=>show_security_status(),
         "health"=>show_health(),
         "service-install"=>service_install(),
@@ -635,6 +689,7 @@ mod tests{
         assert_eq!(remote["forward_protocol"],0);
         assert_eq!(remote["icmp_direction"],"auto");
         assert_eq!(remote["peer_ip"],"198.51.100.45");
+        assert!(remote.get("tcp_bs").is_none());
     }
     #[test]
     fn no_legacy_or_unencrypted_fallback(){
@@ -644,6 +699,40 @@ mod tests{
         c.as_object_mut().unwrap().remove("pair_key");
         assert!(validate(&c).is_err());
         assert!(go_core_config(&c).is_err());
+    }
+    #[test]
+    fn performance_overrides_are_validated_and_forwarded() {
+        let mut cfg=conf("iran","tcp",443);
+        cfg["tcp_bs"]=json!(524288);
+        cfg["tcp_mw"]=json!(4096);
+        cfg["tcp_rst"]=json!(850);
+        cfg["timeout"]=json!(90);
+        let go=go_core_config(&cfg).unwrap();
+        assert_eq!(go["tcp_bs"],524288);
+        assert_eq!(go["tcp_mw"],4096);
+        assert_eq!(go["tcp_rst"],850);
+        assert_eq!(go["timeout"],90);
+        cfg["tcp_mw"]=json!(20001);
+        assert!(validate(&cfg).is_err());
+    }
+    #[test]
+    fn udp_socket_queue_override_is_validated_and_client_only() {
+        let mut cfg=conf("iran","udp",444);
+        assert!(go_core_config(&cfg).unwrap().get("udp_buf").is_none());
+        cfg["udp_buf"]=json!(524288);
+        cfg["timeout"]=json!(90);
+        let go=go_core_config(&cfg).unwrap();
+        assert_eq!(go["tcp"],0);
+        assert_eq!(go["udp_buf"],524288);
+        assert_eq!(go["timeout"],90);
+        assert!(go.get("tcp_mw").is_none());
+        cfg["udp_buf"]=json!(10);
+        assert!(validate(&cfg).is_err());
+        cfg["udp_buf"]=json!(2097153);
+        assert!(validate(&cfg).is_err());
+        let mut server=conf("foreign","udp",444);
+        server["udp_buf"]=json!(524288);
+        assert!(go_core_config(&server).unwrap().get("udp_buf").is_none());
     }
     #[test]
     fn mismatched_inputs_rejected(){
