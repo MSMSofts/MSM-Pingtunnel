@@ -86,7 +86,7 @@ const MAINTENANCE: [(u8, &str, &str); 3] = [
 const SECURITY: [(u8, &str, &str); 3] = [
     (13, "Security", "Replay and recovery"),
     (14, "Health", "Core heartbeat"),
-    (15, "Auto Tune", "Test path and optimize TCP"),
+    (15, "Auto Tune", "Test path; tune TCP/UDP"),
 ];
 
 fn options(out: &mut String, section: &str, entries: &[(u8, &str, &str)],
