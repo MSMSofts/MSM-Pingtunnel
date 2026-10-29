@@ -15,10 +15,11 @@ Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** betwe
 
 ## Auto Tune (proposed, not yet released)
 
-On the **Iran-side TCP client**, run `sudo pingtunnel auto-tune` or select **15) Auto Tune** in the manager menu. The live tunnel must already be authenticated. This one-shot command tests ordinary IPv4 echo latency/loss, a larger ICMP payload, and recent authenticated RTT/jitter/loss reported by the Go core. If data quality is insufficient or loss is extreme, it changes nothing.
+On the **Iran-side TCP or UDP forwarding client**, run `sudo pingtunnel auto-tune` or select **15) Auto Tune** in the manager menu. The tunnel must already be authenticated. Auto Tune samples recent encrypted-tunnel RTT/jitter/loss and uses ordinary/sized ICMP echo as supplemental evidence when available. Insufficient or extremely poor measurements cause no settings to be changed.
 
-Auto Tune chooses conservative bounded overrides for `tcp_bs`, `tcp_mw`, `tcp_rst`, and `timeout`, saves the previous private configuration as `/opt/pingtunnel/conf/config.pre-autotune.json` (0600), restarts the service, and restores the previous configuration on startup/heartbeat failure. The existing Go adaptive logic continues adjusting initial settings for **new** TCP flows. Echo packet size is **not** a validated MTU or bandwidth test. Foreign-side or UDP settings, pairing material, encryption, and port/peer identity are not automatically changed. Measurements and live performance improvements need verification on the actual VPS pair.
+For **TCP**, it adjusts bounded `tcp_bs`, `tcp_mw`, `tcp_rst` and connection idle `timeout` overrides, leaving Go's per-new-stream adaptive controller and congestion control intact. For **UDP**, it adjusts **only** the local listener `udp_buf` socket receive/send buffers (256 KiB, 512 KiB or 1 MiB) and idle connection `timeout` (60/90/120 seconds). UDP has no TCP retransmission window. The Linux kernel may cap effective UDP socket buffers; this setting does not alter a datagram's size, path MTU, application QUIC/Hysteria congestion control, or remote VPS socket queues, and it **cannot fix upstream packet loss**.
 
+Before changes, a 0600 backup of the previous configuration is written to `/opt/pingtunnel/conf/config.pre-autotune.json`. The service is restarted and previous settings are restored if restarting or its fresh heartbeat check fails. Peer IP, pairing key, encrypted wire format, ports, and ICMP direction are never changed by the tuner. Live throughput, QUIC behavior and service stability still require testing on the actual VPS pair.
 
 ## Reflected encrypted PING detection and active TTL eviction (v3.3.8)
 
