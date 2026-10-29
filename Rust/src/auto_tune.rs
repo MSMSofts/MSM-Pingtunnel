@@ -204,7 +204,7 @@ fn core_restarted_since(started: SystemTime, previous_pid: Option<u32>) -> bool 
     false
 }
 
-pub(crate) fn run() -> Result<()> {
+pub(crate) fn run(dry_run: bool) -> Result<()> {
     root_required()?;
     let original = load_config()?;
     if get_string(&original, "region") != Some("iran") {
@@ -258,6 +258,10 @@ pub(crate) fn run() -> Result<()> {
     }
     if updated == original {
         println!("Already using these values; no restart required.");
+        return Ok(());
+    }
+    if dry_run {
+        println!("Preview only: settings, service and backup are unchanged.");
         return Ok(());
     }
     // Stop if the authenticated path disappeared while the active probes ran.
@@ -334,6 +338,22 @@ mod tests {
         assert!(calculate_udp(Samples { loss: 0.75, ..stable }).is_none());
         assert!(calculate_udp(Samples { jitter_ms: f64::NAN, ..stable }).is_none());
         assert!(calculate_udp(Samples { count: 2, ..stable }).is_none());
+    }
+    #[test]
+    fn reauthentication_requires_matching_secure_peer_state() {
+        let mut valid=json!({
+            "state":"authenticated", "region":"iran", "wire_version":4,
+            "config_schema":3, "last_valid_age_seconds":3
+        });
+        assert!(authenticated_status(&valid));
+        valid["state"]=json!("negotiating");
+        assert!(!authenticated_status(&valid));
+        valid["state"]=json!("authenticated");
+        valid["last_valid_age_seconds"]=json!(50);
+        assert!(!authenticated_status(&valid));
+        valid["last_valid_age_seconds"]=json!(0);
+        valid["wire_version"]=json!(3);
+        assert!(!authenticated_status(&valid));
     }
     #[test]
     fn bad_or_insufficient_samples_never_tune() {
