@@ -87,6 +87,10 @@ fn require_authenticated_path() -> Result<()> {
 
 fn tunnel_samples() -> Option<Samples> {
     let value = fresh_status(PERF_STATUS, 15)?;
+    parse_tunnel_samples(&value)
+}
+
+fn parse_tunnel_samples(value: &Value) -> Option<Samples> {
     let count = usize::try_from(value["rtt_samples"].as_u64()?).ok()?;
     // A freshly rewritten status file can still contain hour-old RTT values.
     // Only authenticated pongs observed in the last 35 seconds are useful.
@@ -214,9 +218,11 @@ pub(crate) fn run(dry_run: bool) -> Result<()> {
     require_authenticated_path()?;
     let peer = get_string(&original, "peer_ip").unwrap();
     println!("Auto Tune: measuring authenticated tunnel RTT and IPv4 echo replies to {peer}...");
-    let baseline = tunnel_samples();
     let normal_ping = probe(peer, 56, 8);
     let large_ping = probe(peer, 1180, 5);
+    // Read authenticated QoS status AFTER diagnostic probes so the decision
+    // uses the newest available core samples, not a snapshot from ~10s ago.
+    let baseline = tunnel_samples();
     // Raw ICMP echoes may be filtered or independently rate-limited, and
     // neither proves encrypted-tunnel delivery. They are diagnostic only.
     let quality = baseline.ok_or_else(|| failure(
@@ -338,6 +344,24 @@ mod tests {
         assert!(calculate_udp(Samples { loss: 0.75, ..stable }).is_none());
         assert!(calculate_udp(Samples { jitter_ms: f64::NAN, ..stable }).is_none());
         assert!(calculate_udp(Samples { count: 2, ..stable }).is_none());
+    }
+    #[test]
+    fn refuses_stale_or_insufficient_authenticated_rtt_samples() {
+        let mut status=json!({
+            "rtt_samples":12, "rtt_ms":84.0, "jitter_ms":11.0,
+            "probe_loss_estimate":0.03, "last_rtt_sample_age_seconds":2
+        });
+        assert!(parse_tunnel_samples(&status).is_some());
+        status["last_rtt_sample_age_seconds"]=json!(50);
+        assert!(parse_tunnel_samples(&status).is_none());
+        status["last_rtt_sample_age_seconds"]=json!(-1);
+        assert!(parse_tunnel_samples(&status).is_none());
+        status["last_rtt_sample_age_seconds"]=json!(4);
+        status["rtt_samples"]=json!(3);
+        assert!(parse_tunnel_samples(&status).is_none());
+        status["rtt_samples"]=json!(12);
+        status.as_object_mut().unwrap().remove("last_rtt_sample_age_seconds");
+        assert!(parse_tunnel_samples(&status).is_none());
     }
     #[test]
     fn reauthentication_requires_matching_secure_peer_state() {
