@@ -25,3 +25,28 @@ func TestUDPBufferSizeBoundsAndTransportIsolation(t *testing.T) {
         t.Error("failed override modified TCP-mode UDP setting")
     }
 }
+
+func TestUDPBufferPreferenceFromAuthenticatedPacketIsBounded(t *testing.T) {
+    table := []struct {
+        mode int32
+        requested int32
+        want int
+    }{
+        {0,0,0},
+        {0,-1,0},
+        {0,65535,0},
+        {0,65536,65536},
+        {0,262144,262144},
+        {0,1048576,1048576},
+        {0,2097152,2097152},
+        {0,2097153,0},
+        {1,524288,0},
+    }
+    for _, item := range table {
+        actual := udpSocketPreferenceFromPacket(item.mode,item.requested)
+        if actual != item.want {
+            t.Fatalf("mode=%d preference=%d: got %d want %d",
+                item.mode,item.requested,actual,item.want)
+        }
+    }
+}
