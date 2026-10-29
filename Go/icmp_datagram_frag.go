@@ -91,7 +91,7 @@ type authenticatedReassembler struct {
 }
 func (r *authenticatedReassembler) remove(id [8]byte) {
     if x, ok := r.groups[id]; ok {
-        r.buffered -= x.length
+        r.buffered -= x.total
         delete(r.groups, id)
     }
 }
@@ -162,6 +162,7 @@ func (r *authenticatedReassembler) accept(frame []byte, now time.Time) ([]byte, 
         }
         group = &pendingFragmentMessage{at: now, total: total, parts: make([][]byte, count)}
         r.groups[id] = group
+        r.buffered += total
     }
     if group.parts[index] != nil {
         // Duplicates cannot overwrite previously authenticated fragments.
@@ -170,7 +171,6 @@ func (r *authenticatedReassembler) accept(frame []byte, now time.Time) ([]byte, 
     group.parts[index] = append([]byte(nil), chunk...)
     group.received++
     group.length += len(chunk)
-    r.buffered += len(chunk)
     if group.received < len(group.parts) { return nil, false }
     // All exact-size segments arrived. Reconstruct exactly one original
     // datagram and then release the entire assembly.
