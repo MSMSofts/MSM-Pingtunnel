@@ -1,5 +1,10 @@
 # Pingtunnel Manager
 
+## نسخهٔ آزمایشی 3.3.10 — کاهش Fragmentation تونل ICMP
+
+برای بسته‌های بزرگ UDP/QUIC، هستهٔ Go پیام را **پیش از رمزنگاری** به قطعه‌های کوچک تقسیم می‌کند؛ هر قطعه مستقل رمزنگاری و احراز هویت می‌شود و در مقصد پس از بررسی Replay دوباره به یک پیام واحد تبدیل می‌شود. هدف، بسته‌های IPv4 حداکثر **۱۲۰۰ بایت** و کاهش Fragmentation کرنل است، نه دست‌کاری MTU سیستم. تنظیمات Auto Tune با این فرایند تداخل ندارند؛ `udp_buf` همچنان فقط بافر سوکت است. **هر دو سرور باید هم‌زمان از هستهٔ جدید استفاده کنند**؛ در حالت نسخهٔ نامتقارن، بسته‌های بزرگ UDP قابل‌انتقال نیستند. نتیجهٔ واقعی روی Reels هنوز آزمایش میدانی نشده است. [جزئیات فنی و محدودیت‌ها](docs/ICMP_DATAGRAM_SEGMENTATION.md).
+
+
 ## اصلاحات ایمنی در شاخهٔ توسعه (هنوز منتشر نشده)
 
 - گزینهٔ **۱۵) Auto Tune** و دستور `sudo pingtunnel auto-tune` فقط **پیش‌نمایش** هستند؛ روی خارج هیچ‌گونه تغییر، Ping آزمایشی یا Restart انجام نمی‌دهند.
@@ -10,15 +15,15 @@
 
 **یک تونل ICMP رمزنگاری‌شده، دو سرور، راه‌اندازی ساده و مدیریت سبک.**
 
-[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.3.9](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.9)
+[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.3.9](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.10)
 
-![Version](https://img.shields.io/badge/version-3.3.9-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.3.10--preview-f59e0b) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
 
 **Pingtunnel Manager** ابزاری برای نصب، جفت‌سازی، مدیریت و پایش یک تونل مبتنی بر **ICMP** میان **یک VPS ایران و یک VPS خارج** است. ترافیک برنامه‌های TCP یا UDP ابتدا وارد سرور ایران می‌شود، از طریق ICMP رمزنگاری‌شده به سرور خارج می‌رسد و در نهایت به سرویس محلی موردنظر تحویل داده می‌شود.
 
 این پروژه **به‌تنهایی سرویس VPN یا جایگزین Hysteria 2، Xray و s-ui نیست**؛ بلکه لایهٔ انتقال میان دو سرور را فراهم می‌کند.
 
-> **نسخهٔ بعدی: 3.3.9** — مدیریت Rust و هسته Go، Config Schema 3 و Wire v4. جهت پیش‌فرض **Auto با اولویت ثابت Reverse** است؛ Direct فقط در شرایط اختلال طولانی و تقاضای واقعی فعال می‌شود. بهبود سرعتِ این نسخه نیازمند اندازه‌گیری میدانی است.
+> **نسخهٔ قبلی: 3.3.9** — مدیریت Rust و هسته Go، Config Schema 3 و Wire v4. جهت پیش‌فرض **Auto با اولویت ثابت Reverse** است؛ Direct فقط در شرایط اختلال طولانی و تقاضای واقعی فعال می‌شود. بهبود سرعتِ این نسخه نیازمند اندازه‌گیری میدانی است.
 
 
 ## تنظیم خودکار TCP/UDP بر مبنای ارتباط احرازشده (Auto Tune — نسخهٔ 3.3.9)
