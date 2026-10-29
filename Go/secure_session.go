@@ -504,6 +504,8 @@ type secureStatus struct{
  ReverseQueuePeak int `json:"reverse_queue_peak"`
  ReverseQueueDrops uint64 `json:"reverse_queue_drops"`
  ReverseWriteFailures uint64 `json:"reverse_write_failures"`
+ ICMPWriteFailures uint64 `json:"icmp_write_failures"`
+ ICMPWriteEMSGSIZE uint64 `json:"icmp_write_emsgsize"`
  ReversePollEchoReflections uint64 `json:"reverse_poll_echo_reflections"`
  ReverseDataEchoReflections uint64 `json:"reverse_data_echo_reflections"`
  ReversePingEchoReflections uint64 `json:"reverse_ping_echo_reflections"`
@@ -562,6 +564,8 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.ReverseQueuePeak=diag.QueuePeak
  report.ReverseQueueDrops=diag.QueueDrops
  report.ReverseWriteFailures=diag.FailedReplies
+ report.ICMPWriteFailures=icmpWriteErrors.Load()
+ report.ICMPWriteEMSGSIZE=icmpMessageTooLong.Load()
  report.ReversePollEchoReflections=diag.ReflectedPolls
  report.ReverseDataEchoReflections=diag.ReflectedDataEchoes
  report.ReversePingEchoReflections=diag.ReflectedPingEchoes
