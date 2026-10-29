@@ -1,0 +1,186 @@
+package pingtunnel
+
+// Application-frame segmentation keeps encrypted ICMP below the IPv4
+// fragmentation threshold. Every segment is encrypted separately with the
+// existing session AEAD and replay protection. The reassembled plaintext is
+// exactly the original serialized MyMsg, preserving the UDP datagram boundary.
+//
+// Both peers must run a fragment-aware Go core. No unauthenticated fragments
+// enter this reassembler: recvICMP calls it only AFTER successful AEAD open.
+import (
+    "bytes"
+    "crypto/rand"
+    "encoding/binary"
+    "errors"
+    "sync/atomic"
+    "time"
+)
+
+const (
+    // 1200 bytes INCLUDING IPv4 and ICMP headers; intentionally below the
+    // measured 1476-byte MTU, with margin for common paths and IP options.
+    icmpIPv4PacketBudget = 1200
+    icmpIPv4HeaderBytes = 20
+    icmpEchoHeaderBytes = 8
+    secureAEADHeaderBytes = 29
+    secureAEADTagBytes = 16
+    icmpMaxSecurePlaintext = icmpIPv4PacketBudget - icmpIPv4HeaderBytes -
+        icmpEchoHeaderBytes - secureAEADHeaderBytes - secureAEADTagBytes
+
+    fragmentHeaderBytes = 20
+    fragmentPayloadBytes = icmpMaxSecurePlaintext - fragmentHeaderBytes
+    fragmentMaxOriginalBytes = 70 * 1024
+    fragmentMaxParts = 65
+    fragmentMaxGroups = 128
+    fragmentMaxBufferedBytes = 2 * 1024 * 1024
+    fragmentLifetime = 3 * time.Second
+)
+var fragmentMagic = [4]byte{'P', 'T', 'F', '4'}
+
+// Operational counters; these are Go-process-local, never persisted.
+var icmpFragmentedDatagrams atomic.Uint64
+var icmpReassembledDatagrams atomic.Uint64
+var icmpFragmentDropped atomic.Uint64
+
+// A segment header is inside the authenticated plaintext (never exposed to
+// an unauthenticated network peer).
+//
+//   magic[4] | datagram-ID[8] | fragment-index[2] |
+//   fragment-count[2] | original-length[4] | plaintext-chunk...
+func splitAuthenticatedMessage(data []byte) ([][]byte, error) {
+    if len(data) <= icmpMaxSecurePlaintext {
+        return [][]byte{data}, nil
+    }
+    if len(data) > fragmentMaxOriginalBytes {
+        return nil, errors.New("serialized message exceeds safe fragmentation limit")
+    }
+    count := (len(data) + fragmentPayloadBytes - 1) / fragmentPayloadBytes
+    if count < 2 || count > fragmentMaxParts {
+        return nil, errors.New("invalid fragment count")
+    }
+    var id [8]byte
+    if _, err := rand.Read(id[:]); err != nil { return nil, err }
+    result := make([][]byte, 0, count)
+    for index := 0; index < count; index++ {
+        start := index * fragmentPayloadBytes
+        end := start + fragmentPayloadBytes
+        if end > len(data) { end = len(data) }
+        fragment := make([]byte, fragmentHeaderBytes + end - start)
+        copy(fragment[:4], fragmentMagic[:])
+        copy(fragment[4:12], id[:])
+        binary.BigEndian.PutUint16(fragment[12:14], uint16(index))
+        binary.BigEndian.PutUint16(fragment[14:16], uint16(count))
+        binary.BigEndian.PutUint32(fragment[16:20], uint32(len(data)))
+        copy(fragment[fragmentHeaderBytes:], data[start:end])
+        result = append(result, fragment)
+    }
+    return result, nil
+}
+
+type pendingFragmentMessage struct {
+    at time.Time
+    total int
+    parts [][]byte
+    received int
+    length int
+}
+
+type authenticatedReassembler struct {
+    groups map[[8]byte]*pendingFragmentMessage
+    buffered int
+}
+func (r *authenticatedReassembler) remove(id [8]byte) {
+    if x, ok := r.groups[id]; ok {
+        r.buffered -= x.length
+        delete(r.groups, id)
+    }
+}
+func (r *authenticatedReassembler) prune(now time.Time) {
+    for id, group := range r.groups {
+        if now.Sub(group.at) >= fragmentLifetime || now.Before(group.at) {
+            r.remove(id)
+            icmpFragmentDropped.Add(1)
+        }
+    }
+}
+func (r *authenticatedReassembler) oldest() ([8]byte, bool) {
+    var id [8]byte
+    var t time.Time
+    found := false
+    for key, value := range r.groups {
+        if !found || value.at.Before(t) {
+            id, t, found = key, value.at, true
+        }
+    }
+    return id, found
+}
+
+// accept must only receive plaintext that has already passed secure AEAD
+// authentication. It is intentionally single-receiver scoped.
+func (r *authenticatedReassembler) accept(frame []byte, now time.Time) ([]byte, bool) {
+    if !bytes.HasPrefix(frame, fragmentMagic[:]) {
+        return frame, true
+    }
+    if len(frame) < fragmentHeaderBytes {
+        icmpFragmentDropped.Add(1)
+        return nil, false
+    }
+    var id [8]byte
+    copy(id[:], frame[4:12])
+    index := int(binary.BigEndian.Uint16(frame[12:14]))
+    count := int(binary.BigEndian.Uint16(frame[14:16]))
+    total := int(binary.BigEndian.Uint32(frame[16:20]))
+    chunk := frame[fragmentHeaderBytes:]
+    if count < 2 || count > fragmentMaxParts || index >= count ||
+        total <= icmpMaxSecurePlaintext || total > fragmentMaxOriginalBytes ||
+        len(chunk) == 0 || len(chunk) > fragmentPayloadBytes ||
+        count != (total + fragmentPayloadBytes - 1)/fragmentPayloadBytes {
+        icmpFragmentDropped.Add(1)
+        return nil, false
+    }
+    expected := fragmentPayloadBytes
+    if index == count-1 { expected = total - index*fragmentPayloadBytes }
+    if len(chunk) != expected {
+        icmpFragmentDropped.Add(1)
+        return nil, false
+    }
+    if r.groups == nil { r.groups = make(map[[8]byte]*pendingFragmentMessage) }
+    r.prune(now)
+    group, exists := r.groups[id]
+    if exists && (group.total != total || len(group.parts) != count) {
+        r.remove(id)
+        icmpFragmentDropped.Add(1)
+        return nil, false
+    }
+    if !exists {
+        for len(r.groups) >= fragmentMaxGroups ||
+            r.buffered + total > fragmentMaxBufferedBytes {
+            old, ok := r.oldest()
+            if !ok { return nil, false }
+            r.remove(old)
+            icmpFragmentDropped.Add(1)
+        }
+        group = &pendingFragmentMessage{at: now, total: total, parts: make([][]byte, count)}
+        r.groups[id] = group
+    }
+    if group.parts[index] != nil {
+        // Duplicates cannot overwrite previously authenticated fragments.
+        return nil, false
+    }
+    group.parts[index] = append([]byte(nil), chunk...)
+    group.received++
+    group.length += len(chunk)
+    r.buffered += len(chunk)
+    if group.received < len(group.parts) { return nil, false }
+    // All exact-size segments arrived. Reconstruct exactly one original
+    // datagram and then release the entire assembly.
+    output := make([]byte, 0, total)
+    for _, part := range group.parts { output = append(output, part...) }
+    r.remove(id)
+    if len(output) != total {
+        icmpFragmentDropped.Add(1)
+        return nil, false
+    }
+    icmpReassembledDatagrams.Add(1)
+    return output, true
+}
