@@ -31,6 +31,22 @@ func sendSecureControl(id,sequence int,conn icmp.PacketConn,peer *net.IPAddr,spr
  _=emitEcho(conn,peer,sproto,id,sequence,body)
 }
 
+// Encrypt each large-message fragment independently, so the outer IPv4
+// packet remains <=1200 bytes without relying on kernel IP fragmentation.
+// A complete MyMsg is reconstructed and authenticated at the far receiver.
+func sendAuthenticatedParts(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr,
+    proto int, data []byte, crypto *CryptoConfig, msgType uint32) error {
+    parts, err := splitAuthenticatedMessage(data)
+    if err != nil { return err }
+    for _, plain := range parts {
+        encrypted, err := crypto.Encrypt(plain)
+        if err != nil { return err }
+        sendEncryptedICMP(id,sequence,conn,peer,proto,encrypted,crypto,msgType)
+    }
+    if len(parts) > 1 { icmpFragmentedDatagrams.Add(1) }
+    return nil
+}
+
 func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, target string,
 	connId string, msgType uint32, data []byte, sproto int, rproto int, key int,
 	tcpmode int, tcpmode_buffer_size int, tcpmode_maxwin int, tcpmode_resend_time int, tcpmode_compress int, tcpmode_stat int,
@@ -58,6 +74,22 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
 		loggo.Error("sendICMP Marshal MyMsg error %s %s", server.String(), err)
 		return
 	}
+
+    // A fully authenticated session may segment before encryption, avoiding
+    // an oversized ciphertext and kernel IP fragmentation. While negotiating,
+    // retain the existing whole-message pending queue; FlushPendingICMP will
+    // segment the queued message only after authentication succeeds.
+    if cryptoConfig != nil && cryptoConfig.sec != nil && cryptoConfig.SecureReady() &&
+        len(mb) > icmpMaxSecurePlaintext {
+        if err := sendAuthenticatedParts(id,sequence,conn,server,sproto,mb,cryptoConfig,msgType); err != nil {
+            if errors.Is(err,ErrSecureNegotiation) && msgType==uint32(MyMsg_DATA) {
+                cryptoConfig.sec.queuePacket(pendingICMP{raw:mb,peer:server,id:id,seq:sequence,proto:sproto})
+            } else {
+                loggo.Error("sendICMP fragment error: %s",err)
+            }
+        }
+        return
+    }
 
 	// Encrypt the marshaled data if encryption is enabled
 	if cryptoConfig != nil {
@@ -158,6 +190,13 @@ func FlushPendingICMP(conn icmp.PacketConn, crypto *CryptoConfig) {
  if crypto==nil||crypto.sec==nil||!crypto.SecureReady(){return}
  packets:=crypto.sec.drainPending(time.Now())
  for i,p:=range packets{
+  if len(p.raw)>icmpMaxSecurePlaintext {
+   if err:=sendAuthenticatedParts(p.id,p.seq,conn,p.peer,p.proto,p.raw,crypto,uint32(MyMsg_DATA));err!=nil {
+    for _,unsent:=range packets[i:] {crypto.sec.pushBack(unsent)}
+    return
+   }
+   continue
+  }
   encrypted,err:=crypto.Encrypt(p.raw)
   if err!=nil {
    // A parallel recovery may have started after we drained the queue.
@@ -177,6 +216,7 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
 	defer (*workResultLock).Done()
 
 	bytes := make([]byte, 10240)
+    var fragmented authenticatedReassembler
 	for !exit.Load() {
 		conn.SetReadDeadline(time.Now().Add(time.Millisecond * 100))
 		n, srcaddr, err := conn.ReadFrom(bytes)
@@ -259,6 +299,20 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
 				continue
 			}
 		}
+
+        // AEAD validation comes BEFORE reassembly: unauthenticated sources
+        // cannot consume fragment assembly memory, and each chunk is replay
+        // protected. In Reverse mode every authenticated incoming Echo
+        // Request must still offer an opportunity to return a queued ACK.
+        payloadData, complete := fragmented.accept(payloadData, time.Now())
+        if !complete {
+            if cryptoConfig!=nil && cryptoConfig.sec!=nil &&
+                cryptoConfig.sec.region=="iran" && useReverse(cryptoConfig) &&
+                int(bytes[0])==8 {
+                replyReverse(conn,icmpSrcToIPAddr(srcaddr),echoId,echoSeq,cryptoConfig)
+            }
+            continue
+        }
 
 		my := &MyMsg{}
 		err = proto.Unmarshal(payloadData, my)
