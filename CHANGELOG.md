@@ -1,5 +1,13 @@
 # Changelog / تاریخچه تغییرات
 
+## Unreleased — Safety hardening (not a v3.3.9 hotfix)
+
+- Auto Tune becomes preview-only by default. An explicit `--apply` is necessary for a disruptive restart; Foreign exits without side effects.
+- Conservative stability gate rejects tuning on unreliable/poorly sampled paths. Probe-loss is explicitly identified as an EWMA, not UDP application packet loss.
+- Uninstall handles partial previous removal, deletes runtime files and all dedicated unit drop-ins; irreversible `--purge` requires a separate `PURGE` confirmation and preserves the manager until cleanup succeeds.
+- Regression remains unverified: baseline v3.3.8 and v3.3.9 share Reverse ICMP and AEAD implementation, but real two-VPS MTU/UDP behavior must be measured before claiming a transport fix.
+
+
 ## [3.3.9](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.9) — Authenticated TCP/UDP path Auto Tune
 
 **Schema 3 · Secure wire v4 · No cryptographic, pairing or ICMP direction changes**
