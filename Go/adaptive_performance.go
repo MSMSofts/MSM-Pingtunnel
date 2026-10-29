@@ -23,6 +23,7 @@ type AdaptivePerformance struct {
  lossScore float64
  misses, recovery int
  degraded bool
+ lastPongAt time.Time
 }
 func NewAdaptivePerformance() *AdaptivePerformance { return &AdaptivePerformance{} }
 func (a *AdaptivePerformance) OnPing(sent time.Time) {
@@ -57,6 +58,7 @@ func (a *AdaptivePerformance) OnPong(sent, received time.Time) {
   }else{a.baseMs=0.995*a.baseMs+0.005*rtt}
  }
  a.samples++
+ a.lastPongAt=received
  a.lossScore*=0.82
  a.misses=0
  spike:=a.samples>=4 && rtt>math.Max(250,a.baseMs*2.5)
@@ -125,6 +127,7 @@ func (a *AdaptivePerformance) Parameters(bufferBytes,maxWindow,rto int) Adaptive
 type adaptiveStatus struct {
  Profile string `json:"profile"`
  Samples uint64 `json:"rtt_samples"`
+ LastSampleAgeSeconds int64 `json:"last_rtt_sample_age_seconds"`
  RTTMs float64 `json:"rtt_ms"`
  JitterMs float64 `json:"jitter_ms"`
  LossEstimate float64 `json:"probe_loss_estimate"`
@@ -136,9 +139,15 @@ func (a *AdaptivePerformance) Status(bufferBytes,maxWindow,rto int) adaptiveStat
  a.mu.Lock();defer a.mu.Unlock()
  p:=a.parametersLocked(bufferBytes,maxWindow,rto)
  profile:="learning"
+ age:=int64(-1)
+ if !a.lastPongAt.IsZero() {
+  since:=time.Since(a.lastPongAt)
+  if since<0 {since=0}
+  age=int64(since/time.Second)
+ }
  if a.degraded {profile="degraded"} else if a.samples>0 {profile="stable"}
  return adaptiveStatus{
-  Profile:profile, Samples:a.samples,
+  Profile:profile, Samples:a.samples, LastSampleAgeSeconds:age,
   RTTMs:math.Round(a.srttMs*10)/10,
   JitterMs:math.Round(a.jitterMs*10)/10,
   LossEstimate:math.Round(a.lossScore*1000)/1000,
