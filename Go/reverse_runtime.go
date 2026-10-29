@@ -4,7 +4,10 @@ package pingtunnel
 // Foreign, and matching echo replies from Iran. It does not attempt to hide
 // its authenticated protocol or impersonate other network applications.
 import (
+    "errors"
     "net"
+    "sync/atomic"
+    "syscall"
     "time"
 
     "golang.org/x/net/icmp"
@@ -15,6 +18,18 @@ func useReverse(c *CryptoConfig) bool {
     return c!=nil && c.reverse!=nil && c.reverse.direction()==ICMPReverse
 }
 
+// These counters cover ALL ICMP transmit paths (direct, reverse, DATA and
+// probes). A successful socket write is not proof of delivery to the peer.
+var icmpWriteErrors atomic.Uint64
+var icmpMessageTooLong atomic.Uint64
+
+func recordICMPWriteResult(written, expected int, err error) bool {
+    if err == nil && written == expected { return true }
+    icmpWriteErrors.Add(1)
+    if errors.Is(err, syscall.EMSGSIZE) { icmpMessageTooLong.Add(1) }
+    return false
+}
+
 func emitEcho(conn icmp.PacketConn,peer *net.IPAddr,typ,id,seq int,body []byte) bool {
     if peer==nil{return false}
     msg:=&icmp.Message{Type:ipv4.ICMPType(typ),Code:0,
@@ -22,7 +37,7 @@ func emitEcho(conn icmp.PacketConn,peer *net.IPAddr,typ,id,seq int,body []byte) 
     data,err:=msg.Marshal(nil)
     if err!=nil{return false}
     n,err:=conn.WriteTo(data,icmpDstAddr(peer))
-    return err==nil && n==len(data)
+    return recordICMPWriteResult(n,len(data),err)
 }
 
 // No response is emitted to unauthenticated control or data. This reply is
