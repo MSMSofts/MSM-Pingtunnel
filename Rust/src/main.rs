@@ -90,6 +90,10 @@ fn validate(cfg: &Value) -> Result<()> {
     if bytes.len()!=32||STANDARD.encode(&bytes)!=secret{return Err(failure("pairing key must be 32 random bytes in canonical base64"));}
     if get_number(cfg,"memory_mb",0)?>1_048_576{return Err(failure("invalid memory limit"));}
     // Restrict new optional performance overrides to safe Go core ranges.
+    let udp_buffer=get_number(cfg,"udp_buf",0)?;
+    if udp_buffer!=0 && !(65_536..=2_097_152).contains(&udp_buffer) {
+        return Err(failure("invalid udp_buf: use 0 or 65536..=2097152 bytes"));
+    }
     for (field,default,min,max) in [
         ("tcp_bs",1_048_576,65_536,2_097_152),
         ("tcp_mw",20_000,256,20_000),
@@ -178,6 +182,9 @@ fn go_core_config(cfg:&Value)->Result<Value>{
             config["tcp_bs"]=json!(get_number(cfg,"tcp_bs",1_048_576)?);
             config["tcp_mw"]=json!(get_number(cfg,"tcp_mw",20_000)?);
             config["tcp_rst"]=json!(get_number(cfg,"tcp_rst",400)?);
+        } else {
+            let buf=get_number(cfg,"udp_buf",0)?;
+            if buf>0 {config["udp_buf"]=json!(buf);}
         }
         config["listen"]=json!(format!(":{port}"));
         config["server"]=json!(peer);
@@ -682,6 +689,25 @@ mod tests{
         assert_eq!(go["timeout"],90);
         cfg["tcp_mw"]=json!(20001);
         assert!(validate(&cfg).is_err());
+    }
+    #[test]
+    fn udp_socket_queue_override_is_validated_and_client_only() {
+        let mut cfg=conf("iran","udp",444);
+        assert!(go_core_config(&cfg).unwrap().get("udp_buf").is_none());
+        cfg["udp_buf"]=json!(524288);
+        cfg["timeout"]=json!(90);
+        let go=go_core_config(&cfg).unwrap();
+        assert_eq!(go["tcp"],0);
+        assert_eq!(go["udp_buf"],524288);
+        assert_eq!(go["timeout"],90);
+        assert!(go.get("tcp_mw").is_none());
+        cfg["udp_buf"]=json!(10);
+        assert!(validate(&cfg).is_err());
+        cfg["udp_buf"]=json!(2097153);
+        assert!(validate(&cfg).is_err());
+        let mut server=conf("foreign","udp",444);
+        server["udp_buf"]=json!(524288);
+        assert!(go_core_config(&server).unwrap().get("udp_buf").is_none());
     }
     #[test]
     fn mismatched_inputs_rejected(){
