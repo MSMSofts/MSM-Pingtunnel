@@ -2,18 +2,18 @@
 
 **A lightweight, encrypted ICMP tunnel between exactly two Linux VPSs, with a five-question setup wizard.**
 
-[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.3.8](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.8)
+[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.3.9](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.9)
 
-![Version](https://img.shields.io/badge/version-3.3.8-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.3.9-2563eb) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
 
 Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** between an **Iran-side VPS** and an **overseas VPS**. Local TCP or UDP traffic enters the Iran VPS, travels inside authenticated, encrypted ICMP packets, and is forwarded by the overseas VPS to its configured local service.
 
 **This is a transport layer—not a standalone VPN server.** Services such as Hysteria 2, s-ui or other TCP/UDP applications run and are configured separately.
 
-**Current release: 3.3.8** · Rust manager, Go core, schema **3**, secure wire **4** · **Reverse-first Auto:** Foreign starts ICMP polls; Direct is reserved for prolonged confirmed outages with client demand. Video latency improvements require measured live testing.
+**Next release: 3.3.9** · Rust manager, Go core, schema **3**, secure wire **4** · **Reverse-first Auto:** Foreign starts ICMP polls; Direct is reserved for prolonged confirmed outages with client demand. Video latency improvements require measured live testing.
 
 
-## Auto Tune (proposed, not yet released)
+## Authenticated TCP/UDP Auto Tune (v3.3.9)
 
 On the **Iran-side TCP or UDP forwarding client**, run `sudo pingtunnel auto-tune` or select **15) Auto Tune** in the manager menu. Use `sudo pingtunnel auto-tune --dry-run` to preview without changing a file or restarting the service. The tunnel must already be authenticated. Auto Tune requires at least 8 authenticated encrypted-tunnel RTT samples within a rolling 2-minute window (latest within 35 seconds). Ordinary/sized ICMP echo probes provide diagnostic context only: independent ICMP filtering or rate limiting never changes the tuning profile. Insufficient or extremely poor measurements cause no settings to be changed.
 
