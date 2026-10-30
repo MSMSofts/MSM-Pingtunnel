@@ -90,6 +90,18 @@ fn validate(cfg: &Value) -> Result<()> {
     if bytes.len()!=32||STANDARD.encode(&bytes)!=secret{return Err(failure("pairing key must be 32 random bytes in canonical base64"));}
     if get_number(cfg,"memory_mb",0)?>1_048_576{return Err(failure("invalid memory limit"));}
     // Restrict new optional performance overrides to safe Go core ranges.
+    // Experimental protocol features are opt-in; 3.3.12 defaults to the
+    // proven legacy encrypted ICMP datagram format to prevent mixed-version
+    // peers from silently losing UDP application traffic.
+    for name in ["icmp_segment", "udp_fec"] {
+        if let Some(value)=cfg.get(name) {
+            if !value.is_boolean() {return Err(failure(format!("{name} must be boolean"))); }
+        }
+    }
+    if cfg.get("udp_fec").and_then(Value::as_bool)==Some(true) &&
+       cfg.get("icmp_segment").and_then(Value::as_bool)!=Some(true) {
+        return Err(failure("udp_fec requires icmp_segment=true on BOTH peers"));
+    }
     let udp_buffer=get_number(cfg,"udp_buf",0)?;
     if udp_buffer!=0 && !(65_536..=2_097_152).contains(&udp_buffer) {
         return Err(failure("invalid udp_buf: use 0 or 65536..=2097152 bytes"));
@@ -174,6 +186,10 @@ fn go_core_config(cfg:&Value)->Result<Value>{
         "tcp":protocol,"noprint":0,"nolog":1,"loglevel":"error",
         "icmp_direction":cfg.get("icmp_direction").and_then(Value::as_str).unwrap_or("auto")
     });
+    // Never opt in a node automatically: an older peer may not understand
+    // the protected fragment extension even if the main wire version is 4.
+    config["icmp_segment"]=json!(cfg.get("icmp_segment").and_then(Value::as_bool).unwrap_or(false));
+    config["udp_fec"]=json!(cfg.get("udp_fec").and_then(Value::as_bool).unwrap_or(false));
     if region=="iran"{
         config["timeout"]=json!(get_number(cfg,"timeout",60)?);
         // The client owns TCP framing; the foreign service gets these values
@@ -799,6 +815,24 @@ mod tests{
         assert_eq!(go["tcp_rst"],850);
         assert_eq!(go["timeout"],90);
         cfg["tcp_mw"]=json!(20001);
+        assert!(validate(&cfg).is_err());
+    }
+    #[test]
+    fn experimental_packet_features_are_disabled_by_default() {
+        let iran=conf("iran","udp",444);
+        let foreign=conf("foreign","udp",444);
+        for cfg in [&iran,&foreign] {
+            let go=go_core_config(cfg).unwrap();
+            assert_eq!(go["icmp_segment"],false);
+            assert_eq!(go["udp_fec"],false);
+        }
+        let mut cfg=iran.clone();
+        cfg["udp_fec"]=json!(true);
+        assert!(validate(&cfg).is_err());
+        cfg["icmp_segment"]=json!(true);
+        assert!(validate(&cfg).is_ok());
+        assert_eq!(go_core_config(&cfg).unwrap()["udp_fec"],true);
+        cfg["udp_fec"]=json!("yes");
         assert!(validate(&cfg).is_err());
     }
     #[test]
