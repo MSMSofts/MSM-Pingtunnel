@@ -14,7 +14,6 @@ use std::process::{self, Command, Stdio};
 mod setup;
 mod menu_ui;
 mod resource_monitor;
-mod auto_tune;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -424,7 +423,7 @@ fn help(){
     println!("  pingtunnel            Unified menu");
     println!("  pingtunnel setup      Five questions on each VPS");
     println!("  pingtunnel key        Show existing pairing key (root only)");
-    println!("  pingtunnel validate | performance | auto-tune [--dry-run | --apply] | security | health | dry-run");
+    println!("  pingtunnel validate | performance | security | health | dry-run");
     println!("  pingtunnel start | stop | restart | status | logs [lines]");
     println!("  pingtunnel update | uninstall [--purge]  (permanent purge requires PURGE confirmation)");
 }
@@ -486,7 +485,7 @@ fn menu()->Result<()>{
             menu_ui::choose(&mut monitor,display,default)?
         }else{
             print!("{}",display(monitor.current(),80,40));
-            prompt("Choose (1-15)",default)?
+            prompt("Choose (1-14)",default)?
         };
         let action=match choice.as_str(){
             "1"=>run_systemctl(&["status","pingtunnel.service","--no-pager"]),
@@ -503,8 +502,7 @@ fn menu()->Result<()>{
             "12"|"q"|"Q"=>return Ok(()),
             "13"=>show_security_status(),
             "14"=>show_health(),
-            "15"=>auto_tune::run(false),
-            _=>{println!("Invalid choice: use 1..15.");continue}
+            _=>{println!("Invalid choice: use 1..14.");continue}
         };
         if choice=="11" && action.is_ok() && !Path::new("/usr/local/bin/pingtunnel").exists() {
             return Ok(());
@@ -720,14 +718,6 @@ fn main_inner()->Result<()>{
         "setup"=>setup::wizard(),
         "key"=>display_pair_key(),
         "performance"=>show_adaptive_status(),
-        "auto-tune"=>{
-            if args.len()>2 || args.get(1).is_some_and(|s|s!="--dry-run" && s!="--apply") {
-                return Err(failure("Usage: pingtunnel auto-tune [--dry-run | --apply]"));
-            }
-            // Default and --dry-run are safe previews. Only explicit --apply
-            // is allowed to persist settings and restart the Go core.
-            auto_tune::run(args.get(1).is_some_and(|s|s=="--apply"))
-        },
         "security"=>show_security_status(),
         "health"=>show_health(),
         "service-install"=>service_install(),
