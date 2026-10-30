@@ -37,9 +37,12 @@ const (
     fragmentLifetime = 3 * time.Second
     fecParityMaxPerSecond = 24
     fecCompletedCacheLimit = 256
-    fragmentFECFlag = uint16(1 << 15)
 )
 var fragmentMagic = [4]byte{'P', 'T', 'F', '4'}
+// Parity is a separate authenticated optional payload. The two original
+// PTF4 data fragments NEVER change their headers; a v3.3.10 receiver can
+// still reassemble them and will harmlessly reject the extra PTF5 payload.
+var fragmentParityMagic = [4]byte{'P', 'T', 'F', '5'}
 
 // Operational counters; these are Go-process-local, never persisted.
 var icmpFragmentedDatagrams atomic.Uint64
@@ -80,19 +83,17 @@ func appendBoundedUDPParity(parts [][]byte, now time.Time) [][]byte {
     first, second := parts[0], parts[1]
     parity := make([]byte, fragmentHeaderBytes + fragmentPayloadBytes)
     copy(parity[:fragmentHeaderBytes], first[:fragmentHeaderBytes])
+    copy(parity[:4], fragmentParityMagic[:])
     binary.BigEndian.PutUint16(parity[12:14], 2)
-    binary.BigEndian.PutUint16(parity[14:16], fragmentFECFlag | 2)
+    binary.BigEndian.PutUint16(parity[14:16], 2)
     for i, b := range first[fragmentHeaderBytes:] {
         parity[fragmentHeaderBytes+i] ^= b
     }
     for i, b := range second[fragmentHeaderBytes:] {
         parity[fragmentHeaderBytes+i] ^= b
     }
-    for i, part := range parts {
-        copyOfPart := append([]byte(nil), part...)
-        binary.BigEndian.PutUint16(copyOfPart[14:16], fragmentFECFlag | 2)
-        parts[i] = copyOfPart
-    }
+    // Do not alter data parts: changing their count field caused mixed
+    // 3.3.10/3.3.11 pairs to reject otherwise valid UDP datagrams.
     icmpFECParitySent.Add(1)
     return append(parts, parity)
 }
@@ -140,7 +141,6 @@ type pendingFragmentMessage struct {
     length int
     reserved int
     parity []byte
-    fec bool
 }
 
 type authenticatedReassembler struct {
@@ -198,7 +198,8 @@ func (r *authenticatedReassembler) oldest() ([8]byte, bool) {
 // For a parity-protected two-part datagram, index 2 carries XOR parity.
 // Delivery occurs exactly once, with either two data pieces or one + parity.
 func (r *authenticatedReassembler) accept(frame []byte, now time.Time) ([]byte, bool) {
-    if !bytes.HasPrefix(frame, fragmentMagic[:]) {
+    parityFrame := bytes.HasPrefix(frame, fragmentParityMagic[:])
+    if !parityFrame && !bytes.HasPrefix(frame, fragmentMagic[:]) {
         return frame, true
     }
     if len(frame) < fragmentHeaderBytes {
@@ -208,15 +209,12 @@ func (r *authenticatedReassembler) accept(frame []byte, now time.Time) ([]byte, 
     var id [8]byte
     copy(id[:], frame[4:12])
     index := int(binary.BigEndian.Uint16(frame[12:14]))
-    rawCount := binary.BigEndian.Uint16(frame[14:16])
-    fec := rawCount & fragmentFECFlag != 0
-    count := int(rawCount & ^fragmentFECFlag)
+    count := int(binary.BigEndian.Uint16(frame[14:16]))
     total := int(binary.BigEndian.Uint32(frame[16:20]))
     chunk := frame[fragmentHeaderBytes:]
-    maxIndex := count-1
-    if fec { maxIndex = count }
-    if count < 2 || count > fragmentMaxParts || index > maxIndex ||
-        (fec && count != 2) ||
+    if count < 2 || count > fragmentMaxParts ||
+        (!parityFrame && index >= count) ||
+        (parityFrame && (count != 2 || index != count)) ||
         total <= icmpMaxSecurePlaintext || total > fragmentMaxOriginalBytes ||
         len(chunk) == 0 || len(chunk) > fragmentPayloadBytes ||
         count != (total + fragmentPayloadBytes - 1)/fragmentPayloadBytes {
@@ -225,7 +223,7 @@ func (r *authenticatedReassembler) accept(frame []byte, now time.Time) ([]byte, 
     }
     expected := fragmentPayloadBytes
     if index == count-1 { expected = total - index*fragmentPayloadBytes }
-    if index == count { expected = fragmentPayloadBytes }
+    if parityFrame { expected = fragmentPayloadBytes }
     if len(chunk) != expected {
         icmpFragmentDropped.Add(1)
         return nil, false
@@ -236,15 +234,16 @@ func (r *authenticatedReassembler) accept(frame []byte, now time.Time) ([]byte, 
         return nil, false
     }
     group, exists := r.groups[id]
-    if exists && (group.total != total || len(group.parts) != count ||
-        group.fec != fec) {
+    if exists && (group.total != total || len(group.parts) != count) {
         r.remove(id)
         icmpFragmentDropped.Add(1)
         return nil, false
     }
     if !exists {
         reserved := total
-        if fec { reserved += fragmentPayloadBytes }
+        // Reserve room for a possible late parity piece on every 2-part
+        // group, even if parity arrives after a regular data fragment.
+        if count == 2 { reserved += fragmentPayloadBytes }
         for len(r.groups) >= fragmentMaxGroups ||
             r.buffered + reserved > fragmentMaxBufferedBytes {
             old, ok := r.oldest()
@@ -254,12 +253,12 @@ func (r *authenticatedReassembler) accept(frame []byte, now time.Time) ([]byte, 
         }
         group = &pendingFragmentMessage{
             at: now, total: total, reserved: reserved,
-            fec: fec, parts: make([][]byte, count),
+            parts: make([][]byte, count),
         }
         r.groups[id] = group
         r.buffered += reserved
     }
-    if fec && index == count {
+    if parityFrame {
         if group.parity != nil { return nil, false }
         group.parity = append([]byte(nil), chunk...)
     } else {
@@ -270,7 +269,7 @@ func (r *authenticatedReassembler) accept(frame []byte, now time.Time) ([]byte, 
     }
     recovered := false
     if group.received < len(group.parts) {
-        if !group.fec || group.parity == nil ||
+        if group.parity == nil ||
             group.received != len(group.parts)-1 {
             return nil, false
         }
