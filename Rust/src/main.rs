@@ -587,6 +587,12 @@ fn show_security_status() -> Result<()> {
         report["icmp_fragment_drops"].as_u64()) {
         println!("  Segmented outgoing / reassembled inbound messages: {sent} / {received}");
         println!("  Expired/invalid incomplete assemblies: {dropped}");
+        if let (Some(parity), Some(recovered))=(
+            report["icmp_fec_parity_generated"].as_u64(),
+            report["icmp_fec_recovered_datagrams"].as_u64()) {
+            println!("  Bounded UDP repair parity generated: {parity}");
+            println!("  UDP datagrams recovered after one missing fragment: {recovered}");
+        }
     }
     println!("  Recovery handshakes: {}",report["recoveries"]);
     println!("  Queued data frames: {}",report["pending_packets"]);
