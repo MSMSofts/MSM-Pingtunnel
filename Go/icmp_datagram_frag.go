@@ -194,6 +194,9 @@ func (r *authenticatedReassembler) oldest() ([8]byte, bool) {
 
 // accept must only receive plaintext that has already passed secure AEAD
 // authentication. It is intentionally single-receiver scoped.
+// Only authenticated/replay-checked plaintext may enter this assembler.
+// For a parity-protected two-part datagram, index 2 carries XOR parity.
+// Delivery occurs exactly once, with either two data pieces or one + parity.
 func (r *authenticatedReassembler) accept(frame []byte, now time.Time) ([]byte, bool) {
     if !bytes.HasPrefix(frame, fragmentMagic[:]) {
         return frame, true
@@ -205,10 +208,15 @@ func (r *authenticatedReassembler) accept(frame []byte, now time.Time) ([]byte, 
     var id [8]byte
     copy(id[:], frame[4:12])
     index := int(binary.BigEndian.Uint16(frame[12:14]))
-    count := int(binary.BigEndian.Uint16(frame[14:16]))
+    rawCount := binary.BigEndian.Uint16(frame[14:16])
+    fec := rawCount & fragmentFECFlag != 0
+    count := int(rawCount & ^fragmentFECFlag)
     total := int(binary.BigEndian.Uint32(frame[16:20]))
     chunk := frame[fragmentHeaderBytes:]
-    if count < 2 || count > fragmentMaxParts || index >= count ||
+    maxIndex := count-1
+    if fec { maxIndex = count }
+    if count < 2 || count > fragmentMaxParts || index > maxIndex ||
+        (fec && count != 2) ||
         total <= icmpMaxSecurePlaintext || total > fragmentMaxOriginalBytes ||
         len(chunk) == 0 || len(chunk) > fragmentPayloadBytes ||
         count != (total + fragmentPayloadBytes - 1)/fragmentPayloadBytes {
@@ -217,47 +225,81 @@ func (r *authenticatedReassembler) accept(frame []byte, now time.Time) ([]byte, 
     }
     expected := fragmentPayloadBytes
     if index == count-1 { expected = total - index*fragmentPayloadBytes }
+    if index == count { expected = fragmentPayloadBytes }
     if len(chunk) != expected {
         icmpFragmentDropped.Add(1)
         return nil, false
     }
     if r.groups == nil { r.groups = make(map[[8]byte]*pendingFragmentMessage) }
     r.prune(now)
+    if _, already := r.completed[id]; already {
+        return nil, false
+    }
     group, exists := r.groups[id]
-    if exists && (group.total != total || len(group.parts) != count) {
+    if exists && (group.total != total || len(group.parts) != count ||
+        group.fec != fec) {
         r.remove(id)
         icmpFragmentDropped.Add(1)
         return nil, false
     }
     if !exists {
+        reserved := total
+        if fec { reserved += fragmentPayloadBytes }
         for len(r.groups) >= fragmentMaxGroups ||
-            r.buffered + total > fragmentMaxBufferedBytes {
+            r.buffered + reserved > fragmentMaxBufferedBytes {
             old, ok := r.oldest()
             if !ok { return nil, false }
             r.remove(old)
             icmpFragmentDropped.Add(1)
         }
-        group = &pendingFragmentMessage{at: now, total: total, parts: make([][]byte, count)}
+        group = &pendingFragmentMessage{
+            at: now, total: total, reserved: reserved,
+            fec: fec, parts: make([][]byte, count),
+        }
         r.groups[id] = group
-        r.buffered += total
+        r.buffered += reserved
     }
-    if group.parts[index] != nil {
-        // Duplicates cannot overwrite previously authenticated fragments.
-        return nil, false
+    if fec && index == count {
+        if group.parity != nil { return nil, false }
+        group.parity = append([]byte(nil), chunk...)
+    } else {
+        if group.parts[index] != nil { return nil, false }
+        group.parts[index] = append([]byte(nil), chunk...)
+        group.received++
+        group.length += len(chunk)
     }
-    group.parts[index] = append([]byte(nil), chunk...)
-    group.received++
-    group.length += len(chunk)
-    if group.received < len(group.parts) { return nil, false }
-    // All exact-size segments arrived. Reconstruct exactly one original
-    // datagram and then release the entire assembly.
+    recovered := false
+    if group.received < len(group.parts) {
+        if !group.fec || group.parity == nil ||
+            group.received != len(group.parts)-1 {
+            return nil, false
+        }
+        missing := -1
+        for i, part := range group.parts {
+            if part == nil { missing = i; break }
+        }
+        if missing < 0 { return nil, false }
+        recoveredPiece := append([]byte(nil), group.parity...)
+        for _, known := range group.parts {
+            if known == nil { continue }
+            for i, b := range known { recoveredPiece[i] ^= b }
+        }
+        expectedLen := fragmentPayloadBytes
+        if missing == count-1 {
+            expectedLen = total - missing*fragmentPayloadBytes
+        }
+        group.parts[missing] = recoveredPiece[:expectedLen]
+        recovered = true
+    }
     output := make([]byte, 0, total)
     for _, part := range group.parts { output = append(output, part...) }
     r.remove(id)
+    r.rememberComplete(id, now)
     if len(output) != total {
         icmpFragmentDropped.Add(1)
         return nil, false
     }
+    if recovered { icmpFECRecovered.Add(1) }
     icmpReassembledDatagrams.Add(1)
     return output, true
 }
