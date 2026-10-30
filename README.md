@@ -1,5 +1,10 @@
 # Pingtunnel Manager
 
+## اصلاح اضطراری 3.3.12 — جلوگیری از قطع تونل
+
+در نسخهٔ 3.3.11 فریم ترمیمی، سرآیند دو قطعهٔ اصلی UDP را نیز تغییر می‌داد و با گیرندهٔ 3.3.10 ناسازگار بود. در 3.3.12 **قطعه‌بندی و FEC به‌صورت پیش‌فرض غیرفعال‌اند** و برنامه قالب قدیمیِ رمزنگاری‌شده را ارسال می‌کند؛ بنابراین اولویت با بازیابی ارتباط است، نه بهینه‌سازی آزمایش‌نشده. اگر از 3.3.11 قطع شده‌اید، ابتدا نسخهٔ **3.3.8 که قبلاً سالم بوده** را روی هر دو VPS برگردانید. برای آزمایش آیندهٔ FEC، فریم ترمیمی جداست و فریم‌های اصلی را تغییر نمی‌دهد. [جزئیات اصلاح، محدودیت‌ها و برگشت](docs/3312_EMERGENCY_COMPATIBILITY.md).
+
+
 ## نسخهٔ پیش‌نمایش 3.3.11 — بازیابی بسته‌های UDP با یک قطعهٔ گمشده
 
 برای پیام UDP که در نسخهٔ قبل به دو قطعهٔ ICMP تقسیم می‌شد، اکنون هسته با سقف **۲۴ قطعهٔ ترمیمی در ثانیه** یک قطعهٔ افزونهٔ XOR می‌فرستد تا مقصد در صورت گم‌شدن یکی از دو قطعه، بستهٔ کامل را بازسازی کند. قطعات جداگانه رمزنگاری و کنترل Replay می‌شوند؛ به TCP و پیام‌های چندقطعه‌ای بزرگ‌تر اعمال نمی‌شود. **هر دو VPS باید به 3.3.11 ارتقا پیدا کنند**؛ این قابلیت هنوز با Exclave/Instagram Reels روی مسیر واقعی تأیید نشده و ترافیک اضافه نیز ممکن است موجب فشار شبکه شود. Auto Tune همچنان فقط بافر سوکت و زمان‌سنجی را تنظیم می‌کند. [جزئیات و محدودیت‌ها](docs/UDP_FEC_LOSS_RECOVERY.md).
@@ -20,9 +25,9 @@
 
 **یک تونل ICMP رمزنگاری‌شده، دو سرور، راه‌اندازی ساده و مدیریت سبک.**
 
-[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.3.9](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.11)
+[English documentation](README.en.md) · [معماری فنی](docs/ARCHITECTURE.md) · [راهنمای امنیت](SECURITY.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [دانلود نسخه 3.3.9](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.12)
 
-![Version](https://img.shields.io/badge/version-3.3.11--preview-f59e0b) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.3.12--preview-f59e0b) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
 
 **Pingtunnel Manager** ابزاری برای نصب، جفت‌سازی، مدیریت و پایش یک تونل مبتنی بر **ICMP** میان **یک VPS ایران و یک VPS خارج** است. ترافیک برنامه‌های TCP یا UDP ابتدا وارد سرور ایران می‌شود، از طریق ICMP رمزنگاری‌شده به سرور خارج می‌رسد و در نهایت به سرویس محلی موردنظر تحویل داده می‌شود.
 
