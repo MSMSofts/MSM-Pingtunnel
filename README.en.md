@@ -1,5 +1,12 @@
 # Pingtunnel Manager
 
+## v3.3.13 — Auto Tune removed from Manager
+
+**Auto Tune is removed.** Menu item 15, the `pingtunnel auto-tune` CLI command and the underlying probing/restart code are gone. Saved settings such as `udp_buf`, `timeout` and manual TCP overrides are **preserved**. The Go ICMP/UDP datapath, Reverse behavior, encryption and ordinary passive performance metrics are **unchanged**. Experimental `icmp_segment` and `udp_fec` remain disabled by default.
+
+This is a conservative manager-only cleanup based on v3.3.12. **There is no need to upgrade a working v3.3.12 tunnel solely to remove Auto Tune.** Installing a new manager/core release may restart the tunnel; committing this change does not update deployed VPSs.
+
+
 ## v3.3.12 emergency compatibility hotfix
 
 A verified mixed-version regression in v3.3.11 changed the headers of the two
@@ -36,19 +43,17 @@ messages. The actual reduction of Instagram Reels stalls remains to be
 verified on live VPSs. [Design, tests and limitations](docs/ICMP_DATAGRAM_SEGMENTATION.md).
 
 
-## Unreleased safety hardening (development branch)
+## Safe maintenance
 
-- Menu **15) Auto Tune** and `sudo pingtunnel auto-tune` now **preview only**. On Foreign, Auto Tune returns without probing, changing configuration or restarting anything.
-- Iran-side changes require `sudo pingtunnel auto-tune --apply` during a maintenance window; this **restarts** the core and interrupts live sessions. Degraded RTT/jitter/probe-loss EWMA blocks all writes. Authentication does not prove VPN application delivery.
-- `sudo pingtunnel uninstall` cleans up the service, binaries, dedicated drop-ins and runtime files while preserving the private pairing configuration. `sudo pingtunnel uninstall --purge` needs a typed `PURGE` confirmation and permanently removes keys, config and logs.
-- These changes are **not** a verified fix for the reported v3.3.9 UDP-quality regression. Continue using the known-working v3.3.8 deployment until controlled tests pass. See [Safety and uninstall guide](docs/SAFE_TUNING_AND_UNINSTALL.md).
-
+- `sudo pingtunnel uninstall` preserves the private pairing configuration by default.
+- Explicit, confirmed `--purge` permanently removes private Pingtunnel data.
+- Use `sudo pingtunnel performance`, `sudo pingtunnel security` and `sudo pingtunnel health` for passive status inspection; these are not Auto Tune.
 
 **A lightweight, encrypted ICMP tunnel between exactly two Linux VPSs, with a five-question setup wizard.**
 
-[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.3.9](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.12)
+[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.3.13](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.13)
 
-![Version](https://img.shields.io/badge/version-3.3.12--preview-f59e0b) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.3.13--preview-f59e0b) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
 
 Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** between an **Iran-side VPS** and an **overseas VPS**. Local TCP or UDP traffic enters the Iran VPS, travels inside authenticated, encrypted ICMP packets, and is forwarded by the overseas VPS to its configured local service.
 
@@ -57,13 +62,9 @@ Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** betwe
 **Prior release: 3.3.9** · Rust manager, Go core, schema **3**, secure wire **4** · **Reverse-first Auto:** Foreign starts ICMP polls; Direct is reserved for prolonged confirmed outages with client demand. Video latency improvements require measured live testing.
 
 
-## Authenticated TCP/UDP Auto Tune (v3.3.9)
+## Auto Tune history (removed in v3.3.13)
 
-On the **Iran-side TCP or UDP forwarding client**, run `sudo pingtunnel auto-tune` or select **15) Auto Tune** in the manager menu. Use `sudo pingtunnel auto-tune --dry-run` to preview without changing a file or restarting the service. The tunnel must already be authenticated. Auto Tune requires at least 8 authenticated encrypted-tunnel RTT samples within a rolling 2-minute window (latest within 35 seconds). Ordinary/sized ICMP echo probes provide diagnostic context only: independent ICMP filtering or rate limiting never changes the tuning profile. Insufficient or extremely poor measurements cause no settings to be changed.
-
-For **TCP**, it adjusts bounded `tcp_bs`, `tcp_mw`, `tcp_rst` and connection idle `timeout` overrides, leaving Go's per-new-stream adaptive controller and congestion control intact. For **UDP**, it adjusts **only** the local listener `udp_buf` socket receive/send buffers (256 KiB, 512 KiB or 1 MiB) and idle connection `timeout` (60/90/120 seconds). UDP has no TCP retransmission window. The local socket queue preference is also transmitted in existing authenticated UDP DATA metadata and applied to the overseas UDP target socket on a compatible upgraded core. Older peers simply ignore it. The Linux kernel may cap effective UDP socket buffers; this setting does not alter a datagram's size, path MTU, application QUIC/Hysteria congestion control, or remote application queues, and it **cannot fix upstream packet loss**.
-
-Before changes, a 0600 backup of the previous configuration is written to `/opt/pingtunnel/conf/config.pre-autotune.json`. The service is restarted; a new systemd MainPID, fresh core status, and renewed authenticated peer traffic are required for success within 45 seconds. Previous settings are restored if that check fails. Peer IP, pairing key, encrypted wire format, ports, and ICMP direction are never changed by the tuner. Live throughput, QUIC behavior and service stability still require testing on the actual VPS pair.
+Auto Tune was introduced in v3.3.9. The v3.3.13 manager removes the command, menu option and tuning module entirely. Previously saved TCP/UDP settings remain valid and the existing read-only Performance, Security and Health commands are unaffected. Prior release descriptions are historical, not current invocation instructions.
 
 ## Reflected encrypted PING detection and active TTL eviction (v3.3.8)
 
