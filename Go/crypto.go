@@ -27,6 +27,10 @@ const (
 
 // CryptoConfig holds encryption configuration
 type CryptoConfig struct {
+    // Default FALSE: legacy packet framing remains active unless BOTH peers
+    // have deliberately opted in to the experimental fragmentation protocol.
+    ICMPSegmentation bool
+    UDPParity bool
 	Mode   EncryptionMode
 	Key    []byte
 	Cipher cipher.AEAD
