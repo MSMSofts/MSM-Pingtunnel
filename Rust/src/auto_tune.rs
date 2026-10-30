@@ -276,6 +276,7 @@ pub(crate) fn run(apply: bool) -> Result<()> {
         println!("UDP profile: {} | socket buffer {} KiB | idle timeout {} s",
             plan.profile, plan.socket_buffer_bytes/1024, plan.timeout_secs);
         println!("UDP socket queue preference is sent to the foreign peer over authenticated DATA frames.");
+        println!("The Go core independently rate-limits XOR repair parity for two-part UDP frames; Auto Tune does not change its safety budget.");
         println!("No UDP datagram size, MTU, target port or peer identity changes.");
         updated["udp_buf"] = json!(plan.socket_buffer_bytes);
         updated["timeout"] = json!(plan.timeout_secs);
