@@ -150,6 +150,8 @@ func main() {
 	encryptionKey := flag.String("encrypt-key", "", "encryption key (base64 or passphrase)")
 	tcpmode := flag.Int("tcp", 0, "tcp mode")
 	udpBuffer := flag.Int("udp_buf", 0, "UDP listener socket buffer bytes (0 uses OS default)")
+    icmpSegment := flag.Bool("icmp_segment", false, "opt-in ICMP segmentation, requires both peers upgraded")
+    udpFEC := flag.Bool("udp_fec", false, "opt-in bounded UDP repair parity; requires -icmp_segment and both peers")
 	tcpmode_buffersize := flag.Int("tcp_bs", 1*1024*1024, "tcp mode buffer size")
 	tcpmode_maxwin := flag.Int("tcp_mw", 20000, "tcp mode max win")
 	tcpmode_resend_timems := flag.Int("tcp_rst", 400, "tcp mode resend time ms")
@@ -244,6 +246,8 @@ func main() {
         if !setFlags["udp_buf"] && cfg.UDPBufferSize != 0 {
             *udpBuffer = cfg.UDPBufferSize
         }
+        if !setFlags["icmp_segment"] { *icmpSegment = cfg.ICMPSegmentation }
+        if !setFlags["udp_fec"] { *udpFEC = cfg.UDPParity }
 		if !setFlags["tcp_bs"] && cfg.TCPBufferSize != 0 {
 			*tcpmode_buffersize = cfg.TCPBufferSize
 		}
@@ -343,6 +347,19 @@ func main() {
 			os.Exit(1)
 		}
 	}
+
+    if *udpFEC && !*icmpSegment {
+        fmt.Fprintln(os.Stderr,"udp_fec requires explicit icmp_segment on both peers")
+        os.Exit(1)
+    }
+    if (*icmpSegment || *udpFEC) && encryptionMode != pingtunnel.AUTO {
+        fmt.Fprintln(os.Stderr,"experimental ICMP packet features require authenticated AUTO encryption")
+        os.Exit(1)
+    }
+    if cryptoConfig != nil {
+        cryptoConfig.ICMPSegmentation = *icmpSegment
+        cryptoConfig.UDPParity = *udpFEC
+    }
 
     if encryptionMode==pingtunnel.AUTO {
         // Always domain-separate the AES/XChaCha encryption and decryption
