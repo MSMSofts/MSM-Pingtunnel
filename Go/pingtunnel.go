@@ -38,7 +38,7 @@ func sendAuthenticatedParts(id, sequence int, conn icmp.PacketConn, peer *net.IP
     proto int, data []byte, crypto *CryptoConfig, msgType uint32, udpData bool) error {
     parts, err := splitAuthenticatedMessage(data)
     if err != nil { return err }
-    if udpData && msgType == uint32(MyMsg_DATA) {
+    if udpData && crypto.UDPParity && msgType == uint32(MyMsg_DATA) {
         parts = appendBoundedUDPParity(parts, time.Now())
     }
     for _, plain := range parts {
@@ -82,7 +82,8 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
     // an oversized ciphertext and kernel IP fragmentation. While negotiating,
     // retain the existing whole-message pending queue; FlushPendingICMP will
     // segment the queued message only after authentication succeeds.
-    if cryptoConfig != nil && cryptoConfig.sec != nil && cryptoConfig.SecureReady() &&
+    if cryptoConfig != nil && cryptoConfig.sec != nil &&
+        cryptoConfig.ICMPSegmentation && cryptoConfig.SecureReady() &&
         len(mb) > icmpMaxSecurePlaintext {
         if err := sendAuthenticatedParts(id,sequence,conn,server,sproto,mb,cryptoConfig,msgType,tcpmode==0); err != nil {
             if errors.Is(err,ErrSecureNegotiation) && msgType==uint32(MyMsg_DATA) {
@@ -193,7 +194,7 @@ func FlushPendingICMP(conn icmp.PacketConn, crypto *CryptoConfig) {
  if crypto==nil||crypto.sec==nil||!crypto.SecureReady(){return}
  packets:=crypto.sec.drainPending(time.Now())
  for i,p:=range packets{
-  if len(p.raw)>icmpMaxSecurePlaintext {
+  if crypto.ICMPSegmentation && len(p.raw)>icmpMaxSecurePlaintext {
    if err:=sendAuthenticatedParts(p.id,p.seq,conn,p.peer,p.proto,p.raw,crypto,uint32(MyMsg_DATA),false);err!=nil {
     for _,unsent:=range packets[i:] {crypto.sec.pushBack(unsent)}
     return
