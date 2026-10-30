@@ -35,9 +35,12 @@ func sendSecureControl(id,sequence int,conn icmp.PacketConn,peer *net.IPAddr,spr
 // packet remains <=1200 bytes without relying on kernel IP fragmentation.
 // A complete MyMsg is reconstructed and authenticated at the far receiver.
 func sendAuthenticatedParts(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr,
-    proto int, data []byte, crypto *CryptoConfig, msgType uint32) error {
+    proto int, data []byte, crypto *CryptoConfig, msgType uint32, udpData bool) error {
     parts, err := splitAuthenticatedMessage(data)
     if err != nil { return err }
+    if udpData && msgType == uint32(MyMsg_DATA) {
+        parts = appendBoundedUDPParity(parts, time.Now())
+    }
     for _, plain := range parts {
         encrypted, err := crypto.Encrypt(plain)
         if err != nil { return err }
@@ -81,7 +84,7 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
     // segment the queued message only after authentication succeeds.
     if cryptoConfig != nil && cryptoConfig.sec != nil && cryptoConfig.SecureReady() &&
         len(mb) > icmpMaxSecurePlaintext {
-        if err := sendAuthenticatedParts(id,sequence,conn,server,sproto,mb,cryptoConfig,msgType); err != nil {
+        if err := sendAuthenticatedParts(id,sequence,conn,server,sproto,mb,cryptoConfig,msgType,tcpmode==0); err != nil {
             if errors.Is(err,ErrSecureNegotiation) && msgType==uint32(MyMsg_DATA) {
                 cryptoConfig.sec.queuePacket(pendingICMP{raw:mb,peer:server,id:id,seq:sequence,proto:sproto})
             } else {
@@ -191,7 +194,7 @@ func FlushPendingICMP(conn icmp.PacketConn, crypto *CryptoConfig) {
  packets:=crypto.sec.drainPending(time.Now())
  for i,p:=range packets{
   if len(p.raw)>icmpMaxSecurePlaintext {
-   if err:=sendAuthenticatedParts(p.id,p.seq,conn,p.peer,p.proto,p.raw,crypto,uint32(MyMsg_DATA));err!=nil {
+   if err:=sendAuthenticatedParts(p.id,p.seq,conn,p.peer,p.proto,p.raw,crypto,uint32(MyMsg_DATA),false);err!=nil {
     for _,unsent:=range packets[i:] {crypto.sec.pushBack(unsent)}
     return
    }
