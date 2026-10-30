@@ -1,5 +1,13 @@
 # Changelog / تاریخچه تغییرات
 
+## [3.3.11 preview] — Bounded UDP repair parity for 2-part ICMP datagrams
+
+- Added optional-by-budget XOR parity (maximum 24 repair frames per second) for two-fragment UDP DATA. Independently AEAD-authenticated parity permits receiver reconstruction with **one missing segment**, without delivering partial UDP payloads. TCP/large multi-part packets receive no parity.
+- Parity uses a version-specific encrypted fragment-header flag; the 1200-byte IPv4 budget, reverse-queue handling, and v3 security/replay protection are retained. 256 recently completed IDs avoid late-parity duplicate delivery.
+- Added CI tests for first/second segment loss, no-loss normal delivery, malformed parity, strict sender rate caps, and bounded receiver memory; and security counters for generated parity/recovered UDP datagrams.
+- **Both VPS cores must be upgraded together**: v3.3.10 cannot interpret the flagged chunks. This prerelease is not field-proven to reduce Instagram Reels stalls; extra parity can worsen congestion on ICMP-limited links. [Technical details](docs/UDP_FEC_LOSS_RECOVERY.md).
+
+
 ## [3.3.10 preview] — Authenticated ICMP packet segmentation and safe maintenance
 
 - Keep full serialized UDP datagrams but independently AEAD-authenticate chunks of large protobuf messages. Bound each IPv4/ICMP packet to 1200 bytes, reconstruct only complete datagrams with 3-second TTL and 2 MiB bounded reassembly memory.
