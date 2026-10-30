@@ -83,10 +83,9 @@ const MAINTENANCE: [(u8, &str, &str); 3] = [
     (11, "Uninstall", "Remove binaries; keep pairing config"),
     (12, "Exit", "Close menu"),
 ];
-const SECURITY: [(u8, &str, &str); 3] = [
+const SECURITY: [(u8, &str, &str); 2] = [
     (13, "Security", "Replay and recovery"),
     (14, "Health", "Core heartbeat"),
-    (15, "Auto Tune", "Safe preview (Iran only)"),
 ];
 
 fn options(out: &mut String, section: &str, entries: &[(u8, &str, &str)],
@@ -104,7 +103,7 @@ fn options(out: &mut String, section: &str, entries: &[(u8, &str, &str)],
     }
 }
 
-/// View is deliberately single-column. Menu choices are 1..15 from TOP to
+/// View is deliberately single-column. Menu choices are 1..14 from TOP to
 /// BOTTOM, so visual scanning and terminal keyboard input agree.
 pub(crate) fn render_sized(view: &MenuView<'_>, color: bool, unicode: bool,
                            columns: u16, rows: u16) -> String {
@@ -156,7 +155,7 @@ pub(crate) fn render_sized(view: &MenuView<'_>, color: bool, unicode: bool,
     options(&mut out,"SETUP & CONFIGURATION",&CONFIG,width,unicode,color,compact);
     options(&mut out,"DIAGNOSTICS",&DIAGNOSTIC,width,unicode,color,compact);
     options(&mut out,"MAINTENANCE",&MAINTENANCE,width,unicode,color,compact);
-    options(&mut out,"SECURITY, HEALTH & TUNING",&SECURITY,width,unicode,color,compact);
+    options(&mut out,"SECURITY & HEALTH",&SECURITY,width,unicode,color,compact);
     out
 }
 
@@ -248,7 +247,7 @@ mod tests {
     }
 
     #[test]
-    fn choices_are_strictly_top_to_bottom_1_to_15() {
+    fn choices_are_strictly_top_to_bottom_1_to_14() {
         for (cols,rows) in [(80,40),(52,30),(47,27)]{
             let s=render_sized(&fixture(),false,false,cols,rows);
             let choices:Vec<u8>=s.lines().filter_map(|line|{
@@ -256,7 +255,9 @@ mod tests {
                 let (prefix,_) = text.split_once(')')?;
                 prefix.trim().parse::<u8>().ok()
             }).collect();
-            assert_eq!(choices,(1..=15).collect::<Vec<u8>>());
+            assert_eq!(choices,(1..=14).collect::<Vec<u8>>());
+            assert!(!s.contains("Auto Tune"));
+            assert!(!s.contains("15)"));
             assert!(s.contains("0.3%"));
             assert!(s.contains("13.9 MiB"));
             assert!(!s.contains("\x1b["));
