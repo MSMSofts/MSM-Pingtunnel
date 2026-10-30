@@ -30,6 +30,18 @@ jobs:
       - name: Verify Bash installer syntax
         run: bash -n Source/*.sh
       - run: cargo test --manifest-path Rust/Cargo.toml
+      - name: Verify Auto Tune is not exposed through the CLI
+        run: |
+          cargo run --quiet --manifest-path Rust/Cargo.toml -- --help > /tmp/pingtunnel-help
+          if grep -iq 'auto-tune' /tmp/pingtunnel-help; then
+            echo "Auto Tune remains in CLI help" >&2
+            exit 1
+          fi
+          if cargo run --quiet --manifest-path Rust/Cargo.toml -- auto-tune --apply >/tmp/pingtunnel-removed-command.log 2>&1; then
+            echo "Removed Auto Tune command unexpectedly accepted" >&2
+            exit 1
+          fi
+          grep -F 'Unknown command: auto-tune' /tmp/pingtunnel-removed-command.log
   build:
     needs: test
     strategy:
