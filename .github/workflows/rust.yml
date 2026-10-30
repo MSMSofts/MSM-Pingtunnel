@@ -95,7 +95,7 @@ jobs:
         run: |
           cd upstream
           go build -o /tmp/pingtunnel-security-verify ./cmd
-          test "$(/tmp/pingtunnel-security-verify -security-protocol)" = "pingtunnel-go-core=3.3.10 config-schema=3 wire=4"
+          test "$(/tmp/pingtunnel-security-verify -security-protocol)" = "pingtunnel-go-core=3.3.11 config-schema=3 wire=4"
           if /tmp/pingtunnel-security-verify -c /tmp/does-not-exist-pingtunnel-config.json; then
             echo "Go core returned success for an invalid config" >&2
             exit 1
@@ -138,15 +138,15 @@ jobs:
       - name: Build release compatibility manifest
         run: |
           {
-            printf 'release=v3.3.10\nconfig_schema=3\nwire=4\n'
+            printf 'release=v3.3.11\nconfig_schema=3\nwire=4\n'
             printf 'upstream_go=df16e52771ee67f1f9770ec68763b425672a36fc\n'
             printf 'source_commit=%s\n' "$GITHUB_SHA"
             (cd dist && sha256sum pingtunnel-core-linux-* pingtunnel-manager-linux-* | grep -v '\.sha256') 
           } > dist/release-manifest.txt
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v3.3.10
-          name: Pingtunnel Manager 3.3.10 — secure wire v4
+          tag_name: v3.3.11
+          name: Pingtunnel Manager 3.3.11 — secure wire v4
           prerelease: true
           make_latest: false
           files: dist/*
