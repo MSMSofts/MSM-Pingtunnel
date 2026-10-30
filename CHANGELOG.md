@@ -1,5 +1,14 @@
 # Changelog / تاریخچه تغییرات
 
+## [3.3.13 preview] — Remove Auto Tune (no transport changes)
+
+- Removed Rust Auto Tune implementation, its active probes, configuration writes, restart/rollback logic, menu option **15** and CLI subcommand `auto-tune`.
+- Existing `udp_buf`, `timeout`, TCP configuration and pairing keys remain untouched. No configuration migration, network protocol change, kernel/sysctl tuning, or automatic service restart.
+- Passive `performance`, `security` and `health` commands continue to work. Go core packet framing, Reverse behavior, adaptive performance monitoring and disabled-by-default experimental fragmentation/FEC retain v3.3.12 behavior.
+- CI enforces the missing CLI command and 14 menu choices. Versioned Rust/Go release stays paired for checksum integrity, but packet format is unchanged.
+- The previously working v3.3.12 deployment needs no upgrade. Upgrading an installed service still requires a separately scheduled restart.
+
+
 ## [3.3.12 preview] — Emergency safe-by-default framing hotfix
 
 - **Connectivity regression:** v3.3.11 FEC rewrote the count field of BOTH original UDP fragments, making their reassembly incompatible with v3.3.10 during mixed-version operation.
