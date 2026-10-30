@@ -196,3 +196,42 @@ func TestMalformedAuthenticatedParityIsRejected(t *testing.T) {
     if _,ok:=r.accept(broken,time.Now());ok{t.Fatal("short segment accepted")}
     if len(r.groups)!=0{t.Fatal("bad length consumed group memory")}
 }
+
+func TestFECParityDoesNotMutateLegacyDataChunks(t *testing.T) {
+    original := bytes.Repeat([]byte("REELS-UDP"), 170)
+    legacy, err := splitAuthenticatedMessage(original)
+    if err != nil || len(legacy) != 2 { t.Fatalf("test needs 2 fragments, got %d: %v",len(legacy),err) }
+    orig0 := append([]byte(nil),legacy[0]...)
+    orig1 := append([]byte(nil),legacy[1]...)
+    fecLimiter.Lock()
+    fecLimiter.window = time.Time{}
+    fecLimiter.used = 0
+    fecLimiter.Unlock()
+    pieces := appendBoundedUDPParity(legacy,time.Now())
+    if len(pieces)!=3 {t.Fatalf("want 2+1 frames, got %d",len(pieces))}
+    if !bytes.Equal(pieces[0],orig0) || !bytes.Equal(pieces[1],orig1) {
+        t.Fatal("FEC MUST NOT modify data fragments accepted by older peers")
+    }
+    if !bytes.Equal(pieces[2][:4],fragmentParityMagic[:]) {
+        t.Fatal("parity requires independent PTF5 marker")
+    }
+    if !bytes.Equal(pieces[0][:4],fragmentMagic[:]) ||
+       binary.BigEndian.Uint16(pieces[0][14:16])!=2 {
+        t.Fatal("ordinary PTF4 framing changed")
+    }
+    var oldStyleReceiver authenticatedReassembler
+    now:=time.Now()
+    if _,complete:=oldStyleReceiver.accept(pieces[0],now);complete {
+        t.Fatal("early original UDP delivery")
+    }
+    out,complete:=oldStyleReceiver.accept(pieces[1],now)
+    if !complete || !bytes.Equal(out,original) {
+        t.Fatal("original two frames no longer reconstruct independently of parity")
+    }
+}
+func TestLegacyTransportFeaturesAreDisabledByDefault(t *testing.T) {
+    var config CryptoConfig
+    if config.ICMPSegmentation || config.UDPParity {
+        t.Fatal("production default must match legacy encrypted datagram format")
+    }
+}
