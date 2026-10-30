@@ -1,5 +1,14 @@
 # Changelog / تاریخچه تغییرات
 
+## [3.3.12 preview] — Emergency safe-by-default framing hotfix
+
+- **Connectivity regression:** v3.3.11 FEC rewrote the count field of BOTH original UDP fragments, making their reassembly incompatible with v3.3.10 during mixed-version operation.
+- **Fail-safe default:** Disable both ICMP segmentation and UDP FEC unless explicitly enabled on both peers; default encrypted datagram wire behavior matches the known-working v3.3.8.
+- Optional parity is now a distinct AEAD-encrypted PTF5 extension; original PTF4 data fragments retain their previous bytes, so a v3.3.10 peer can still reconstruct ordinary fragments.
+- Strict manager/core validation prevents enabling FEC without segmentation, and regression tests cover unchanged original data plus disabled-by-default settings.
+- Not a measured Reels-speed fix. Use a 2-VPS staging pair before re-enabling fragmentation; preserve v3.3.8 rollback. [Hotfix design](docs/3312_EMERGENCY_COMPATIBILITY.md).
+
+
 ## [3.3.11 preview] — Bounded UDP repair parity for 2-part ICMP datagrams
 
 - Added optional-by-budget XOR parity (maximum 24 repair frames per second) for two-fragment UDP DATA. Independently AEAD-authenticated parity permits receiver reconstruction with **one missing segment**, without delivering partial UDP payloads. TCP/large multi-part packets receive no parity.
