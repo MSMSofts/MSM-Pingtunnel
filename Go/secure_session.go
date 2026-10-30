@@ -509,6 +509,8 @@ type secureStatus struct{
  ICMPFragmentedDatagrams uint64 `json:"icmp_fragmented_datagrams"`
  ICMPReassembledDatagrams uint64 `json:"icmp_reassembled_datagrams"`
  ICMPFragmentDrop uint64 `json:"icmp_fragment_drops"`
+ ICMPFECParityGenerated uint64 `json:"icmp_fec_parity_generated"`
+ ICMPFECRecovered uint64 `json:"icmp_fec_recovered_datagrams"`
  ReversePollEchoReflections uint64 `json:"reverse_poll_echo_reflections"`
  ReverseDataEchoReflections uint64 `json:"reverse_data_echo_reflections"`
  ReversePingEchoReflections uint64 `json:"reverse_ping_echo_reflections"`
@@ -572,6 +574,8 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.ICMPFragmentedDatagrams=icmpFragmentedDatagrams.Load()
  report.ICMPReassembledDatagrams=icmpReassembledDatagrams.Load()
  report.ICMPFragmentDrop=icmpFragmentDropped.Load()
+ report.ICMPFECParityGenerated=icmpFECParitySent.Load()
+ report.ICMPFECRecovered=icmpFECRecovered.Load()
  report.ReversePollEchoReflections=diag.ReflectedPolls
  report.ReverseDataEchoReflections=diag.ReflectedDataEchoes
  report.ReversePingEchoReflections=diag.ReflectedPingEchoes
