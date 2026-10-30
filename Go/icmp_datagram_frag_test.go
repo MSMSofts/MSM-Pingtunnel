@@ -96,3 +96,103 @@ func TestFragmentReassemblyMemoryBoundUnderManyPartialDatagrams(t *testing.T) {
         }
     }
 }
+
+func TestBoundedFECRecoversEitherMissingSegment(t *testing.T) {
+    original := bytes.Repeat([]byte("quic-video-datagram"), 78)
+    data, err := splitAuthenticatedMessage(original)
+    if err != nil || len(data) != 2 {
+        t.Fatalf("test message must have 2 segments: count=%d err=%v",len(data),err)
+    }
+    // Give this test a clean parity allowance.
+    fecLimiter.Lock()
+    fecLimiter.window = time.Time{}
+    fecLimiter.used = 0
+    fecLimiter.Unlock()
+    pieces := appendBoundedUDPParity(data, time.Now())
+    if len(pieces) != 3 { t.Fatalf("want 2+1 FEC, got %d",len(pieces)) }
+    if binary.BigEndian.Uint16(pieces[2][12:14]) != 2 {
+        t.Fatal("parity must have index 2")
+    }
+    for lost := 0; lost < 2; lost++ {
+        var reassembler authenticatedReassembler
+        now := time.Now()
+        var result []byte
+        var ok bool
+        if lost==0 {
+            result,ok = reassembler.accept(pieces[1],now)
+        } else {
+            result,ok = reassembler.accept(pieces[0],now)
+        }
+        if ok || result!=nil { t.Fatal("incomplete UDP delivered before parity") }
+        result,ok = reassembler.accept(pieces[2],now)
+        if !ok || !bytes.Equal(result, original) {
+            t.Fatalf("could not reconstruct missing segment %d",lost)
+        }
+        if after,done := reassembler.accept(pieces[lost],now); done || after!=nil {
+            t.Fatal("late fragment replay caused duplicate UDP delivery")
+        }
+        if reassembler.buffered!=0 || len(reassembler.groups)!=0 {
+            t.Fatal("recovered message leaked fragment state")
+        }
+    }
+}
+func TestFECWithoutLossDeliversOnceAndIgnoresLateParity(t *testing.T) {
+    original := bytes.Repeat([]byte("REELS"), 310)
+    pieces, err := splitAuthenticatedMessage(original)
+    if err != nil || len(pieces)!=2 { t.Fatal("expected 2 fragments") }
+    fecLimiter.Lock()
+    fecLimiter.window = time.Time{}
+    fecLimiter.used = 0
+    fecLimiter.Unlock()
+    pieces = appendBoundedUDPParity(pieces,time.Now())
+    var r authenticatedReassembler
+    now := time.Now()
+    if _,ok:=r.accept(pieces[0],now);ok{t.Fatal("early delivery")}
+    reconstructed,ok:=r.accept(pieces[1],now)
+    if !ok||!bytes.Equal(reconstructed,original){t.Fatal("normal FEC group not delivered")}
+    if out,again:=r.accept(pieces[2],now);again||out!=nil{
+        t.Fatal("late parity must never start another UDP datagram")
+    }
+    if len(r.groups)!=0||r.buffered!=0{t.Fatal("late parity allocated a new group")}
+}
+func TestFECNeverAmplifiesBeyondBoundedRate(t *testing.T) {
+    now:=time.Now()
+    fecLimiter.Lock()
+    fecLimiter.window=time.Time{}
+    fecLimiter.used=0
+    fecLimiter.Unlock()
+    data:=bytes.Repeat([]byte("UDP"),550)
+    allowed:=0
+    for i:=0;i<fecParityMaxPerSecond+15;i++{
+        chunks,err:=splitAuthenticatedMessage(data)
+        if err!=nil||len(chunks)!=2{t.Fatal("unexpected chunks")}
+        if len(appendBoundedUDPParity(chunks,now))==3 {allowed++}
+    }
+    if allowed!=fecParityMaxPerSecond{
+        t.Fatalf("parity amplified %d packets in one second, expected %d",
+            allowed,fecParityMaxPerSecond)
+    }
+    chunks,_:=splitAuthenticatedMessage(data)
+    if len(appendBoundedUDPParity(chunks,now.Add(time.Second)))!=3 {
+        t.Fatal("rate allowance not replenished")
+    }
+}
+func TestMalformedAuthenticatedParityIsRejected(t *testing.T) {
+    original:=bytes.Repeat([]byte("udp"),700)
+    pieces,err:=splitAuthenticatedMessage(original)
+    if err!=nil||len(pieces)!=2{t.Fatal("expected pair")}
+    fecLimiter.Lock()
+    fecLimiter.window=time.Time{}
+    fecLimiter.used=0
+    fecLimiter.Unlock()
+    pieces=appendBoundedUDPParity(pieces,time.Now())
+    p:=append([]byte(nil),pieces[2]...)
+    binary.BigEndian.PutUint16(p[12:14],3)
+    var r authenticatedReassembler
+    if _,ok:=r.accept(p,time.Now());ok{t.Fatal("bad parity index accepted")}
+    if len(r.groups)!=0{t.Fatal("bad parity consumed group memory")}
+    broken:=append([]byte(nil),pieces[1]...)
+    broken=broken[:len(broken)-1]
+    if _,ok:=r.accept(broken,time.Now());ok{t.Fatal("short segment accepted")}
+    if len(r.groups)!=0{t.Fatal("bad length consumed group memory")}
+}
