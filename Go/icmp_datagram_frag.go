@@ -12,6 +12,7 @@ import (
     "crypto/rand"
     "encoding/binary"
     "errors"
+    "sync"
     "sync/atomic"
     "time"
 )
@@ -34,6 +35,9 @@ const (
     fragmentMaxGroups = 128
     fragmentMaxBufferedBytes = 2 * 1024 * 1024
     fragmentLifetime = 3 * time.Second
+    fecParityMaxPerSecond = 24
+    fecCompletedCacheLimit = 256
+    fragmentFECFlag = uint16(1 << 15)
 )
 var fragmentMagic = [4]byte{'P', 'T', 'F', '4'}
 
@@ -41,6 +45,57 @@ var fragmentMagic = [4]byte{'P', 'T', 'F', '4'}
 var icmpFragmentedDatagrams atomic.Uint64
 var icmpReassembledDatagrams atomic.Uint64
 var icmpFragmentDropped atomic.Uint64
+var icmpFECParitySent atomic.Uint64
+var icmpFECRecovered atomic.Uint64
+
+var fecLimiter struct {
+    sync.Mutex
+    window time.Time
+    used int
+}
+
+// Rate-limiting parity prevents a lossy ICMP connection from being flooded
+// with repair traffic, which could otherwise worsen QUIC jitter.
+func allowBoundedFEC(now time.Time) bool {
+    fecLimiter.Lock()
+    defer fecLimiter.Unlock()
+    if fecLimiter.window.IsZero() || now.Before(fecLimiter.window) ||
+        now.Sub(fecLimiter.window) >= time.Second {
+        fecLimiter.window = now
+        fecLimiter.used = 0
+    }
+    if fecLimiter.used >= fecParityMaxPerSecond { return false }
+    fecLimiter.used++
+    return true
+}
+
+// One extra authenticated XOR parity segment can recover either missing
+// data segment from a two-segment UDP datagram. This is never used for TCP.
+func appendBoundedUDPParity(parts [][]byte, now time.Time) [][]byte {
+    if len(parts) != 2 { return parts }
+    if len(parts[0]) < fragmentHeaderBytes || len(parts[1]) < fragmentHeaderBytes {
+        return parts
+    }
+    if !allowBoundedFEC(now) { return parts }
+    first, second := parts[0], parts[1]
+    parity := make([]byte, fragmentHeaderBytes + fragmentPayloadBytes)
+    copy(parity[:fragmentHeaderBytes], first[:fragmentHeaderBytes])
+    binary.BigEndian.PutUint16(parity[12:14], 2)
+    binary.BigEndian.PutUint16(parity[14:16], fragmentFECFlag | 2)
+    for i, b := range first[fragmentHeaderBytes:] {
+        parity[fragmentHeaderBytes+i] ^= b
+    }
+    for i, b := range second[fragmentHeaderBytes:] {
+        parity[fragmentHeaderBytes+i] ^= b
+    }
+    for i, part := range parts {
+        copyOfPart := append([]byte(nil), part...)
+        binary.BigEndian.PutUint16(copyOfPart[14:16], fragmentFECFlag | 2)
+        parts[i] = copyOfPart
+    }
+    icmpFECParitySent.Add(1)
+    return append(parts, parity)
+}
 
 // A segment header is inside the authenticated plaintext (never exposed to
 // an unauthenticated network peer).
@@ -83,25 +138,47 @@ type pendingFragmentMessage struct {
     parts [][]byte
     received int
     length int
+    reserved int
+    parity []byte
+    fec bool
 }
 
 type authenticatedReassembler struct {
     groups map[[8]byte]*pendingFragmentMessage
     buffered int
+    completed map[[8]byte]time.Time
 }
 func (r *authenticatedReassembler) remove(id [8]byte) {
     if x, ok := r.groups[id]; ok {
-        r.buffered -= x.total
+        r.buffered -= x.reserved
         delete(r.groups, id)
     }
 }
 func (r *authenticatedReassembler) prune(now time.Time) {
+    for id, finished := range r.completed {
+        if now.Before(finished) || now.Sub(finished) >= fragmentLifetime {
+            delete(r.completed, id)
+        }
+    }
     for id, group := range r.groups {
         if now.Sub(group.at) >= fragmentLifetime || now.Before(group.at) {
             r.remove(id)
             icmpFragmentDropped.Add(1)
         }
     }
+}
+func (r *authenticatedReassembler) rememberComplete(id [8]byte, now time.Time) {
+    if r.completed == nil { r.completed = make(map[[8]byte]time.Time) }
+    if len(r.completed) >= fecCompletedCacheLimit {
+        var oldest [8]byte
+        var age time.Time
+        found := false
+        for key, at := range r.completed {
+            if !found || at.Before(age) { oldest,age,found = key,at,true }
+        }
+        if found { delete(r.completed, oldest) }
+    }
+    r.completed[id] = now
 }
 func (r *authenticatedReassembler) oldest() ([8]byte, bool) {
     var id [8]byte
