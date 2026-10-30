@@ -1,5 +1,8 @@
 # Safety, rollback and uninstall (development branch)
 
+> **Archived historical guide:** Starting in **v3.3.13**, the entire Auto Tune command, module and menu option were **removed**. Do NOT execute any Auto Tune command described below; those instructions apply only to older versions. Manual `udp_buf`/`timeout` settings and `pingtunnel performance` remain available. The uninstall guidance remains applicable.
+
+
 > This is an unreleased hardening branch, **not** a confirmed fix for the
 > reported high-latency v3.3.9 VPN/UDP incident. Do **not** switch a healthy
 > v3.3.8 two-VPS deployment to this branch just to test it. First validate
