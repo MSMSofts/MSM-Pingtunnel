@@ -1,5 +1,17 @@
 # Pingtunnel Manager
 
+## v3.3.11 preview — Bounded one-fragment loss recovery for UDP
+
+For two-part UDP packets only, the core may add an independently encrypted XOR
+parity segment, capped at **24 repair frames per second**. The peer can recover
+the exact original packet when either one of the two data segments is missing.
+No partial UDP packets are delivered, and TCP is unaffected. **Both VPSs must
+run v3.3.11**, since v3.3.10 does not recognize the parity flag. This
+increase in ICMP traffic has not yet been proven to improve Instagram Reels
+stalls and might exacerbate congestion on some networks. Auto Tune socket
+buffers remain independent. [Technical explanation](docs/UDP_FEC_LOSS_RECOVERY.md).
+
+
 ## v3.3.10 preview — avoid kernel ICMP fragmentation
 
 Large UDP/QUIC messages are split **before encryption** into independently
@@ -22,9 +34,9 @@ verified on live VPSs. [Design, tests and limitations](docs/ICMP_DATAGRAM_SEGMEN
 
 **A lightweight, encrypted ICMP tunnel between exactly two Linux VPSs, with a five-question setup wizard.**
 
-[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.3.9](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.10)
+[فارسی / Persian](README.md) · [Technical architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Download v3.3.9](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.11)
 
-![Version](https://img.shields.io/badge/version-3.3.10--preview-f59e0b) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
+![Version](https://img.shields.io/badge/version-3.3.11--preview-f59e0b) ![Platform](https://img.shields.io/badge/Linux-AMD64%20%7C%20ARM64-444) ![License](https://img.shields.io/badge/license-Apache--2.0-137333) [![CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml/badge.svg)](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
 
 Pingtunnel Manager sets up and operates an **ICMP-based transport tunnel** between an **Iran-side VPS** and an **overseas VPS**. Local TCP or UDP traffic enters the Iran VPS, travels inside authenticated, encrypted ICMP packets, and is forwarded by the overseas VPS to its configured local service.
 
