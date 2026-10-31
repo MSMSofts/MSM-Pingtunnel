@@ -14,6 +14,17 @@
 
 Pingtunnel is **not a VPN server**. It transports traffic arriving at the Iran VPS over encrypted ICMP to a local application endpoint on the overseas VPS, for example `127.0.0.1:444`. Each tunnel instance forwards either TCP or UDP, as configured.
 
+## Resource usage in a real-world test
+
+During a user-observed test with an **active tunnel, UDP forwarding on port 444 and one VPN connection used for Instagram and YouTube**, the Pingtunnel monitoring dashboard on **v3.3.13** displayed:
+
+| VPS | CPU (10s) | Average CPU (60s) | RAM / RSS | Average RAM (60s) |
+| --- | ---: | ---: | ---: | ---: |
+| Iran | 3.4% | 4.2% | 16.9 MiB | 17.0 MiB |
+| Overseas | 5.6% | 6.4% | 35.4 MiB | 35.4 MiB |
+
+These figures are **one real-world observation**, not a controlled benchmark, a capacity limit or a resource-usage guarantee. CPU percentages follow the dashboard convention (100% represents one vCPU); RAM is the process's **resident set size (RSS)**, not total system memory. Actual usage varies with VPS specifications, traffic volume and concurrent connections.
+
 ## Requirements
 
 - Two Linux VPSs with public IPv4 addresses: one in Iran, one overseas
