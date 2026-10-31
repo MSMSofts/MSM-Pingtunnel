@@ -85,26 +85,46 @@ These figures are **one real-world observation**, not a controlled benchmark, a 
 
 ## Quick installation
 
-Run these commands **on the overseas VPS first**, then **on the Iran VPS**:
+### ⚠️ Important: install and set up the OVERSEAS VPS first
+
+> **Required first-time setup order: 1) Overseas VPS → 2) Iran VPS.**
+>
+> **Finish installation and Setup on the overseas VPS and save its newly generated pairing key before starting installation and Setup in Iran.** The overseas setup generates the initial shared pairing key; Iran must use that **exact same key**. This order applies to **first-time pairing**; an existing installation must retain its pairing key during updates.
+
+**Step 1 — Overseas VPS (Foreign)**
+
+Connect to the **overseas VPS** via SSH and run:
 
 ~~~bash
 curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.13/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
+sudo pingtunnel setup
 ~~~
 
-The installer checks matching Manager and Go core assets using SHA-256 checksums and the release manifest. Existing configuration, if any, is validated before installation.
+Select **Foreign**, enter the Iran VPS public IPv4 address, choose **TCP or UDP**, and specify the port of the local overseas service. On first setup, the wizard generates a random **256-bit pairing key**. Transfer this key securely for the next step.
 
-For initial setup, run on each VPS:
+**Step 2 — Iran VPS (Iran)**
+
+**Only after finishing overseas setup**, connect to the Iran VPS and run:
 
 ~~~bash
-sudo pingtunnel
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.13/Source/install.sh -o /tmp/pingtunnel-install.sh
+sudo bash /tmp/pingtunnel-install.sh
+sudo pingtunnel setup
 ~~~
 
-Select **6) Setup Wizard**. It asks for five values: server region, opposite VPS public IPv4, shared pairing key, TCP/UDP transport and local port.
+Select **Iran**, enter the overseas VPS public IPv4, use **the exact pairing key generated overseas**, and choose **the same TCP/UDP transport**. Configure the port on which Iran accepts client connections.
 
-1. **Overseas VPS:** Select Foreign. A random pairing key is generated on first setup; transfer it securely to Iran. Select the transport and enter the local destination service port.
-2. **Iran VPS:** Select Iran, enter the overseas public IPv4 and **the same pairing key and transport**, then choose the port clients will connect to.
-3. Check service health and the authenticated session **on both VPSs**. An active systemd service alone does not prove application traffic is flowing.
+**Step 3 — Verify both VPSs**
+
+On **each VPS**, check the core heartbeat and authenticated session:
+
+~~~bash
+sudo pingtunnel health
+sudo pingtunnel security
+~~~
+
+The installer checks matching Manager/Go core assets using SHA-256 and the release manifest. Existing configuration is validated before installation, and upgrades must preserve the pairing key. **An active systemd service alone does not prove application traffic is flowing.**
 
 ## Useful commands
 
