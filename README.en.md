@@ -42,6 +42,30 @@ While using Direct, the core checks whether Reverse can be safely re-established
 
 The process runs **inside the Go core** without manually changing the pairing key, service ports or Exclave/Hysteria 2 configuration. Run `sudo pingtunnel security` to inspect the selected direction and recovery diagnostics.
 
+## Encryption and authentication flow
+
+By default, traffic between the two VPSs uses an **authenticated encrypted session (Wire v4)**. Its security handshake is independent of whether Reverse or Direct ICMP carries the packets.
+
+1. **Initial pairing:** Setup generates a random **256-bit (32-byte)** pairing key on the overseas VPS. The same key is securely transferred to Iran and stored on both peers. It authenticates the handshake; it is **not** reused directly as a static encryption key for every session packet.
+2. **Session initiation:** Each new handshake creates ephemeral **X25519** keys. Initial `ClientHello` and `ServerHello` messages are authenticated with **HMAC-SHA256**, using a handshake key derived from the pairing secret.
+3. **Key agreement and confirmation:** The peers derive an X25519 shared secret. **HKDF-SHA256** combines that secret with the pairing key and handshake transcript to derive distinct directional send/receive keys. `Finish` and `Ack` prove possession of the newly derived confirmation key. Application data is not accepted as authenticated traffic before the handshake completes.
+4. **Packet encryption:** At startup, the Go core benchmarks **AES-256-GCM** and **XChaCha20-Poly1305** and selects a suitable algorithm for outgoing packets; peers may choose differently. Each encrypted packet uses a sequence-derived nonce, and its session header is authenticated as **AEAD** associated data.
+5. **Receiver checks:** The peer validates the session identifier and AEAD authentication tag, then applies a bounded sequence-number **anti-replay** window. Invalid, altered or replayed packets are rejected. When recovery requires a new session, fresh keys are negotiated.
+
+```text
+TCP/UDP application data
+    ↓
+Authenticated session + ephemeral X25519 / HKDF keys
+    ↓
+AEAD encryption + sequence number + authentication tag
+    ↓
+ICMP Echo Request / Echo Reply (Reverse or Direct)
+    ↓
+Session and replay checks → decryption → data delivery
+```
+
+**Security boundaries:** Application data in authenticated frames is encrypted, but outer IP/ICMP headers and the presence of ICMP traffic are not hidden. This does not guarantee anonymity, resistance to filtering or an independent security audit. Keep the pairing key private, and inspect authentication/replay counters with `sudo pingtunnel security`.
+
 ## Resource usage in a real-world test
 
 During a user-observed test with an **active tunnel, UDP forwarding on port 444 and one VPN connection used for Instagram and YouTube**, the Pingtunnel monitoring dashboard on **v3.3.13** displayed:
