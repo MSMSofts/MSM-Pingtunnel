@@ -10,9 +10,37 @@
 - **Adaptive ICMP direction:** Reverse ICMP is preferred, with a guarded Direct fallback after sustained failure.
 - **TCP or UDP forwarding:** Connect applications such as Hysteria 2 or Xray running on the overseas VPS.
 - **Unified management:** Setup wizard, systemd service controls, logs, health checks, security reports and passive performance metrics.
-- **Conservative defaults:** Experimental ICMP segmentation and UDP parity repair are off by default. **Auto Tune has been removed**; existing configuration overrides are preserved.
+- **Conservative defaults:** Experimental ICMP segmentation and UDP parity repair are disabled by default; existing connection settings are preserved.
 
 Pingtunnel is **not a VPN server**. It transports traffic arriving at the Iran VPS over encrypted ICMP to a local application endpoint on the overseas VPS, for example `127.0.0.1:444`. Each tunnel instance forwards either TCP or UDP, as configured.
+
+## How automatic Reverse and Direct ICMP work
+
+The Setup Wizard sets `icmp_direction` to `auto` by default. Both VPSs keep their fixed physical roles (Iran and overseas). **Reverse and Direct only determine which VPS initiates the ICMP exchange**—they do not swap VPN endpoints, keys or application ports.
+
+**1. Reverse — preferred primary path**
+
+```text
+Overseas  ── ICMP Echo Request (poll or data) ──>  Iran
+Overseas  <── ICMP Echo Reply (queued data) ────  Iran
+```
+
+The overseas VPS originates ICMP Echo Requests. When Iran receives an authenticated request, it sends a matching Echo Reply, carrying queued encrypted traffic when available. Overseas-to-Iran data can travel in the request itself. Polling adapts to real traffic activity: it becomes more responsive during active transfers and backs off when idle.
+
+**2. Direct — fallback after sustained Reverse-path failure**
+
+```text
+Iran  ── ICMP Echo Request ──>  Overseas
+Iran  <── ICMP Echo Reply ────  Overseas
+```
+
+If Reverse has been unavailable for a sustained period **while local users are actively requesting traffic**, the core may fall back to Direct. The decision accounts for the authenticated session and validated Reverse probes. A single lost reply, brief interruption or idle application alone does not trigger a switch.
+
+**3. Guarded recovery to Reverse**
+
+While using Direct, the core checks whether Reverse can be safely re-established. After eligibility checks and authenticated negotiation, it can return to its preferred Reverse path. A minimum dwell interval helps prevent repeated route flapping. Direction changes can require session renegotiation, so **seamless switching is not guaranteed**.
+
+The process runs **inside the Go core** without manually changing the pairing key, service ports or Exclave/Hysteria 2 configuration. Run `sudo pingtunnel security` to inspect the selected direction and recovery diagnostics.
 
 ## Resource usage in a real-world test
 
