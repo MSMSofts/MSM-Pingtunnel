@@ -616,7 +616,7 @@ fn show_security_status() -> Result<()> {
     if let (Some(checks),Some(proofs))=(
         report["direct_probe_checks"].as_u64(),
         report["direct_path_proofs"].as_u64()) {
-        println!("  Background Direct checks / authenticated replies: {checks} / {proofs} (Reverse stays preferred)");
+        println!("  Background Direct checks / authenticated replies: {checks} / {proofs} (while Reverse is active)");
         if let Some(age)=report["direct_last_proof_age_seconds"].as_i64().filter(|age|*age>=0){
             println!("  Last confirmed Direct test reply: {age}s ago");
         }
