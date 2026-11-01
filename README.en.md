@@ -2,7 +2,7 @@
 
 **A lightweight, encrypted ICMP tunnel between an Iran VPS and an overseas VPS**, forwarding TCP or UDP traffic through a Go core and a simple Rust manager.
 
-[فارسی](README.md) · [Current release: v3.3.13](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.13) · [CI status](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0 license](LICENSE)
+[فارسی](README.md) · [Current preview: v3.3.14](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.14) · [CI status](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0 license](LICENSE)
 
 ## Features
 
@@ -38,7 +38,7 @@ If Reverse has been unavailable for a sustained period **while local users are a
 
 **3. Guarded recovery to Reverse**
 
-While using Direct, the core checks whether Reverse can be safely re-established. After eligibility checks and authenticated negotiation, it can return to its preferred Reverse path. A minimum dwell interval helps prevent repeated route flapping. Direction changes can require session renegotiation, so **seamless switching is not guaranteed**.
+While using Direct, the core checks whether Reverse can be safely re-established. **A healthy authenticated Direct path is retained; Reverse is retried only after genuine local demand and evidence that Direct has degraded, not merely because Reverse is preferred.** After eligibility checks and authenticated negotiation, it can return to its preferred Reverse path. A minimum dwell interval helps prevent repeated route flapping. Direction changes can require session renegotiation, so **seamless switching is not guaranteed**.
 
 The process runs **inside the Go core** without manually changing the pairing key, service ports or Exclave/Hysteria 2 configuration. Run `sudo pingtunnel security` to inspect the selected direction and recovery diagnostics.
 
@@ -85,6 +85,8 @@ These figures are **one real-world observation**, not a controlled benchmark, a 
 
 ## Quick installation
 
+> **Release status:** This is a **preview** addressing one-way ICMP recovery. Passing CI does not prove reliability on a real two-VPS network. Back up operational configurations and upgrade both peers together only after a controlled test.
+
 ### ⚠️ Important: install and set up the OVERSEAS VPS first
 
 > **Required first-time setup order: 1) Overseas VPS → 2) Iran VPS.**
@@ -96,7 +98,7 @@ These figures are **one real-world observation**, not a controlled benchmark, a 
 Connect to the **overseas VPS** via SSH and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.13/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.14/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -108,7 +110,7 @@ Select **Foreign**, enter the Iran VPS public IPv4 address, choose **TCP or UDP*
 **Only after finishing overseas setup**, connect to the Iran VPS and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.13/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.14/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
