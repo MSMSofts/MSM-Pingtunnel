@@ -36,3 +36,27 @@ func TestPeerRecoveryWatchdogRecoversAndResets(t *testing.T) {
         t.Fatal("absence of demand must reset watchdog")
     }
 }
+
+func TestIdleClientDoesNotInventDemandOrRunHotPings(t *testing.T) {
+    var c Client
+    if !c.lastActivity().IsZero() {
+        t.Fatal("never-active client must not synthesize local user demand")
+    }
+    now:=time.Now()
+    if got:=c.nextPingInterval(now);got!=10*time.Second {
+        t.Fatalf("idle ICMP ping cadence must be cold, got %s",got)
+    }
+    var w peerRecoveryWatchdog
+    oldPong:=now.Add(-10*time.Minute)
+    if w.shouldRestart(now,oldPong,c.lastActivity(),false) ||
+      w.shouldRestart(now.Add(10*time.Minute),oldPong,c.lastActivity(),false) {
+        t.Fatal("idle client cannot trigger the Direct link restart watchdog")
+    }
+    c.touchActivity()
+    if c.lastActivity().IsZero() {
+        t.Fatal("real application activity was not recorded")
+    }
+    if got:=c.nextPingInterval(time.Now());got!=time.Second {
+        t.Fatalf("active ICMP ping cadence must be hot, got %s",got)
+    }
+}
