@@ -2,7 +2,7 @@
 
 **A lightweight, encrypted ICMP tunnel between an Iran VPS and an overseas VPS**, forwarding TCP or UDP traffic through a Go core and a simple Rust manager.
 
-[فارسی](README.md) · [Current preview: v3.3.15](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.15) · [CI status](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0 license](LICENSE)
+[فارسی](README.md) · [Current preview: v3.3.16](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.16) · [CI status](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0 license](LICENSE)
 
 ## Features
 
@@ -14,35 +14,18 @@
 
 Pingtunnel is **not a VPN server**. It transports traffic arriving at the Iran VPS over encrypted ICMP to a local application endpoint on the overseas VPS, for example `127.0.0.1:444`. Each tunnel instance forwards either TCP or UDP, as configured.
 
-## How automatic Reverse and Direct ICMP work
+## Automatic ICMP route management — Smart Rotation
 
-The Setup Wizard sets `icmp_direction` to `auto` by default. Both VPSs keep their fixed physical roles (Iran and overseas). **Reverse and Direct only determine which VPS initiates the ICMP exchange**—they do not swap VPN endpoints, keys or application ports.
+For the default `icmp_direction: "auto"`, **the old unconditional Reverse Priority policy is replaced by Smart Rotation**. The tunnel starts in Reverse. If **both directions have independently authenticated two-way health proofs**, it attempts to alternate the active user-data route between Reverse and Direct approximately **every three hours**. The interval is measured from process startup or the last successful path change; a timer by itself never forces a switch.
 
-**1. Reverse — preferred primary path**
+- **While Reverse is active**, Foreign originates Echo Requests and Iran tests Direct every **60 seconds** using matched HMAC-authenticated `PTC4/PDA4` challenges. After **two fresh independent proofs**, Iran can request a scheduled Direct handoff via signed `PTX4`. Foreign acknowledges with `PTB4`; Iran commits only after matching the one-time challenge ID, sequence and nonce.
+- **While Direct is active**, Iran originates Echo Requests and Foreign checks Reverse every **10 seconds** via authenticated `PTR4/PRA4`. After two distinct matched proofs, three hours and minimum dwell, Foreign requests a Reverse handoff via `PTS4`. Iran responds with a signed `PTA4`, and Foreign commits only after verifying the matching response.
+- **On actual path failure**, emergency health-based recovery overrides the three-hour clock when there is genuine user demand and sustained authenticated failure. A single lost Ping or an idle session is not enough. If the destination route lacks two-way proof, no scheduled rotation occurs.
+- **Connection preservation:** Planned handoffs retain the current Wire-v4 AEAD session, key material, replay sequence and TCP/UDP socket identity. Any encrypted Reverse queue is moved to Direct in FIFO order on a successful scheduled rotation; lost switch ACKs are retried within a bounded window. **This is designed to minimize disruption but cannot guarantee zero packet loss or uninterrupted application sessions during network faults.**
 
-```text
-Overseas  ── ICMP Echo Request (poll or data) ──>  Iran
-Overseas  <── ICMP Echo Reply (queued data) ────  Iran
-```
+`sudo pingtunnel security` reports active direction, last change reason, three-hour schedule, paired path proofs, rotations/retries and userspace-generated ICMP rates. Synthetic Reverse polling is conservatively capped at about **100 polls/s** under load and **1 poll/s** when idle; DATA traffic has a separate packet rate.
 
-**Both paths are monitored:** While Reverse is active, Iran sends one signed `PTC4` Direct challenge per **60 seconds**, accepting the `PDA4` response only when the MAC, nonce and ICMP ID/sequence match. This is purely a health check: **Reverse remains selected even if Direct works better or faster.**
-
-The overseas VPS originates ICMP Echo Requests. When Iran receives an authenticated request, it sends a matching Echo Reply, carrying queued encrypted traffic when available. Overseas-to-Iran data can travel in the request itself. Polling adapts to real traffic activity: it becomes more responsive during active transfers and backs off when idle. Version 3.3.15 reduces the synthetic Reverse poll ceiling from 500 to **100 per second** and idle polling to about **1 per second**; synthetic polls coinciding with real encrypted outbound DATA are coalesced. This may reduce peak throughput on packet-hungry links and needs field testing.
-
-**2. Direct — fallback after sustained Reverse-path failure**
-
-```text
-Iran  ── ICMP Echo Request ──>  Overseas
-Iran  <── ICMP Echo Reply ────  Overseas
-```
-
-If Reverse has been unavailable for a sustained period **while local users are actively requesting traffic**, the core may fall back to Direct. The decision accounts for the authenticated session and validated Reverse probes. A single lost reply, brief interruption or idle application alone does not trigger a switch.
-
-**3. Guarded recovery to Reverse**
-
-**In AUTO, Reverse always has absolute priority, regardless of speed, RTT or observed Direct stability.** After proven sustained Reverse failure with real local demand, the core uses Direct as a guarded fallback. While Direct remains fully healthy, Foreign checks Reverse **every 10 seconds**. Iran returns a userspace HMAC-authenticated `PRA4` proof without disturbing the Direct AEAD session. Foreign waits for **two independently matched, valid proofs** (challenge nonce and ICMP ID/sequence), enforces a **60-second minimum dwell**, and then sends an authenticated `PTS4` takeover request. Only then does the normal four-message X25519 session handshake switch the channel back to Reverse. If Reverse cannot complete authentication or actual transfer, Direct fallback is retried with cooldown. **Completely interruption-free switching is not guaranteed.**
-
-The process runs **inside the Go core** without manually changing the pairing key, service ports or Exclave/Hysteria 2 configuration. Run `sudo pingtunnel security` to inspect the selected direction and recovery diagnostics.
+**Limitations:** Rotation redistributes use between two ICMP exchange patterns; it does not reduce total application bandwidth, override provider anti-DDoS rules or guarantee no future filtering. Both peers must run the same new Go core/manager version because older peers do not recognize the signed handoff ACK frames.
 
 ### Optional, reversible suppression of duplicate kernel Echo Replies
 
@@ -108,7 +91,7 @@ These figures are **one real-world observation**, not a controlled benchmark, a 
 Connect to the **overseas VPS** via SSH and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.15/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.16/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -120,7 +103,7 @@ Select **Foreign**, enter the Iran VPS public IPv4 address, choose **TCP or UDP*
 **Only after finishing overseas setup**, connect to the Iran VPS and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.15/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.16/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
