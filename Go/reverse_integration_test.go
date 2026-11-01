@@ -198,7 +198,7 @@ func TestAutoReverseDirectReverseRecoveryWithAuthenticatedHandshakes(t *testing.
             t.Fatal("path probing destroyed healthy Direct AEAD")
         }
     }
-    if !foreign.reverse.takeSwitchRequest(back){t.Fatal("confirmed Reverse did not receive priority")}
+    if !foreign.reverse.takeSwitchRequest(back,true){t.Fatal("emergency Reverse recovery failed after Direct became stale")}
     switchProbe,e:=foreign.reverse.makeSwitchProbe(back);if e!=nil{t.Fatal(e)}
     valid,switchIntent:=iran.reverse.authenticateProbeWithSwitch(switchProbe,back)
     if !valid||!switchIntent{t.Fatal("authenticated PTS4 switch intent rejected")}

@@ -518,6 +518,12 @@ type secureStatus struct{
  DirectPathProofs uint64 `json:"direct_path_proofs"`
  DirectLastProofAgeSeconds int64 `json:"direct_last_proof_age_seconds"`
  AutoLastSwitchAgeSeconds int64 `json:"auto_last_switch_age_seconds"`
+ SmartRotationIntervalSeconds uint64 `json:"smart_rotation_interval_seconds"`
+ SmartRotationDue bool `json:"smart_rotation_due"`
+ SmartRotationCount uint64 `json:"smart_rotation_count"`
+ SmartRotationRetryCount uint64 `json:"smart_rotation_retries"`
+ SmartRotationLastReason string `json:"smart_rotation_last_reason,omitempty"`
+ SmartDirectProofConfirmations int `json:"smart_direct_proof_confirmations"`
  ICMPFragmentedDatagrams uint64 `json:"icmp_fragmented_datagrams"`
  ICMPReassembledDatagrams uint64 `json:"icmp_reassembled_datagrams"`
  ICMPFragmentDrop uint64 `json:"icmp_fragment_drops"`
@@ -594,6 +600,12 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.DirectPathProofs=diag.DirectPathProofs
  report.DirectLastProofAgeSeconds=diag.DirectLastProofAgeSeconds
  report.AutoLastSwitchAgeSeconds=diag.LastSwitchAgeSeconds
+ report.SmartRotationIntervalSeconds=uint64(smartRotationInterval.Seconds())
+ report.SmartRotationDue=diag.RotationDue
+ report.SmartRotationCount=diag.ScheduledRotations
+ report.SmartRotationRetryCount=diag.RotationRetryCount
+ report.SmartRotationLastReason=diag.LastRotationReason
+ report.SmartDirectProofConfirmations=diag.DirectProofConfirmations
  report.ICMPFragmentedDatagrams=icmpFragmentedDatagrams.Load()
  report.ICMPReassembledDatagrams=icmpReassembledDatagrams.Load()
  report.ICMPFragmentDrop=icmpFragmentDropped.Load()

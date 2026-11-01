@@ -405,6 +405,43 @@ func (p *Client) Run() error {
                     }
                 }
             }
+            if p.cryptoConfig!=nil && p.cryptoConfig.reverse!=nil &&
+                p.cryptoConfig.reverse.shouldRequestDirectRotation(now,p.cryptoConfig.SecureReady()) {
+                // Scheduled switch only when the Direct return path has at
+                // least two fresh signed proofs. Iran remains on Reverse
+                // until a matched foreign userspace PTB4 ACK is received.
+                if peer:=p.serverIP.Load();peer!=nil {
+                    probe,err:=p.cryptoConfig.reverse.makeDirectSwitchProbe(now)
+                    if err==nil {
+                        seq:=p.nextSequence()
+                        p.cryptoConfig.reverse.stageDirectSwitch(p.id,seq,probe,now)
+                        if !emitEcho(*p.conn,peer,8,p.id,seq,probe) {
+                            p.cryptoConfig.reverse.cancelDirectProbe(p.id,seq)
+                        }
+                    }
+                }
+            }
+            if p.cryptoConfig!=nil && p.cryptoConfig.reverse!=nil &&
+                !useReverse(p.cryptoConfig) && p.cryptoConfig.SecureReady() {
+                // Scheduled rotation keeps the same AEAD session. Forward
+                // any ciphertext that was already queued for Reverse as
+                // ordinary Direct Echo Requests, in FIFO order, instead
+                // of dropping in-flight user traffic on path changes.
+                if peer:=p.serverIP.Load();peer!=nil {
+                    // Limit a mode-change backlog to 64 packets per health
+                    // tick; this avoids a sudden 256-frame ICMP burst.
+                    for i:=0;i<64;i++ {
+                        frame,ok:=p.cryptoConfig.reverse.takeFrame(now)
+                        if !ok{break}
+                        if emitEcho(*p.conn,peer,8,p.id,p.nextSequence(),frame.data) {
+                            p.cryptoConfig.reverse.noteDeliveredFrame(frame.created,now)
+                        } else {
+                            p.cryptoConfig.reverse.restoreFront(frame,now)
+                            break
+                        }
+                    }
+                }
+            }
             if p.cryptoConfig!=nil {p.cryptoConfig.WriteSecureStatus("/run/pingtunnel-security.json")}
             if p.cryptoConfig!=nil {FlushPendingICMP(*p.conn,p.cryptoConfig)}
             // A signed Reverse poll proves only that Foreign->Iran ICMP

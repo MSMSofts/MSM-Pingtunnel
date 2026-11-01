@@ -261,6 +261,51 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
             if isReflectedReverseDataEcho(cryptoConfig,bytes[0],echoId,echoSeq,payloadData,now) {
                 continue
             }
+            // Session-preserving, HMACed three-hour Reverse->Direct handoff.
+            // Foreign selects Direct only for a valid PTx4 request from
+            // the pinned paired Iran VPS, then acknowledges with PTB4.
+            // Iran switches only after matching that ACK to its challenge.
+            if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="foreign" &&
+                int(bytes[0])==8 && stdbytes.HasPrefix(payloadData,directSwitchMagic[:]) {
+                if cryptoConfig.reverse.authenticateDirectSwitchProbe(payloadData,now) &&
+                    cryptoConfig.SecureReady() {
+                    if useReverse(cryptoConfig) {
+                        cryptoConfig.reverse.rotateKeepingSession(ICMPDirect,now,"smart_rotation_to_direct")
+                    }
+                    if !useReverse(cryptoConfig) {
+                        ack:=cryptoConfig.reverse.makeSwitchAck(payloadData,directSwitchAckMagic)
+                        _=emitEcho(conn,peer,0,echoId,echoSeq,ack)
+                    }
+                }
+                continue
+            }
+            if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="iran" &&
+                int(bytes[0])==0 && stdbytes.HasPrefix(payloadData,directSwitchAckMagic[:]) {
+                if cryptoConfig.SecureReady() &&
+                    cryptoConfig.reverse.acceptDirectSwitchProof(echoId,echoSeq,payloadData,now) {
+                    cryptoConfig.reverse.rotateKeepingSession(ICMPDirect,now,"smart_rotation_to_direct")
+                }
+                continue
+            }
+            // Ignore the Linux Echo Reply reflecting Iran's PTx4 request.
+            if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="iran" &&
+                int(bytes[0])==0 && stdbytes.HasPrefix(payloadData,directSwitchMagic[:]) {
+                continue
+            }
+            // Foreign switches to Reverse only on a matched HMACed PTA4
+            // acknowledgement of the switch request, never on a PTR4
+            // proof or timer alone. Application keys stay unchanged.
+            if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="foreign" &&
+                int(bytes[0])==0 && stdbytes.HasPrefix(payloadData,reverseSwitchAckMagic[:]) {
+                if cryptoConfig.SecureReady() &&
+                    cryptoConfig.reverse.acceptReverseSwitchProof(echoId,echoSeq,payloadData,now) &&
+                    cryptoConfig.reverse.rotateKeepingSession(ICMPReverse,now,"smart_rotation_to_reverse") {
+                    // Immediately offer a matching Echo Request so Iran's
+                    // reverse FIFO can start draining without a 10s wait.
+                    sendForeignPoll(conn,peer,0x42a5,(echoSeq+1)&0xffff,cryptoConfig,now,true)
+                }
+                continue
+            }
             // A low-rate Direct check is sent by Iran while Reverse
             // remains the preferred authenticated user transport.
             if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="foreign" &&
@@ -305,7 +350,7 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
                             _=emitEcho(conn,peer,0,echoId,echoSeq,proof)
                         }
                     } else {
-                        startReverseHandshake(conn,peer,echoId,echoSeq,cryptoConfig,now,switchRequest)
+                        startReverseHandshake(conn,peer,echoId,echoSeq,cryptoConfig,now,switchRequest,payloadData)
                     }
                 }
                 continue

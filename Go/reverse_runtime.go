@@ -100,17 +100,26 @@ func replyReverse(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoConf
     })
 }
 
-func startReverseHandshake(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoConfig,now time.Time,switchRequested bool) {
+func startReverseHandshake(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoConfig,now time.Time,switchRequested bool,frameProbe []byte) {
     if c==nil || c.reverse==nil || c.sec==nil || c.sec.region!="iran" {return}
     if c.reverse.preference==ICMPDirect{return}
-    // Healthy Direct must NEVER be reset merely because an authenticated
-    // one-way Reverse poll arrived. PTS4 is only sent by the paired Foreign
-    // worker after two separately authenticated PRA4 return-path receipts.
+    // Scheduled handoff uses a distinct authenticated PTS4 request.
+    // Do not discard active AEAD keys or queued application frames. A
+    // matching PTA4 reply lets Foreign switch only after Iran has agreed.
+    if switchRequested && c.SecureReady() {
+        if !useReverse(c) {
+            if !c.reverse.rotateKeepingSession(ICMPReverse,now,"smart_rotation_to_reverse"){return}
+        }
+        ack:=c.reverse.makeSwitchAck(frameProbe,reverseSwitchAckMagic)
+        if len(ack)>0 {_=emitEcho(conn,peer,0,id,seq,ack)}
+        return
+    }
     if !useReverse(c) {
-        if !switchRequested || !c.reverse.choose(ICMPReverse,now){return}
-        c.sec.resetForTransportChange()
-    } else if c.SecureReady(){
-        // Keep a stable Reverse session; never restart on a routine poll.
+        // Ordinary PTR4 is never authorized to tear down a healthy Direct
+        // session. Emergency negotiation remains fail-closed.
+        return
+    }
+    if c.SecureReady(){
         replyReverse(conn,peer,id,seq,c)
         return
     }
@@ -122,7 +131,7 @@ func startReverseHandshake(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *C
     replyReverse(conn,peer,id,seq,c)
 }
 
-func sendForeignPoll(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoConfig,now time.Time,recentlyAuthenticated bool) {
+func sendForeignPoll(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoConfig,now time.Time,recentlyAuthenticated bool,activeConnections ...int) {
     if c==nil||c.sec==nil||c.sec.region!="foreign"||c.reverse==nil {return}
     authenticated:=recentlyAuthenticated
     // A long-idle authenticated direct link is not automatically considered
@@ -130,7 +139,11 @@ func sendForeignPoll(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoC
     if !c.reverse.needsProbe(now,authenticated){return}
     // A poll is only a candidate path. Foreign selects Reverse AFTER
     // receiving an authenticated ClientHello inside the matching Echo Reply.
-    switchRequest:=c.reverse.takeSwitchRequest(now)
+    last:=c.sec.lastPeerTraffic()
+    demand:=len(activeConnections)>0 && activeConnections[0]>0
+    emergency:=c.SecureReady() && demand && !last.IsZero() &&
+        now.Sub(last)>=150*time.Second && !recentlyAuthenticated
+    switchRequest:=c.reverse.takeSwitchRequest(now,emergency)
     var probe []byte
     var err error
     if switchRequest {
@@ -139,10 +152,11 @@ func sendForeignPoll(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoC
         probe,err=c.reverse.makeProbe(now)
     }
     if err!=nil{return}
+    if switchRequest {c.reverse.stageReverseSwitch(id,seq,probe,now)}
     if !switchRequest {c.reverse.stageProbe(id,seq,probe,now)}
     if emitEcho(conn,peer,8,id,seq,probe) {
         c.reverse.notePollSent()
-    } else if !switchRequest {
+    } else {
         c.reverse.cancelProbe(id,seq)
     }
 }
