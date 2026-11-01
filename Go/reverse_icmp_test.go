@@ -83,13 +83,53 @@ func TestAutoReverseRequiresTrafficAndStaleAuthentication(t *testing.T){
  if !r.choose(ICMPReverse,now.Add(215*time.Second)){t.Fatal("could not retry reverse")}
  for i:=216;i<=370;i++{r.noteDemand(now.Add(time.Duration(i)*time.Second),true)}
  r.lastValidProbe=now.Add(369*time.Second)
- if r.fallbackDirect(now.Add(370*time.Second),true,now.Add(216*time.Second)){
-    t.Fatal("recent reverse polls did not protect healthy but idle AEAD session")
+ if r.fallbackDirect(now.Add(370*time.Second),true,now.Add(365*time.Second)){
+    t.Fatal("recent genuine peer AEAD traffic did not protect healthy Reverse")
  }
- r.lastValidProbe=now.Add(216*time.Second)
+ // A signed poll is one-way evidence, never a substitute for successful
+ // ciphertext delivery. A fully stale Reverse session must fail over.
  if !r.fallbackDirect(now.Add(371*time.Second),true,now.Add(216*time.Second)){
-    t.Fatal("fully stale authenticated reverse failed to enter emergency direct")
+    t.Fatal("one-way polls incorrectly blocked Direct recovery")
  }
+}
+
+func TestReverseOneWaySignedPollsDoNotSuppressFallbackUnderDemand(t *testing.T) {
+    start:=time.Unix(1840000000,0)
+    r,_:=newReverseTransport(ICMPAuto,bytes.Repeat([]byte{0x36},32),start)
+    // ICMP Echo REQUEST arrives and its HMAC validates every second, but
+    // none of the Iranian encrypted Echo REPLIES reach the foreign peer.
+    for sec:=1;sec<=160;sec++ {
+        now:=start.Add(time.Duration(sec)*time.Second)
+        r.noteDemand(now,true)
+        r.lastValidProbe=now
+        if sec < 150 && r.fallbackDirect(now,true,start){
+            t.Fatalf("flapped to Direct before full 150s grace at %ds",sec)
+        }
+    }
+    at:=start.Add(160*time.Second)
+    if !r.fallbackDirect(at,true,start) {
+        t.Fatal("valid one-way polls concealed a dead authenticated return path")
+    }
+    if r.direction()!=ICMPDirect {t.Fatal("no Direct fallback")}
+    if r.lastFallbackReason!="no_authenticated_reverse_feedback" {
+        t.Fatalf("unexpected reason %q",r.lastFallbackReason)
+    }
+    if r.choose(ICMPReverse,at.Add(20*time.Second)){
+        t.Fatal("switching back bypassed minimum dwell period")
+    }
+}
+func TestReverseOneWaySignedPollsRemainPreferredWithoutLocalDemand(t *testing.T) {
+    start:=time.Unix(1840001000,0)
+    r,_:=newReverseTransport(ICMPAuto,bytes.Repeat([]byte{0x37},32),start)
+    for hr:=1;hr<=36;hr++ {
+        now:=start.Add(time.Duration(hr)*time.Hour)
+        r.noteDemand(now,false)
+        r.lastValidProbe=now
+        if r.fallbackDirect(now,true,start){
+            t.Fatalf("idle link unexpectedly switched at hour %d",hr)
+        }
+    }
+    if r.direction()!=ICMPReverse {t.Fatal("quiet Reverse should remain preferred")}
 }
 
 func TestReverseModeParsing(t *testing.T){
@@ -111,15 +151,15 @@ func TestReverseAutoNeverFailsOverWhileIdleOrPollsHealthy(t *testing.T) {
             t.Fatalf("quiet established reverse failed over at hour %d",i)
         }
     }
-    // Long-lived flow, no recent application DATA but fresh signed polls:
-    // ICMP reverse direction is still usable and must stay primary.
+    // Long-lived flow with recent authenticated peer DATA and signed polls:
+    // the Reverse path is healthy and must stay primary.
     baseline:=start.Add(25*time.Hour)
     for i:=0;i<=190;i++{
         now:=baseline.Add(time.Duration(i)*time.Second)
         r.noteDemand(now,true)
         if i%5==0 {r.lastValidProbe=now}
-        if r.fallbackDirect(now,true,start){
-            t.Fatalf("authenticated reverse poll path ignored at second %d",i)
+        if r.fallbackDirect(now,true,now.Add(-3*time.Second)){
+            t.Fatalf("healthy authenticated Reverse path flipped at second %d",i)
         }
     }
     if r.direction()!=ICMPReverse {t.Fatal("preferred reverse changed unexpectedly")}
