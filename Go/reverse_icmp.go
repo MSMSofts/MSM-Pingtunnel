@@ -47,6 +47,14 @@ const (
     reverseProofMinInterval = 9 * time.Second
     reverseProofTTL = 25 * time.Second
     reverseSwitchRetryCooldown = 3 * time.Minute
+    // Rotation is measured from the last completed path change (or start).
+    // No change is attempted merely because the clock fired: a valid
+    // independently authenticated return-path proof must also exist.
+    smartRotationInterval = 3 * time.Hour
+    smartDirectProofMaxAge = 95 * time.Second
+    smartRotationRetryInterval = 2 * time.Second
+    smartRotationRetryWindow = 30 * time.Second
+    smartRotationFailedCooldown = 5 * time.Minute
     reverseRequiredProofs = 2
     reverseAutoDelay = 0 * time.Second
     // Reverse must be genuinely unavailable before switching direction.
@@ -71,6 +79,9 @@ const (
 var reverseProbeMagic = [4]byte{'P','T','R','4'}
 var reverseProofMagic = [4]byte{'P','R','A','4'}
 var reverseSwitchMagic = [4]byte{'P','T','S','4'}
+var reverseSwitchAckMagic = [4]byte{'P','T','A','4'}
+var directSwitchMagic = [4]byte{'P','T','X','4'}
+var directSwitchAckMagic = [4]byte{'P','T','B','4'}
 var directProbeMagic = [4]byte{'P','T','C','4'}
 var directProofMagic = [4]byte{'P','D','A','4'}
 
@@ -138,12 +149,22 @@ type reverseTransport struct {
     directProbeChallenges map[uint32]reverseProbeChallenge
     lastDirectProbe time.Time
     lastDirectProof time.Time
+    directProofConfirmations int
+    directRotationRequestedAt time.Time
+    directRotationAttemptAt time.Time
+    directRotationSequence uint64
+    pendingReverseSwitch bool
+    scheduledRotations uint64
+    rotationRetryCount uint64
+    lastRotationReason string
     directProbeChecks uint64
     directPathProofs uint64
     lastProofSent time.Time
     lastProofAt time.Time
     proofConfirmations int
     lastSwitchAttempt time.Time
+    reverseSwitchAttemptAt time.Time
+    reverseSwitchRetries int
     reverseProofs uint64
     reverseSwitchAttempts uint64
     pollRequests uint64
@@ -220,6 +241,8 @@ func (r *reverseTransport) direction() ICMPDirection {
 
 // Fall back only when explicitly requested by the authenticated link
 // coordinator. Path switching is bounded by a minimum dwell interval.
+// choose remains the emergency failover operation. Its old queue/session
+// invalidation policy is retained for failed paths, not scheduled rotations.
 func (r *reverseTransport) choose(direction ICMPDirection, now time.Time) bool {
     r.mu.Lock();defer r.mu.Unlock()
     if direction!=ICMPDirect && direction!=ICMPReverse{return false}
@@ -239,6 +262,113 @@ func (r *reverseTransport) choose(direction ICMPDirection, now time.Time) bool {
     return true
 }
 
+// rotateKeepingSession moves ONLY the ICMP initiator role. The existing
+// Wire-v4 AEAD keys, replay window, application socket maps and Reverse
+// encrypted FIFO remain intact. Acknowledgements are HMAC-bound to the exact
+// incoming challenge before either side uses this method.
+func (r *reverseTransport) rotateKeepingSession(direction ICMPDirection,now time.Time,reason string) bool {
+    r.mu.Lock();defer r.mu.Unlock()
+    if r.preference!=ICMPAuto || (direction!=ICMPReverse&&direction!=ICMPDirect) ||
+        r.selected==direction || (!r.lastSwitch.IsZero() && now.Sub(r.lastSwitch)<reverseMinDwell) {
+        return false
+    }
+    r.selected=direction
+    r.lastSwitch=now
+    r.lastRotationReason=reason
+    r.scheduledRotations++
+    r.proofConfirmations=0
+    r.directProofConfirmations=0
+    r.lastProofAt=time.Time{}
+    r.probeChallenges=nil
+    r.directProbeChallenges=nil
+    r.directRotationRequestedAt=time.Time{}
+    r.directRotationAttemptAt=time.Time{}
+    r.pendingReverseSwitch=false
+    return true
+}
+func (r *reverseTransport) rotationDueLocked(now time.Time) bool {
+    since:=r.started
+    if !r.lastSwitch.IsZero(){since=r.lastSwitch}
+    return !now.Before(since)&&now.Sub(since)>=smartRotationInterval
+}
+func (r *reverseTransport) rotationDue(now time.Time) bool {
+    r.mu.Lock();defer r.mu.Unlock()
+    return r.preference==ICMPAuto && r.rotationDueLocked(now)
+}
+// The Iran side owns Reverse->Direct scheduled moves. A sparse Direct path
+// proof must be recent, from two distinct matched PTC4/PDA4 exchanges.
+func (r *reverseTransport) shouldRequestDirectRotation(now time.Time,ready bool) bool {
+    r.mu.Lock();defer r.mu.Unlock()
+    if r.preference!=ICMPAuto || r.selected!=ICMPReverse || !ready ||
+        !r.rotationDueLocked(now) || r.directProofConfirmations<2 ||
+        r.lastDirectProof.IsZero() || now.Sub(r.lastDirectProof)>smartDirectProofMaxAge {
+        return false
+    }
+    if !r.directRotationRequestedAt.IsZero() {
+        if now.Sub(r.directRotationRequestedAt)>smartRotationRetryWindow {
+            r.directRotationRequestedAt=time.Time{}
+            r.directRotationAttemptAt=now
+            r.directProofConfirmations=0
+            r.rotationRetryCount++
+            return false
+        }
+        if now.Sub(r.directRotationAttemptAt)<smartRotationRetryInterval{return false}
+    } else {
+        if !r.directRotationAttemptAt.IsZero() &&
+            now.Sub(r.directRotationAttemptAt)<smartRotationFailedCooldown {return false}
+        r.directRotationRequestedAt=now
+    }
+    r.directRotationAttemptAt=now
+    r.directRotationSequence++
+    return true
+}
+// A pending request keeps the same socket/session as Reverse and retries the
+// HMACed handoff until its paired foreign userspace ACK arrives.
+func (r *reverseTransport) stageDirectSwitch(id,seq int,payload []byte,now time.Time) {
+    r.stageDirectProbe(id,seq,payload,now)
+}
+func (r *reverseTransport) acceptDirectSwitchProof(id,seq int,reply []byte,now time.Time) bool {
+    if len(reply)!=reverseProbeBytes||!bytes.Equal(reply[:4],directSwitchAckMagic[:]){return false}
+    tag:=r.mac(reply[:20])
+    if !hmac.Equal(tag[:16],reply[20:36]){return false}
+    r.mu.Lock();defer r.mu.Unlock()
+    if r.preference!=ICMPAuto || r.selected!=ICMPReverse ||
+        r.directRotationRequestedAt.IsZero() || !r.rotationDueLocked(now) {return false}
+    key:=probeChallengeKey(id,seq)
+    challenge,ok:=r.directProbeChallenges[key]
+    if !ok || now.Before(challenge.sentAt) || now.Sub(challenge.sentAt)>reverseProofTTL ||
+        !bytes.Equal(challenge.first20[:4],directSwitchMagic[:]) ||
+        !hmac.Equal(reply[4:20],challenge.first20[4:20]) {
+        return false
+    }
+    delete(r.directProbeChallenges,key)
+    return true
+}
+func (r *reverseTransport) makeSwitchAck(probe []byte,magic [4]byte) []byte {
+    if len(probe)!=reverseProbeBytes{return nil}
+    reply:=append([]byte(nil),probe...)
+    copy(reply[:4],magic[:])
+    tag:=r.mac(reply[:20])
+    copy(reply[20:],tag[:16])
+    return reply
+}
+func (r *reverseTransport) stageReverseSwitch(id,seq int,probe []byte,now time.Time) {
+    r.stageProbe(id,seq,probe,now)
+}
+func (r *reverseTransport) acceptReverseSwitchProof(id,seq int,reply []byte,now time.Time) bool {
+    if len(reply)!=reverseProbeBytes||!bytes.Equal(reply[:4],reverseSwitchAckMagic[:]){return false}
+    tag:=r.mac(reply[:20])
+    if !hmac.Equal(tag[:16],reply[20:36]){return false}
+    r.mu.Lock();defer r.mu.Unlock()
+    if r.preference!=ICMPAuto || r.selected!=ICMPDirect{return false}
+    key:=probeChallengeKey(id,seq)
+    challenge,ok:=r.probeChallenges[key]
+    if !ok || now.Before(challenge.sentAt)||now.Sub(challenge.sentAt)>reverseProofTTL ||
+        !bytes.Equal(challenge.first20[:4],reverseSwitchMagic[:])||
+        !hmac.Equal(reply[4:20],challenge.first20[4:20]){return false}
+    delete(r.probeChallenges,key)
+    return true
+}
 // Reverse is the preferred route. Direct is permitted only after sustained
 // *local user demand* and independently observed reverse-path failure.
 // The authenticated reverse polls are important: an idle AEAD session can
@@ -336,6 +466,9 @@ func (r *reverseTransport) makeSwitchProbe(now time.Time) ([]byte,error) {
 func (r *reverseTransport) makeDirectProbe(now time.Time) ([]byte,error) {
     return r.makeProbeType(now,directProbeMagic)
 }
+func (r *reverseTransport) makeDirectSwitchProbe(now time.Time) ([]byte,error) {
+    return r.makeProbeType(now,directSwitchMagic)
+}
 func (r *reverseTransport) makeProbeType(now time.Time,magic [4]byte) ([]byte,error) {
     b:=make([]byte,reverseProbeBytes)
     copy(b[:4],magic[:])
@@ -357,12 +490,18 @@ func (r *reverseTransport) authenticateDirectProbe(frame []byte,now time.Time) b
     valid,_:=r.authenticateProbeWithSwitch(frame,now)
     return valid
 }
+func (r *reverseTransport) authenticateDirectSwitchProbe(frame []byte,now time.Time) bool {
+    if len(frame)!=reverseProbeBytes||!bytes.Equal(frame[:4],directSwitchMagic[:]){return false}
+    valid,_:=r.authenticateProbeWithSwitch(frame,now)
+    return valid
+}
 func (r *reverseTransport) authenticateProbeWithSwitch(frame []byte,now time.Time) (valid,switchRequest bool) {
     if len(frame)!=reverseProbeBytes{return false,false}
     isProbe:=bytes.Equal(frame[:4],reverseProbeMagic[:])
     isSwitch:=bytes.Equal(frame[:4],reverseSwitchMagic[:])
     isDirect:=bytes.Equal(frame[:4],directProbeMagic[:])
-    if !isProbe && !isSwitch && !isDirect{return false,false}
+    isDirectSwitch:=bytes.Equal(frame[:4],directSwitchMagic[:])
+    if !isProbe && !isSwitch && !isDirect && !isDirectSwitch{return false,false}
     seconds:=int64(binary.BigEndian.Uint64(frame[4:12]))
     delta:=now.Unix()-seconds
     if delta<0 {delta=-delta}
@@ -388,27 +527,17 @@ func (r *reverseTransport) authenticateProbeWithSwitch(frame []byte,now time.Tim
         return false,false
     }
     r.recent[nonce]=now
-    if !isDirect{r.lastValidProbe=now}
+    if !isDirect && !isDirectSwitch{r.lastValidProbe=now}
     return true,isSwitch
 }
 
 // Only a matched, one-time, MAC-authenticated userspace Echo Reply proves
 // that the Reverse route has recovered while Direct is still active.
 func (r *reverseTransport) makeProof(probe []byte) []byte {
-    if len(probe)!=reverseProbeBytes{return nil}
-    reply:=append([]byte(nil),probe...)
-    copy(reply[:4],reverseProofMagic[:])
-    tag:=r.mac(reply[:20])
-    copy(reply[20:],tag[:16])
-    return reply
+    return r.makeSwitchAck(probe,reverseProofMagic)
 }
 func (r *reverseTransport) makeDirectProof(probe []byte) []byte {
-    if len(probe)!=reverseProbeBytes{return nil}
-    reply:=append([]byte(nil),probe...)
-    copy(reply[:4],directProofMagic[:])
-    tag:=r.mac(reply[:20])
-    copy(reply[20:],tag[:16])
-    return reply
+    return r.makeSwitchAck(probe,directProofMagic)
 }
 // Low-rate, authenticated Direct reachability check; it never selects
 // Direct or resets the preferred Reverse session while healthy.
@@ -452,6 +581,10 @@ func (r *reverseTransport) acceptDirectProof(id,seq int,reply []byte,now time.Ti
     if !hmac.Equal(reply[4:20],challenge.first20[4:20]){return false}
     delete(r.directProbeChallenges,key)
     r.directPathProofs++
+    if r.lastDirectProof.IsZero() || now.Sub(r.lastDirectProof)>2*directBackgroundProbeInterval+10*time.Second {
+        r.directProofConfirmations=0
+    }
+    if r.directProofConfirmations<2 {r.directProofConfirmations++}
     r.lastDirectProof=now
     return true
 }
@@ -813,6 +946,11 @@ type reverseDiagnostics struct {
     PollIntervalMillis int
     ReverseProofs uint64
     ReverseSwitchAttempts uint64
+    ScheduledRotations uint64
+    RotationRetryCount uint64
+    RotationDue bool
+    LastRotationReason string
+    DirectProofConfirmations int
     PollRequests uint64
     PollsSkippedByData uint64
     DirectProbeChecks uint64
@@ -872,6 +1010,9 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         ReplayCapacityRejects:r.replayCapacityRejects,
         PollIntervalMillis:r.pollPeriodMillis,LastUsefulFrameAgeSeconds:age,
         ReverseProofs:r.reverseProofs,ReverseSwitchAttempts:r.reverseSwitchAttempts,
+        ScheduledRotations:r.scheduledRotations,RotationRetryCount:r.rotationRetryCount,
+        RotationDue:r.rotationDueLocked(now),LastRotationReason:r.lastRotationReason,
+        DirectProofConfirmations:r.directProofConfirmations,
         PollRequests:r.pollRequests,PollsSkippedByData:r.pollsSkippedByData,
         DirectProbeChecks:r.directProbeChecks,DirectPathProofs:r.directPathProofs,
         DirectLastProofAgeSeconds:directProofAge,
