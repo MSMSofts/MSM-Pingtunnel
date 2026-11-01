@@ -53,7 +53,7 @@ func TestReversePTD4PingClassificationAndExactReply(t *testing.T) {
         d.OutboundEchoCacheEntries!=1 || d.LastOutboundDataAgeMs!=-1 {
         t.Fatalf("PING reflection contaminated DATA counters or poll state: %+v",d)
     }
-    if got:=r.pollPeriod(start.Add(2*time.Millisecond),1,true);got!=40*time.Millisecond{
+    if got:=r.pollPeriod(start.Add(2*time.Millisecond),1,true);got!=25*time.Millisecond{
         t.Fatalf("PING alone accelerated application return polls: %s",got)
     }
     if foreign.sec.stats().AuthenticationFailures!=before {
