@@ -1,5 +1,15 @@
 # Changelog / تاریخچه تغییرات
 
+## [3.3.17 preview] — Lower latency on data-driven Reverse wakeups, bounded busy polling
+
+- **Root-cause response:** v3.3.16 kept idle signed Reverse polls at ~1Hz to avoid unneeded ICMP network load. This could add as much as a one-second scheduling wait to the first Iran-origin queued encrypted DATA frame, contributing to high queue-delay readings even when host ping RTT is low.
+- **New authenticated PTW4 wakeup:** Iran sends a 36-byte nonce/HMAC challenge only after actual encrypted Reverse DATA has entered its FIFO, limited to at most one every 500ms. Foreign verifies the configured peer IP, HMAC and replay cache before notifying its existing single poller. A verified wake immediately interrupts the one-second idle timer and temporarily accelerates synthetic Echo Requests to 8ms for up to 1.2s, then returns to the 1Hz idle schedule.
+- **Bounded active-traffic improvements:** Adaptive baseline from 40ms to 25ms, warm in-flow polls 16ms to 12ms, sustained in-flow polls 10ms to 8ms (~125 polls/s theoretical max). Recent genuine encrypted Foreign-origin Echo Requests still coalesce otherwise redundant synthetic polls. This is not a global DATA PPS limit, and it does not promise lower physical ICMP RTT.
+- **Security:** PTW4 contains no user payload or route-switch command; it is root-key HMAC authenticated, replay-limited, peer-IP pinned and ignored as a Linux kernel reflection. On fake, stale or one-way wake messages no keys, session state or three-hour Smart Rotation direction change.
+- **Diagnostics:** The security command now displays backlog wakeups sent/accepted/rate-limited, bounded fast-poll time remaining, existing ICMP PPS and queue delay/P95. Tests assert no idle traffic increase, correct HMAC/replay behavior and tight wake rate limits under burst load.
+- **Compatibility and scope:** Wire-v4 AEAD, Schema-3 config, paired keys, pending packet FIFO, three-hour Smart Rotation and emergency failover are unchanged. Both VPSs should upgrade together for paired PTW4 support; no VPS was changed during development.
+- **Preview limitations:** Impact on Hysteria 2/video RTT, throughput, burst PPS and actual provider Anti-DDoS behavior is not established by unit/CI tests. Benchmark both directions with live user traffic before adopting this release as stable.
+
 ## [3.3.16 preview] — Three-hour health-gated Smart Rotation, session-preserving bidirectional handoffs
 
 - **Replaced AUTO Reverse Priority:** Auto now alternates the user-data initiator between Reverse and Direct approximately **every 3 hours**, measured since startup or a successful path change, *only when both paths demonstrate independently HMAC-authenticated return-path health*. Clock time, throughput or an isolated Ping failure never force rotation.

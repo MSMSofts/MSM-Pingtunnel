@@ -871,7 +871,16 @@ func (p *Server) runReversePoller() {
     defer timer.Stop()
     peer:=&net.IPAddr{IP:append(net.IP(nil),p.allowedPeer...)}
     for !p.exit.Load() {
-        <-timer.C
+        select {
+        case <-timer.C:
+        case <-p.cryptoConfig.reverse.pollWakeup:
+            // Wake a sleeping idle timer only for a verified, rate-limited
+            // hint that encrypted Iran DATA is waiting. No parallel poller
+            // and no permanent rise in the idle ICMP request rate.
+            if !timer.Stop() {
+                select{case <-timer.C:default:}
+            }
+        }
         if p.exit.Load(){return}
         now:=time.Now()
         recent:=false

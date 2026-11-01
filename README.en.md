@@ -2,12 +2,12 @@
 
 **A lightweight, encrypted ICMP tunnel between an Iran VPS and an overseas VPS**, forwarding TCP or UDP traffic through a Go core and a simple Rust manager.
 
-[فارسی](README.md) · [Current preview: v3.3.16](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.16) · [CI status](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0 license](LICENSE)
+[فارسی](README.md) · [Current preview: v3.3.17](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.17) · [CI status](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0 license](LICENSE)
 
 ## Features
 
 - **Authenticated encryption:** 256-bit pairing key, ephemeral secure sessions, peer authentication and replay protection.
-- **Adaptive ICMP direction:** Reverse ICMP is preferred, with a guarded Direct fallback after sustained failure.
+- **Adaptive Smart Rotation:** health-gated three-hour alternation of Reverse/Direct while both are usable, guarded recovery upon actual path failure.
 - **TCP or UDP forwarding:** Connect applications such as Hysteria 2 or Xray running on the overseas VPS.
 - **Unified management:** Setup wizard, systemd service controls, logs, health checks, security reports and passive performance metrics.
 - **Conservative defaults:** Experimental ICMP segmentation and UDP parity repair are disabled by default; existing connection settings are preserved.
@@ -23,9 +23,17 @@ For the default `icmp_direction: "auto"`, **the old unconditional Reverse Priori
 - **On actual path failure**, emergency health-based recovery overrides the three-hour clock when there is genuine user demand and sustained authenticated failure. A single lost Ping or an idle session is not enough. If the destination route lacks two-way proof, no scheduled rotation occurs.
 - **Connection preservation:** Planned handoffs retain the current Wire-v4 AEAD session, key material, replay sequence and TCP/UDP socket identity. Any encrypted Reverse queue is moved to Direct in FIFO order on a successful scheduled rotation; lost switch ACKs are retried within a bounded window. **This is designed to minimize disruption but cannot guarantee zero packet loss or uninterrupted application sessions during network faults.**
 
-`sudo pingtunnel security` reports active direction, last change reason, three-hour schedule, paired path proofs, rotations/retries and userspace-generated ICMP rates. Synthetic Reverse polling is conservatively capped at about **100 polls/s** under load and **1 poll/s** when idle; DATA traffic has a separate packet rate.
+`sudo pingtunnel security` reports active direction, last change reason, three-hour schedule, paired path proofs, rotations/retries and userspace-generated ICMP rates. Synthetic Reverse polling peaks at about **125 polls/s** when genuinely busy and remains near **1 poll/s** while idle; DATA traffic has a separate packet rate.
 
 **Limitations:** Rotation redistributes use between two ICMP exchange patterns; it does not reduce total application bandwidth, override provider anti-DDoS rules or guarantee no future filtering. Both peers must run the same new Go core/manager version because older peers do not recognize the signed handoff ACK frames.
+
+### Lower first-packet latency during idle Reverse (3.3.17)
+
+Previously, a quiet Reverse poller might wait up to **one second** to issue another Echo Request after Iran queued new user data. Now Iran sends a root-HMAC-authenticated, replay-protected `PTW4` hint **only after actual encrypted data is queued**. The foreign VPS immediately wakes its single poll timer and briefly uses **8ms** intervals for up to **1.2 seconds**. No application plaintext, encryption keys, or route-switch commands travel in the hint, and it never changes Smart Rotation state.
+
+Iran sends no more than **two** backlog hints per second; Foreign independently rate-limits valid hints. Once the demand pulse expires, normal **1Hz idle** polling resumes. When genuinely active, base polling improves **40ms → 25ms**, warm intervals **16ms → 12ms**, and sustained throughput **10ms → 8ms**. If the wake message cannot traverse the current network path, the normal poller still operates. This is a bounded latency/packet-rate tradeoff, not a bypass or a cure for unknown provider ICMP filtering.
+
+`sudo pingtunnel security` shows verified, sent and rate-limited backlog wakeups. The ordinary host-to-host ping RTT (previously about 86ms) is constrained by the real path; improvement is targeted at **queueing latency**, not the physical network RTT. Real Hysteria 2, streaming, stability and ICMP PPS measurements are required to quantify results.
 
 ### Optional, reversible suppression of duplicate kernel Echo Replies
 
@@ -91,7 +99,7 @@ These figures are **one real-world observation**, not a controlled benchmark, a 
 Connect to the **overseas VPS** via SSH and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.16/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.17/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -103,7 +111,7 @@ Select **Foreign**, enter the Iran VPS public IPv4 address, choose **TCP or UDP*
 **Only after finishing overseas setup**, connect to the Iran VPS and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.16/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.17/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~

@@ -613,6 +613,15 @@ fn show_security_status() -> Result<()> {
         report["reverse_polls_coalesced"].as_u64()) {
         println!("  Signed Reverse polls sent / coalesced into DATA opportunities: {polls} / {saved}");
     }
+    if let (Some(sent),Some(received),Some(limited))=(
+        report["reverse_backlog_wakes_sent"].as_u64(),
+        report["reverse_backlog_wakes_accepted"].as_u64(),
+        report["reverse_backlog_wakes_rate_limited"].as_u64()) {
+        println!("  Encrypted backlog wakeup hints sent / verified / rate-limited: {sent} / {received} / {limited}");
+        if let Some(remaining)=report["reverse_wake_burst_remaining_ms"].as_i64().filter(|v|*v>0) {
+            println!("  Data-driven Reverse fast-poll burst remaining: {remaining} ms");
+        }
+    }
     if let (Some(checks),Some(proofs))=(
         report["direct_probe_checks"].as_u64(),
         report["direct_path_proofs"].as_u64()) {

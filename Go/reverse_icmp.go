@@ -39,6 +39,12 @@ const (
     // unique nonces inside the 20-second replay window. 4096 rejected
     // otherwise-valid requests every ~8 seconds during active streaming.
     reverseReplayCacheLimit = 16384
+    // Only real, queued Iran DATA can wake the idle foreign poller.
+    // At most two signed hints per second, and a bounded short poll burst.
+    reverseWakeSendCooldown = 500 * time.Millisecond
+    reverseWakeReceiveCooldown = 400 * time.Millisecond
+    reverseWakeBurst = 1200 * time.Millisecond
+    reverseFastPollPeriod = 8 * time.Millisecond
     // Sparse side-channel health checks are safe while Direct carries live
     // user traffic: only signed replies prove that Iran's userspace is alive
     // AND that its Echo Reply can reach Foreign.
@@ -77,6 +83,7 @@ const (
 )
 
 var reverseProbeMagic = [4]byte{'P','T','R','4'}
+var reverseWakeMagic = [4]byte{'P','T','W','4'}
 var reverseProofMagic = [4]byte{'P','R','A','4'}
 var reverseSwitchMagic = [4]byte{'P','T','S','4'}
 var reverseSwitchAckMagic = [4]byte{'P','T','A','4'}
@@ -169,6 +176,15 @@ type reverseTransport struct {
     reverseSwitchAttempts uint64
     pollRequests uint64
     pollsSkippedByData uint64
+    lastBacklogWake time.Time
+    lastAcceptedWake time.Time
+    backlogPollUntil time.Time
+    backlogWakeSent uint64
+    backlogWakeAccepted uint64
+    backlogWakeRateLimited uint64
+    // Buffered signal removes the artificial 1s idle wait from the first
+    // application packet while preserving the ordinary 1Hz idle cadence.
+    pollWakeup chan struct{}
     lastUsefulFrame time.Time
     usefulBurst int
     lastOutboundData time.Time
@@ -203,7 +219,8 @@ type reverseTransport struct {
 func newReverseTransport(preference ICMPDirection, key []byte, now time.Time) (*reverseTransport, error) {
     if len(key)!=32 {return nil, errors.New("reverse transport requires a 32-byte shared pairing key")}
     if _,err:=ParseICMPDirection(string(preference));err!=nil{return nil,err}
-    r:=&reverseTransport{preference:preference,selected:ICMPReverse,started:now}
+    r:=&reverseTransport{preference:preference,selected:ICMPReverse,started:now,
+        pollWakeup:make(chan struct{},1)}
     copy(r.secret[:],key)
     if preference==ICMPDirect {r.selected=ICMPDirect}
     return r,nil
@@ -461,6 +478,52 @@ func (r *reverseTransport) mac(body []byte) [32]byte {
 func (r *reverseTransport) makeProbe(now time.Time) ([]byte,error) {
     return r.makeProbeType(now,reverseProbeMagic)
 }
+// Wake-up frames are NOT transport-switch intents, handshake controls,
+// application DATA or acknowledgement of a healthy two-way link.
+// They only remove the next scheduled poller's idle sleep on genuine demand.
+func (r *reverseTransport) makeBacklogWake(now time.Time) ([]byte,error) {
+    return r.makeProbeType(now,reverseWakeMagic)
+}
+func (r *reverseTransport) authenticateBacklogWake(frame []byte,now time.Time) bool {
+    if len(frame)!=reverseProbeBytes || !bytes.Equal(frame[:4],reverseWakeMagic[:]) {
+        return false
+    }
+    ok,sw:=r.authenticateProbeWithSwitch(frame,now)
+    return ok && !sw
+}
+// On the Iran VPS, the data must already be encrypted and queued before
+// deciding to emit a single, short, key-authenticated hint.
+func (r *reverseTransport) allowBacklogWake(now time.Time) bool {
+    r.mu.Lock();defer r.mu.Unlock()
+    if r.selected!=ICMPReverse || len(r.pending)==0 {
+        return false
+    }
+    if !r.lastBacklogWake.IsZero() &&
+        now.Sub(r.lastBacklogWake)<reverseWakeSendCooldown{return false}
+    r.lastBacklogWake=now
+    return true
+}
+func (r *reverseTransport) noteBacklogWakeSent(){
+    r.mu.Lock();r.backlogWakeSent++;r.mu.Unlock()
+}
+// The foreign server accepts only verified requests from its pinned peer.
+// An in-memory, non-blocking notification wakes the single timer-based
+// poller; no second poller or parallel burst loop is ever started.
+func (r *reverseTransport) noteAuthenticatedBacklogWake(now time.Time) bool {
+    r.mu.Lock()
+    if r.selected!=ICMPReverse || (!r.lastAcceptedWake.IsZero() &&
+        now.Sub(r.lastAcceptedWake)<reverseWakeReceiveCooldown) {
+        r.backlogWakeRateLimited++
+        r.mu.Unlock()
+        return false
+    }
+    r.lastAcceptedWake=now
+    r.backlogPollUntil=now.Add(reverseWakeBurst)
+    r.backlogWakeAccepted++
+    r.mu.Unlock()
+    select{case r.pollWakeup<-struct{}{}:default:}
+    return true
+}
 func (r *reverseTransport) makeSwitchProbe(now time.Time) ([]byte,error) {
     return r.makeProbeType(now,reverseSwitchMagic)
 }
@@ -502,7 +565,8 @@ func (r *reverseTransport) authenticateProbeWithSwitch(frame []byte,now time.Tim
     isSwitch:=bytes.Equal(frame[:4],reverseSwitchMagic[:])
     isDirect:=bytes.Equal(frame[:4],directProbeMagic[:])
     isDirectSwitch:=bytes.Equal(frame[:4],directSwitchMagic[:])
-    if !isProbe && !isSwitch && !isDirect && !isDirectSwitch{return false,false}
+    isWake:=bytes.Equal(frame[:4],reverseWakeMagic[:])
+    if !isProbe && !isSwitch && !isDirect && !isDirectSwitch && !isWake{return false,false}
     seconds:=int64(binary.BigEndian.Uint64(frame[4:12]))
     delta:=now.Unix()-seconds
     if delta<0 {delta=-delta}
@@ -528,7 +592,7 @@ func (r *reverseTransport) authenticateProbeWithSwitch(frame []byte,now time.Tim
         return false,false
     }
     r.recent[nonce]=now
-    if !isDirect && !isDirectSwitch{r.lastValidProbe=now}
+    if !isDirect && !isDirectSwitch && !isWake{r.lastValidProbe=now}
     return true,isSwitch
 }
 
@@ -896,26 +960,35 @@ func (r *reverseTransport) pollPeriod(now time.Time,activeConns int,ready bool) 
         // polling. Keep the previously authenticated burst warm for a
         // bounded jitter window; never run at the old 2ms rate solely because a socket
         // remains open.
-        if activeConns>0 {period=40*time.Millisecond}
+        if activeConns>0 {period=25*time.Millisecond}
         ageIn:=now.Sub(r.lastUsefulFrame)
         if !r.lastUsefulFrame.IsZero() && ageIn>=0 {
             switch {
             case r.usefulBurst>=4 && ageIn<2400*time.Millisecond:
-                period=10*time.Millisecond
+                period=reverseFastPollPeriod
             case r.usefulBurst>=2 && ageIn<4500*time.Millisecond:
-                if period>16*time.Millisecond {period=16*time.Millisecond}
+                if period>12*time.Millisecond {period=12*time.Millisecond}
             case ageIn<4500*time.Millisecond:
-                if period>25*time.Millisecond {period=25*time.Millisecond}
+                if period>20*time.Millisecond {period=20*time.Millisecond}
             }
         }
         ageOut:=now.Sub(r.lastOutboundData)
         if !r.lastOutboundData.IsZero() && ageOut>=0 {
             switch {
             case r.outboundBurst>=4 && ageOut<4500*time.Millisecond:
-                if period>12*time.Millisecond {period=12*time.Millisecond}
+                if period>10*time.Millisecond {period=10*time.Millisecond}
             case ageOut<8*time.Second:
-                if period>25*time.Millisecond {period=25*time.Millisecond}
+                if period>20*time.Millisecond {period=20*time.Millisecond}
             }
+        }
+        // Burst mode requires a fresh, root-key authenticated wake from a
+        // peer with actually queued DATA. It automatically expires after
+        // 1.2s rather than imposing permanent high-frequency idle polls.
+        if !r.backlogPollUntil.IsZero() &&
+            !now.Before(r.lastAcceptedWake) &&
+            now.Before(r.backlogPollUntil) &&
+            period>reverseFastPollPeriod {
+            period=reverseFastPollPeriod
         }
     }
     r.pollPeriodMillis=int(period/time.Millisecond)
@@ -975,6 +1048,10 @@ type reverseDiagnostics struct {
     DirectProofConfirmations int
     PollRequests uint64
     PollsSkippedByData uint64
+    BacklogWakeSent uint64
+    BacklogWakeAccepted uint64
+    BacklogWakeRateLimited uint64
+    BacklogWakeActiveMs int64
     DirectProbeChecks uint64
     DirectPathProofs uint64
     DirectLastProofAgeSeconds int64
@@ -1015,6 +1092,10 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         directProofAge=int64(now.Sub(r.lastDirectProof).Seconds())
         if directProofAge<0{directProofAge=0}
     }
+    wakeRemaining:=int64(0)
+    if now.Before(r.backlogPollUntil) {
+        wakeRemaining=int64(r.backlogPollUntil.Sub(now)/time.Millisecond)
+    }
     switchAge:=int64(-1)
     if !r.lastSwitch.IsZero(){
         switchAge=int64(now.Sub(r.lastSwitch).Seconds())
@@ -1036,6 +1117,9 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         RotationDue:r.rotationDueLocked(now),LastRotationReason:r.lastRotationReason,
         DirectProofConfirmations:r.directProofConfirmations,
         PollRequests:r.pollRequests,PollsSkippedByData:r.pollsSkippedByData,
+        BacklogWakeSent:r.backlogWakeSent,BacklogWakeAccepted:r.backlogWakeAccepted,
+        BacklogWakeRateLimited:r.backlogWakeRateLimited,
+        BacklogWakeActiveMs:wakeRemaining,
         DirectProbeChecks:r.directProbeChecks,DirectPathProofs:r.directPathProofs,
         DirectLastProofAgeSeconds:directProofAge,
         LastSwitchAgeSeconds:switchAge,
