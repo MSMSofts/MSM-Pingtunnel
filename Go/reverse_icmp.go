@@ -669,7 +669,7 @@ func (r *reverseTransport) pollPeriod(now time.Time,activeConns int,ready bool) 
         // Under BBR/QUIC, a short application pause is not an idle
         // connection: ACKs and loss-recovery packets still need return
         // polling. Keep the previously authenticated burst warm for a
-        // bounded jitter window; never run at 2ms solely because a socket
+        // bounded jitter window; never run at the old 2ms rate solely because a socket
         // remains open.
         if activeConns>0 {period=40*time.Millisecond}
         ageIn:=now.Sub(r.lastUsefulFrame)
@@ -687,9 +687,9 @@ func (r *reverseTransport) pollPeriod(now time.Time,activeConns int,ready bool) 
         if !r.lastOutboundData.IsZero() && ageOut>=0 {
             switch {
             case r.outboundBurst>=4 && ageOut<4500*time.Millisecond:
-                if period>25*time.Millisecond {period=25*time.Millisecond}
-            case ageOut<8*time.Second:
                 if period>12*time.Millisecond {period=12*time.Millisecond}
+            case ageOut<8*time.Second:
+                if period>25*time.Millisecond {period=25*time.Millisecond}
             }
         }
     }
