@@ -745,6 +745,7 @@ type reverseDiagnostics struct {
     ReverseSwitchAttempts uint64
     PollRequests uint64
     PollsSkippedByData uint64
+    LastSwitchAgeSeconds int64
     LastUsefulFrameAgeSeconds int64
     FallbackCount uint64
     FallbackReason string
@@ -776,6 +777,11 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         outboundAge=int64(d/time.Millisecond)
     }
     avgDelay,p95Delay:=r.queueDelaySummaryLocked()
+    switchAge:=int64(-1)
+    if !r.lastSwitch.IsZero(){
+        switchAge=int64(now.Sub(r.lastSwitch).Seconds())
+        if switchAge<0{switchAge=0}
+    }
     return reverseDiagnostics{Pending:len(r.pending),PendingBytes:r.pendingBytes,
         QueuePeak:r.queuePeak,QueueDrops:r.drops,FailedReplies:r.failedReplies,
         ReflectedPolls:r.reflectedPolls,
@@ -789,6 +795,7 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         PollIntervalMillis:r.pollPeriodMillis,LastUsefulFrameAgeSeconds:age,
         ReverseProofs:r.reverseProofs,ReverseSwitchAttempts:r.reverseSwitchAttempts,
         PollRequests:r.pollRequests,PollsSkippedByData:r.pollsSkippedByData,
+        LastSwitchAgeSeconds:switchAge,
         FallbackCount:r.fallbackCount,FallbackReason:r.lastFallbackReason,
         OldestQueueAgeMs:oldest,LastQueueDelayMs:r.lastDeliveredQueueDelayMs,
         MaxQueueDelayMs:r.maxDeliveredQueueDelayMs,DeliveredFrames:r.deliveredFrames,
