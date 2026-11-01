@@ -11,38 +11,38 @@ func TestReverseAdaptivePollCadence(t *testing.T) {
     now:=time.Unix(1810000000,0)
     r,err:=newReverseTransport(ICMPReverse,bytes.Repeat([]byte{15},32),now)
     if err!=nil{t.Fatal(err)}
-    if got:=r.pollPeriod(now,0,false);got!=200*time.Millisecond{
+    if got:=r.pollPeriod(now,0,false);got!=500*time.Millisecond{
         t.Fatalf("negotiation poll interval %s",got)
     }
-    if got:=r.pollPeriod(now,0,true);got!=250*time.Millisecond{
+    if got:=r.pollPeriod(now,0,true);got!=time.Second{
         t.Fatalf("idle interval %s",got)
     }
     r.noteUsefulFrame(now)
-    if got:=r.pollPeriod(now.Add(50*time.Millisecond),1,true);got!=12*time.Millisecond{
+    if got:=r.pollPeriod(now.Add(50*time.Millisecond),1,true);got!=40*time.Millisecond{
         t.Fatalf("isolated inbound data interval: %s",got)
     }
     r.noteUsefulFrame(now.Add(100*time.Millisecond))
-    if got:=r.pollPeriod(now.Add(150*time.Millisecond),1,true);got!=6*time.Millisecond{
+    if got:=r.pollPeriod(now.Add(150*time.Millisecond),1,true);got!=16*time.Millisecond{
         t.Fatalf("warm reverse interval %s",got)
     }
     r.noteUsefulFrame(now.Add(160*time.Millisecond))
     r.noteUsefulFrame(now.Add(200*time.Millisecond))
-    if got:=r.pollPeriod(now.Add(250*time.Millisecond),1,true);got!=2*time.Millisecond{
+    if got:=r.pollPeriod(now.Add(250*time.Millisecond),1,true);got!=10*time.Millisecond{
         t.Fatalf("sustained reverse throughput capped at %s",got)
     }
-    if got:=r.pollPeriod(now.Add(2*time.Second),1,true);got!=2*time.Millisecond{
+    if got:=r.pollPeriod(now.Add(2*time.Second),1,true);got!=10*time.Millisecond{
         t.Fatalf("sustained return data burst cooled during jitter window: %s",got)
     }
-    if got:=r.pollPeriod(now.Add(3*time.Second),1,true);got!=6*time.Millisecond{
+    if got:=r.pollPeriod(now.Add(3*time.Second),1,true);got!=16*time.Millisecond{
         t.Fatalf("reverse burst did not step down to 6ms: %s",got)
     }
-    if got:=r.pollPeriod(now.Add(5*time.Second),1,true);got!=25*time.Millisecond {
+    if got:=r.pollPeriod(now.Add(5*time.Second),1,true);got!=40*time.Millisecond {
         t.Fatalf("reverse ACK activity did not cool after bounded hold: %s",got)
     }
-    if got:=r.pollPeriod(now.Add(10*time.Second),1,true);got!=25*time.Millisecond{
+    if got:=r.pollPeriod(now.Add(10*time.Second),1,true);got!=40*time.Millisecond{
         t.Fatalf("open QUIC return path must not wait 80ms: %s",got)
     }
-    if got:=r.pollPeriod(now.Add(10*time.Second),0,true);got!=250*time.Millisecond{
+    if got:=r.pollPeriod(now.Add(10*time.Second),0,true);got!=time.Second{
         t.Fatalf("idle reverse interval %s",got)
     }
     d:=r.diagnostics(now.Add(10*time.Second))
@@ -133,30 +133,30 @@ func TestAuthenticatedReverseReceiptsOnlyForRealData(t *testing.T) {
 func TestReverseVideoOutboundAcceleratesReturnACKPolling(t *testing.T) {
     start:=time.Unix(1830000000,0)
     r,_:=newReverseTransport(ICMPAuto,bytes.Repeat([]byte{5},32),start)
-    if got:=r.pollPeriod(start,2,true);got!=25*time.Millisecond {
+    if got:=r.pollPeriod(start,2,true);got!=40*time.Millisecond {
         t.Fatalf("active baseline should be 25ms, got %s",got)
     }
     r.noteOutboundFrame(start)
-    if got:=r.pollPeriod(start.Add(100*time.Millisecond),2,true);got!=12*time.Millisecond {
+    if got:=r.pollPeriod(start.Add(100*time.Millisecond),2,true);got!=25*time.Millisecond {
         t.Fatalf("first video response did not accelerate ACK polling: %s",got)
     }
     for n:=1;n<=4;n++ {r.noteOutboundFrame(start.Add(time.Duration(n*30)*time.Millisecond))}
-    if got:=r.pollPeriod(start.Add(140*time.Millisecond),2,true);got!=4*time.Millisecond {
+    if got:=r.pollPeriod(start.Add(140*time.Millisecond),2,true);got!=40*time.Millisecond {
         t.Fatalf("sustained video frames should keep ACK polling responsive: %s",got)
     }
-    if got:=r.pollPeriod(start.Add(3*time.Second),2,true);got!=4*time.Millisecond {
+    if got:=r.pollPeriod(start.Add(3*time.Second),2,true);got!=12*time.Millisecond {
         t.Fatalf("short video pause must retain warm ACK cadence: %s",got)
     }
     if got:=r.pollPeriod(start.Add(6*time.Second),2,true);got!=12*time.Millisecond {
         t.Fatalf("outbound data must step down to 12ms after sustained burst: %s",got)
     }
-    if got:=r.pollPeriod(start.Add(9*time.Second),2,true);got!=25*time.Millisecond {
+    if got:=r.pollPeriod(start.Add(9*time.Second),2,true);got!=40*time.Millisecond {
         t.Fatalf("stale outbound traffic must cool back to 25ms: %s",got)
     }
-    if got:=r.pollPeriod(start.Add(10*time.Second),0,true);got!=250*time.Millisecond {
+    if got:=r.pollPeriod(start.Add(10*time.Second),0,true);got!=time.Second {
         t.Fatalf("no active application must return to idle: %s",got)
     }
-    if got:=r.pollPeriod(start.Add(11*time.Second),0,false);got!=200*time.Millisecond {
+    if got:=r.pollPeriod(start.Add(11*time.Second),0,false);got!=500*time.Millisecond {
         t.Fatalf("handshake traffic must preserve startup pacing: %s",got)
     }
     d:=r.diagnostics(start.Add(10*time.Second))
