@@ -279,8 +279,9 @@ func TestScheduledReverseProofAuthenticatesBidirectionalPath(t *testing.T){
     if foreign.takeSwitchRequest(switched.Add(30*time.Second)){
         t.Fatal("Reverse takeover ignored minimum 60-second Direct dwell")
     }
-    now:=switched.Add(65*time.Second)
-    // The last proof has expired: demand two recent observations.
+    now:=switched.Add(smartRotationInterval-20*time.Second)
+    // The old proof has expired. A rotation needs two NEW proofs near
+    // the scheduled three-hour boundary.
     if foreign.takeSwitchRequest(now){t.Fatal("stale proofs initiated takeover")}
     for i:=0;i<2;i++ {
         moment:=now.Add(time.Duration(i*10)*time.Second)
@@ -291,14 +292,14 @@ func TestScheduledReverseProofAuthenticatesBidirectionalPath(t *testing.T){
         proof:=iran.makeProof(probe)
         if !foreign.acceptProof(id,seq,proof,moment){t.Fatal("proof refused")}
     }
-    at:=now.Add(11*time.Second)
-    if !foreign.takeSwitchRequest(at){t.Fatal("no scheduled preferred Reverse switch")}
+    at:=switched.Add(smartRotationInterval+time.Second)
+    if !foreign.takeSwitchRequest(at){t.Fatal("eligible scheduled Reverse switch was not requested")}
     if foreign.takeSwitchRequest(at.Add(time.Second)){t.Fatal("duplicate switch without proof")}
     switchProbe,err:=foreign.makeSwitchProbe(at);if err!=nil{t.Fatal(err)}
     valid,sw:=iran.authenticateProbeWithSwitch(switchProbe,at)
     if !valid||!sw{t.Fatal("valid signed switch probe rejected")}
     if iran.authenticateProbe(switchProbe,at){t.Fatal("replayed switch accepted")}
-    if !iran.choose(ICMPReverse,at){t.Fatal("Reverse priority not restored")}
+    if !iran.rotateKeepingSession(ICMPReverse,at,"smart_rotation_to_reverse"){t.Fatal("scheduled Reverse not restored")}
 }
 func TestFailedOrStaleReverseProbesNeverInterruptDirect(t *testing.T){
     start:=time.Unix(1850001000,0)
