@@ -6,6 +6,7 @@ package pingtunnel
 import (
     "errors"
     "net"
+    "sync"
     "sync/atomic"
     "syscall"
     "time"
@@ -22,6 +23,36 @@ func useReverse(c *CryptoConfig) bool {
 // probes). A successful socket write is not proof of delivery to the peer.
 var icmpWriteErrors atomic.Uint64
 var icmpMessageTooLong atomic.Uint64
+var icmpRequestsSent atomic.Uint64
+var icmpRepliesSent atomic.Uint64
+
+// Lightweight userspace-only wire accounting. Linux-generated Echo Replies
+// are deliberately not counted; a scoped optional nft rule is documented.
+var icmpRateSample struct {
+    sync.Mutex
+    lastAt time.Time
+    lastTotal uint64
+    currentPPS uint64
+    peakPPS uint64
+}
+func icmpSentRate(now time.Time) (current,peak uint64) {
+    total:=icmpRequestsSent.Load()+icmpRepliesSent.Load()
+    icmpRateSample.Lock()
+    defer icmpRateSample.Unlock()
+    if icmpRateSample.lastAt.IsZero() {
+        icmpRateSample.lastAt=now
+        icmpRateSample.lastTotal=total
+    } else if elapsed:=now.Sub(icmpRateSample.lastAt);elapsed>=time.Second {
+        delta:=total-icmpRateSample.lastTotal
+        icmpRateSample.currentPPS=uint64(float64(delta)/elapsed.Seconds()+0.5)
+        if icmpRateSample.currentPPS>icmpRateSample.peakPPS {
+            icmpRateSample.peakPPS=icmpRateSample.currentPPS
+        }
+        icmpRateSample.lastAt=now
+        icmpRateSample.lastTotal=total
+    }
+    return icmpRateSample.currentPPS,icmpRateSample.peakPPS
+}
 
 func recordICMPWriteResult(written, expected int, err error) bool {
     if err == nil && written == expected { return true }
@@ -37,7 +68,12 @@ func emitEcho(conn icmp.PacketConn,peer *net.IPAddr,typ,id,seq int,body []byte) 
     data,err:=msg.Marshal(nil)
     if err!=nil{return false}
     n,err:=conn.WriteTo(data,icmpDstAddr(peer))
-    return recordICMPWriteResult(n,len(data),err)
+    ok:=recordICMPWriteResult(n,len(data),err)
+    if ok {
+        if typ==8 {icmpRequestsSent.Add(1)}
+        if typ==0 {icmpRepliesSent.Add(1)}
+    }
+    return ok
 }
 
 // No response is emitted to unauthenticated control or data. This reply is
