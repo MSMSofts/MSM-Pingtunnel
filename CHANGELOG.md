@@ -1,5 +1,15 @@
 # Changelog / تاریخچه تغییرات
 
+## [3.3.14 preview] — Guarded two-way ICMP recovery after prolonged one-way stalls
+
+- **Incident reproduced in diagnostics (2026-11-01):** Two v3.3.13 peers stayed systemd-active and reported `authenticated` while authenticated peer DATA was stale for ~78 minutes. Iran still received authenticated Reverse Echo Requests; its outbound `PTH4` Echo Replies were visible in local tcpdump but absent from the overseas ingress capture. Normal Iran-origin ICMP ping worked. This does **not** identify a specific VPS/provider firewall: upstream packet filtering or routing remains possible.
+- **Reverse → Direct:** Signed Reverse polling now counts only as *one-way ingress evidence*. After >=150 seconds without authenticated peer feedback **and** sustained real local demand, guarded Direct fallback is allowed even while signed polls remain fresh. Existing shorter failure/negotiation paths and minimum direction dwell are retained.
+- **Session recovery:** After >=35 seconds of missing authenticated inbound traffic under real local demand, the Iran peer can renegotiate a fresh X25519 session while in Reverse or Direct. An idle peer never triggers a rekey solely because no application traffic is present.
+- **Direct → Reverse:** When authenticated Direct is stale and a fresh paired Reverse poll reaches Iran, the existing guarded direction candidate logic can re-establish Reverse with a full authenticated handshake. Healthy Direct sessions are not interrupted by speculative probes.
+- **Idle watchdog:** An entirely idle client no longer pretends to have recent user demand, avoiding spurious Direct-mode watchdog restarts and hot idle ping cadence.
+- **Regressions:** Go tests simulate signed polls with a dead Reverse return path, authenticate Reverse → Direct → Reverse handshakes, enforce AEAD key renewal, preserve idle/healthy sessions and verify watchdog semantics. All changes retain **wire=4**, **schema=3**, pairing secrets and TCP/UDP framing; experimental ICMP segmentation and parity FEC stay off by default.
+- This is a **preview**. Network path behavior (including cloud firewall / ICMP rate limits) cannot be diagnosed or guaranteed by CI; no automatic VPS upgrades are performed.
+
 ## [3.3.13 preview] — Remove Auto Tune (no transport changes)
 
 - Removed Rust Auto Tune implementation, its active probes, configuration writes, restart/rollback logic, menu option **15** and CLI subcommand `auto-tune`.
