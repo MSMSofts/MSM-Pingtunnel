@@ -64,21 +64,19 @@ func replyReverse(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoConf
     })
 }
 
-func startReverseHandshake(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoConfig,now time.Time) {
+func startReverseHandshake(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoConfig,now time.Time,switchRequested bool) {
     if c==nil || c.reverse==nil || c.sec==nil || c.sec.region!="iran" {return}
     if c.reverse.preference==ICMPDirect{return}
-    // Do not reset an already authenticated reverse session on every
-    // authenticated polling request: that caused endless handshakes.
-    if useReverse(c) && c.SecureReady() {
+    // Healthy Direct must NEVER be reset merely because an authenticated
+    // one-way Reverse poll arrived. PTS4 is only sent by the paired Foreign
+    // worker after two separately authenticated PRA4 return-path receipts.
+    if !useReverse(c) {
+        if !switchRequested || !c.reverse.choose(ICMPReverse,now){return}
+        c.sec.resetForTransportChange()
+    } else if c.SecureReady(){
+        // Keep a stable Reverse session; never restart on a routine poll.
         replyReverse(conn,peer,id,seq,c)
         return
-    }
-    if !c.reverse.allowReverseCandidate(now,c.SecureReady(),c.sec.lastPeerTraffic()) {
-        return
-    }
-    if !useReverse(c) {
-        if c.SecureReady(){c.sec.resetForTransportChange()}
-        if !c.reverse.choose(ICMPReverse,now){return}
     }
     frame,err:=c.SecureControl(now)
     if err==nil && len(frame)>0{
@@ -96,7 +94,19 @@ func sendForeignPoll(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoC
     if !c.reverse.needsProbe(now,authenticated){return}
     // A poll is only a candidate path. Foreign selects Reverse AFTER
     // receiving an authenticated ClientHello inside the matching Echo Reply.
-    probe,err:=c.reverse.makeProbe(now)
+    switchRequest:=c.reverse.takeSwitchRequest(now)
+    var probe []byte
+    var err error
+    if switchRequest {
+        probe,err=c.reverse.makeSwitchProbe(now)
+    } else {
+        probe,err=c.reverse.makeProbe(now)
+    }
     if err!=nil{return}
-    _=emitEcho(conn,peer,8,id,seq,probe)
+    if !switchRequest {c.reverse.stageProbe(id,seq,probe,now)}
+    if emitEcho(conn,peer,8,id,seq,probe) {
+        c.reverse.notePollSent()
+    } else if !switchRequest {
+        c.reverse.cancelProbe(id,seq)
+    }
 }
