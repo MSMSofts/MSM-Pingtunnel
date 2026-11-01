@@ -236,7 +236,10 @@ func (p *Client) touchActivity() {
 func (p *Client) lastActivity() time.Time {
 	ns := p.lastActivityUnixNano.Load()
 	if ns <= 0 {
-		return time.Now()
+        // No local user has ever requested traffic. Never synthesize
+        // activity: idle Direct sessions must not trip the link watchdog
+        // or run active-rate ICMP pings indefinitely.
+		return time.Time{}
 	}
 	return time.Unix(0, ns)
 }
