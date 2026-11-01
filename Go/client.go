@@ -428,7 +428,9 @@ func (p *Client) Run() error {
                 // ordinary Direct Echo Requests, in FIFO order, instead
                 // of dropping in-flight user traffic on path changes.
                 if peer:=p.serverIP.Load();peer!=nil {
-                    for i:=0;i<reverseQueueMaxFrames;i++ {
+                    // Limit a mode-change backlog to 64 packets per health
+                    // tick; this avoids a sudden 256-frame ICMP burst.
+                    for i:=0;i<64;i++ {
                         frame,ok:=p.cryptoConfig.reverse.takeFrame(now)
                         if !ok{break}
                         if emitEcho(*p.conn,peer,8,p.id,p.nextSequence(),frame.data) {
