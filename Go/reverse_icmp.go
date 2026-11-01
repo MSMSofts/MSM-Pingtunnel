@@ -7,6 +7,7 @@ import (
     "crypto/hmac"
     "crypto/rand"
     "crypto/sha256"
+    "bytes"
     "encoding/binary"
     "errors"
     "sort"
@@ -38,6 +39,14 @@ const (
     // unique nonces inside the 20-second replay window. 4096 rejected
     // otherwise-valid requests every ~8 seconds during active streaming.
     reverseReplayCacheLimit = 16384
+    // Sparse side-channel health checks are safe while Direct carries live
+    // user traffic: only signed replies prove that Iran's userspace is alive
+    // AND that its Echo Reply can reach Foreign.
+    reverseDirectProbeInterval = 10 * time.Second
+    reverseProofMinInterval = 9 * time.Second
+    reverseProofTTL = 25 * time.Second
+    reverseSwitchRetryCooldown = 3 * time.Minute
+    reverseRequiredProofs = 2
     reverseAutoDelay = 0 * time.Second
     // Reverse must be genuinely unavailable before switching direction.
     // A short X25519 delay, an idle session or sporadic ICMP loss is not
@@ -59,6 +68,15 @@ const (
 )
 
 var reverseProbeMagic = [4]byte{'P','T','R','4'}
+var reverseProofMagic = [4]byte{'P','R','A','4'}
+var reverseSwitchMagic = [4]byte{'P','T','S','4'}
+
+// The 4-byte ID/sequence pairs are scoped to a 25-second challenge lifetime.
+// They are matched against an HMACed nonce; they never change the AEAD keys.
+type reverseProbeChallenge struct {
+    first20 [20]byte
+    sentAt time.Time
+}
 
 type reverseQueuedFrame struct {
     data []byte
@@ -113,6 +131,15 @@ type reverseTransport struct {
     lastPrune time.Time
     replayCapacityRejects uint64
     lastValidProbe time.Time
+    probeChallenges map[uint32]reverseProbeChallenge
+    lastProofSent time.Time
+    lastProofAt time.Time
+    proofConfirmations int
+    lastSwitchAttempt time.Time
+    reverseProofs uint64
+    reverseSwitchAttempts uint64
+    pollRequests uint64
+    pollsSkippedByData uint64
     lastUsefulFrame time.Time
     usefulBurst int
     lastOutboundData time.Time
@@ -193,6 +220,9 @@ func (r *reverseTransport) choose(direction ICMPDirection, now time.Time) bool {
     if !r.lastSwitch.IsZero() && now.Sub(r.lastSwitch)<reverseMinDwell{return false}
     r.selected=direction
     r.lastSwitch=now
+    r.proofConfirmations=0
+    r.lastProofAt=time.Time{}
+    r.probeChallenges=nil
     // Queued ciphertext cannot survive a transport/session change. Account
     // for discarded frames explicitly instead of silently losing them.
     r.drops+=uint64(len(r.pending))
@@ -272,9 +302,10 @@ func (r *reverseTransport) needsProbe(now time.Time, authenticated bool) bool {
     r.mu.Lock();defer r.mu.Unlock()
     if r.preference==ICMPDirect{return false}
     if r.selected==ICMPReverse{return true}
-    // On a Direct fallback keep testing the reverse path at a bounded rate
-    // only when the authenticated Direct channel is stale.
-    return r.preference==ICMPAuto && !authenticated
+    // Always recheck the preferred path on a bounded 10-second schedule,
+    // even while authenticated Direct is healthy. A poll itself cannot
+    // cause a switch: the paired Go worker must prove the RETURN path.
+    return r.preference==ICMPAuto
 }
 
 func (r *reverseTransport) mac(body []byte) [32]byte {
@@ -289,8 +320,14 @@ func (r *reverseTransport) mac(body []byte) [32]byte {
 // A bounded, authenticated probe prevents unauthenticated ICMP scans from
 // triggering a reverse handshake. It carries no application plaintext.
 func (r *reverseTransport) makeProbe(now time.Time) ([]byte,error) {
+    return r.makeProbeType(now,reverseProbeMagic)
+}
+func (r *reverseTransport) makeSwitchProbe(now time.Time) ([]byte,error) {
+    return r.makeProbeType(now,reverseSwitchMagic)
+}
+func (r *reverseTransport) makeProbeType(now time.Time,magic [4]byte) ([]byte,error) {
     b:=make([]byte,reverseProbeBytes)
-    copy(b[:4],reverseProbeMagic[:])
+    copy(b[:4],magic[:])
     binary.BigEndian.PutUint64(b[4:12],uint64(now.Unix()))
     if _,err:=rand.Read(b[12:20]);err!=nil{return nil,err}
     tag:=r.mac(b[:20])
@@ -301,19 +338,26 @@ func (r *reverseTransport) makeProbe(now time.Time) ([]byte,error) {
 // authenticateProbe is replay-limited and tolerant of modest clock skew.
 // Caller must verify the configured remote IP before invoking it.
 func (r *reverseTransport) authenticateProbe(frame []byte,now time.Time) bool {
-    if len(frame)!=reverseProbeBytes || !hmac.Equal(frame[:4],reverseProbeMagic[:]) {return false}
+    valid,_:=r.authenticateProbeWithSwitch(frame,now)
+    return valid
+}
+func (r *reverseTransport) authenticateProbeWithSwitch(frame []byte,now time.Time) (valid,switchRequest bool) {
+    if len(frame)!=reverseProbeBytes{return false,false}
+    isProbe:=bytes.Equal(frame[:4],reverseProbeMagic[:])
+    isSwitch:=bytes.Equal(frame[:4],reverseSwitchMagic[:])
+    if !isProbe && !isSwitch{return false,false}
     seconds:=int64(binary.BigEndian.Uint64(frame[4:12]))
     delta:=now.Unix()-seconds
     if delta<0 {delta=-delta}
-    if delta>int64(reverseProbeWindow.Seconds()){return false}
+    if delta>int64(reverseProbeWindow.Seconds()){return false,false}
     tag:=r.mac(frame[:20])
-    if !hmac.Equal(frame[20:36],tag[:16]){return false}
+    if !hmac.Equal(frame[20:36],tag[:16]){return false,false}
     var nonce [8]byte
     copy(nonce[:],frame[12:20])
     r.mu.Lock()
     defer r.mu.Unlock()
     if r.recent==nil{r.recent=make(map[[8]byte]time.Time)}
-    if _,ok:=r.recent[nonce];ok{return false}
+    if _,ok:=r.recent[nonce];ok{return false,false}
     if r.lastPrune.IsZero() || now.Sub(r.lastPrune)>=time.Second {
         for id,t:=range r.recent {
             if now.Sub(t)>reverseProbeWindow{delete(r.recent,id)}
@@ -324,12 +368,106 @@ func (r *reverseTransport) authenticateProbe(frame []byte,now time.Time) bool {
     // never disable replay tracking just to meet throughput.
     if len(r.recent)>=reverseReplayCacheLimit {
         r.replayCapacityRejects++
-        return false
+        return false,false
     }
     r.recent[nonce]=now
     r.lastValidProbe=now
+    return true,isSwitch
+}
+
+// Only a matched, one-time, MAC-authenticated userspace Echo Reply proves
+// that the Reverse route has recovered while Direct is still active.
+func (r *reverseTransport) makeProof(probe []byte) []byte {
+    if len(probe)!=reverseProbeBytes{return nil}
+    reply:=append([]byte(nil),probe...)
+    copy(reply[:4],reverseProofMagic[:])
+    tag:=r.mac(reply[:20])
+    copy(reply[20:],tag[:16])
+    return reply
+}
+func (r *reverseTransport) allowDirectPathProof(now time.Time) bool {
+    r.mu.Lock();defer r.mu.Unlock()
+    if r.preference!=ICMPAuto || r.selected!=ICMPDirect{return false}
+    if !r.lastProofSent.IsZero() && now.Sub(r.lastProofSent)<reverseProofMinInterval{return false}
+    r.lastProofSent=now
     return true
 }
+func probeChallengeKey(id,seq int)uint32{
+    return uint32(uint16(id))<<16 | uint32(uint16(seq))
+}
+func (r *reverseTransport) stageProbe(id,seq int,probe []byte,now time.Time) {
+    if len(probe)!=reverseProbeBytes{return}
+    r.mu.Lock();defer r.mu.Unlock()
+    if r.preference!=ICMPAuto || r.selected!=ICMPDirect{return}
+    if r.probeChallenges==nil{r.probeChallenges=make(map[uint32]reverseProbeChallenge)}
+    for k,c:=range r.probeChallenges{
+        if now.Sub(c.sentAt)>reverseProofTTL{delete(r.probeChallenges,k)}
+    }
+    // At most three live challenges at the default one-per-10s cadence.
+    // Cap strictly even if a scheduling bug or malformed clock is observed.
+    if len(r.probeChallenges)>=8{
+        for k:=range r.probeChallenges{delete(r.probeChallenges,k);break}
+    }
+    var prefix [20]byte
+    copy(prefix[:],probe[:20])
+    r.probeChallenges[probeChallengeKey(id,seq)]=reverseProbeChallenge{first20:prefix,sentAt:now}
+}
+func (r *reverseTransport) cancelProbe(id,seq int){
+    r.mu.Lock();delete(r.probeChallenges,probeChallengeKey(id,seq));r.mu.Unlock()
+}
+func (r *reverseTransport) acceptProof(id,seq int,reply []byte,now time.Time) bool {
+    if len(reply)!=reverseProbeBytes || !bytes.Equal(reply[:4],reverseProofMagic[:]){return false}
+    mac:=r.mac(reply[:20])
+    if !hmac.Equal(reply[20:],mac[:16]){return false}
+    r.mu.Lock();defer r.mu.Unlock()
+    if r.preference!=ICMPAuto || r.selected!=ICMPDirect{return false}
+    key:=probeChallengeKey(id,seq)
+    challenge,ok:=r.probeChallenges[key]
+    if !ok || now.Before(challenge.sentAt) || now.Sub(challenge.sentAt)>reverseProofTTL {
+        return false
+    }
+    if !hmac.Equal(reply[4:20],challenge.first20[4:20]){return false}
+    delete(r.probeChallenges,key)
+    if r.lastProofAt.IsZero() || now.Sub(r.lastProofAt)>reverseProofTTL {
+        r.proofConfirmations=0
+    }
+    if !r.lastProofAt.IsZero() && now.Sub(r.lastProofAt)<5*time.Second{return false}
+    if r.proofConfirmations<reverseRequiredProofs{r.proofConfirmations++}
+    r.lastProofAt=now
+    r.reverseProofs++
+    return true
+}
+// Call on the foreign poller only, after two separate successful proofs.
+// Never reset the healthy Direct AEAD session merely due to a timer.
+func (r *reverseTransport) takeSwitchRequest(now time.Time) bool {
+    r.mu.Lock();defer r.mu.Unlock()
+    if r.preference!=ICMPAuto || r.selected!=ICMPDirect ||
+        r.proofConfirmations<reverseRequiredProofs ||
+        r.lastProofAt.IsZero() || now.Sub(r.lastProofAt)>reverseProofTTL ||
+        (!r.lastSwitch.IsZero() && now.Sub(r.lastSwitch)<reverseMinDwell) ||
+        (!r.lastSwitchAttempt.IsZero() && now.Sub(r.lastSwitchAttempt)<reverseSwitchRetryCooldown) {
+        return false
+    }
+    r.lastSwitchAttempt=now
+    r.reverseSwitchAttempts++
+    r.proofConfirmations=0
+    return true
+}
+func (r *reverseTransport) notePollSent(){
+    r.mu.Lock();r.pollRequests++;r.mu.Unlock()
+}
+func (r *reverseTransport) notePollSkippedByData(){
+    r.mu.Lock();r.pollsSkippedByData++;r.mu.Unlock()
+}
+// A legitimate outbound encrypted foreign DATA Echo Request already gives
+// Iran an opportunity to send one queued Echo Reply. Do not add a synthetic
+// poll in the same small time window.
+func (r *reverseTransport) recentOutboundData(now time.Time) bool {
+    r.mu.Lock();defer r.mu.Unlock()
+    return r.selected==ICMPReverse && !r.lastOutboundData.IsZero() &&
+        now.Sub(r.lastOutboundData)>=0 && now.Sub(r.lastOutboundData)<20*time.Millisecond
+}
+
 
 func (r *reverseTransport) enqueue(frame []byte,now time.Time) bool {
     if len(frame)==0 || len(frame)>10240{return false}
@@ -524,32 +662,32 @@ func (r *reverseTransport) noteOutboundFrame(now time.Time) {
 }
 func (r *reverseTransport) pollPeriod(now time.Time,activeConns int,ready bool) time.Duration {
     r.mu.Lock();defer r.mu.Unlock()
-    period:=250*time.Millisecond
+    period:=time.Second
     if !ready {
-        period=200*time.Millisecond
+        period=500*time.Millisecond
     } else {
         // Under BBR/QUIC, a short application pause is not an idle
         // connection: ACKs and loss-recovery packets still need return
         // polling. Keep the previously authenticated burst warm for a
         // bounded jitter window; never run at 2ms solely because a socket
         // remains open.
-        if activeConns>0 {period=25*time.Millisecond}
+        if activeConns>0 {period=40*time.Millisecond}
         ageIn:=now.Sub(r.lastUsefulFrame)
         if !r.lastUsefulFrame.IsZero() && ageIn>=0 {
             switch {
             case r.usefulBurst>=4 && ageIn<2400*time.Millisecond:
-                period=2*time.Millisecond
+                period=10*time.Millisecond
             case r.usefulBurst>=2 && ageIn<4500*time.Millisecond:
-                if period>6*time.Millisecond {period=6*time.Millisecond}
+                if period>16*time.Millisecond {period=16*time.Millisecond}
             case ageIn<4500*time.Millisecond:
-                if period>12*time.Millisecond {period=12*time.Millisecond}
+                if period>25*time.Millisecond {period=25*time.Millisecond}
             }
         }
         ageOut:=now.Sub(r.lastOutboundData)
         if !r.lastOutboundData.IsZero() && ageOut>=0 {
             switch {
             case r.outboundBurst>=4 && ageOut<4500*time.Millisecond:
-                if period>4*time.Millisecond {period=4*time.Millisecond}
+                if period>25*time.Millisecond {period=25*time.Millisecond}
             case ageOut<8*time.Second:
                 if period>12*time.Millisecond {period=12*time.Millisecond}
             }
@@ -603,6 +741,10 @@ type reverseDiagnostics struct {
     CapacityEvictedEchoSignatures uint64
     ReplayCapacityRejects uint64
     PollIntervalMillis int
+    ReverseProofs uint64
+    ReverseSwitchAttempts uint64
+    PollRequests uint64
+    PollsSkippedByData uint64
     LastUsefulFrameAgeSeconds int64
     FallbackCount uint64
     FallbackReason string
@@ -645,6 +787,8 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         CapacityEvictedEchoSignatures:r.capacityEvictedEchoSignatures,
         ReplayCapacityRejects:r.replayCapacityRejects,
         PollIntervalMillis:r.pollPeriodMillis,LastUsefulFrameAgeSeconds:age,
+        ReverseProofs:r.reverseProofs,ReverseSwitchAttempts:r.reverseSwitchAttempts,
+        PollRequests:r.pollRequests,PollsSkippedByData:r.pollsSkippedByData,
         FallbackCount:r.fallbackCount,FallbackReason:r.lastFallbackReason,
         OldestQueueAgeMs:oldest,LastQueueDelayMs:r.lastDeliveredQueueDelayMs,
         MaxQueueDelayMs:r.maxDeliveredQueueDelayMs,DeliveredFrames:r.deliveredFrames,
