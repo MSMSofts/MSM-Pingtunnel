@@ -899,7 +899,7 @@ func (p *Server) runReversePoller() {
             continue
         }
         sequence:=int(p.reverseSequence.Add(1)&0xffff)
-        sendForeignPoll(*p.conn,peer,0x42A5,sequence,p.cryptoConfig,now,recent)
+        sendForeignPoll(*p.conn,peer,0x42A5,sequence,p.cryptoConfig,now,recent,int(p.localConnMapSize.Load()))
         if useReverse(p.cryptoConfig) && ready &&
             p.cryptoConfig.reverse.shouldSendReceiveAck(now) {
             // The client deliberately ignores this application-level Ping
