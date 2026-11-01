@@ -261,6 +261,27 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
             if isReflectedReverseDataEcho(cryptoConfig,bytes[0],echoId,echoSeq,payloadData,now) {
                 continue
             }
+            // A low-rate Direct check is sent by Iran while Reverse
+            // remains the preferred authenticated user transport.
+            if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="foreign" &&
+                int(bytes[0])==8 && stdbytes.HasPrefix(payloadData,directProbeMagic[:]) {
+                if cryptoConfig.reverse.authenticateDirectProbe(payloadData,now) {
+                    proof:=cryptoConfig.reverse.makeDirectProof(payloadData)
+                    _=emitEcho(conn,peer,0,echoId,echoSeq,proof)
+                }
+                continue
+            }
+            if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="iran" &&
+                int(bytes[0])==0 && stdbytes.HasPrefix(payloadData,directProofMagic[:]) {
+                cryptoConfig.reverse.acceptDirectProof(echoId,echoSeq,payloadData,now)
+                continue
+            }
+            // Suppress only the foreign kernel's exact PTC4 auto-echo;
+            // it is not a cryptographic proof of userspace reachability.
+            if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="iran" &&
+                int(bytes[0])==0 && stdbytes.HasPrefix(payloadData,directProbeMagic[:]) {
+                continue
+            }
             // Reverse health proofs are unrelated to AEAD DATA: validate
             // them against the exact paired challenge, Echo ID/sequence and
             // root-key MAC. This does not authenticate or switch a session.
