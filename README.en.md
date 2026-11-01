@@ -25,6 +25,8 @@ Overseas  ── ICMP Echo Request (poll or data) ──>  Iran
 Overseas  <── ICMP Echo Reply (queued data) ────  Iran
 ```
 
+**Both paths are monitored:** While Reverse is active, Iran sends one signed `PTC4` Direct challenge per **60 seconds**, accepting the `PDA4` response only when the MAC, nonce and ICMP ID/sequence match. This is purely a health check: **Reverse remains selected even if Direct works better or faster.**
+
 The overseas VPS originates ICMP Echo Requests. When Iran receives an authenticated request, it sends a matching Echo Reply, carrying queued encrypted traffic when available. Overseas-to-Iran data can travel in the request itself. Polling adapts to real traffic activity: it becomes more responsive during active transfers and backs off when idle. Version 3.3.15 reduces the synthetic Reverse poll ceiling from 500 to **100 per second** and idle polling to about **1 per second**; synthetic polls coinciding with real encrypted outbound DATA are coalesced. This may reduce peak throughput on packet-hungry links and needs field testing.
 
 **2. Direct — fallback after sustained Reverse-path failure**
