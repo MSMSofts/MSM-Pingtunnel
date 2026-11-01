@@ -43,6 +43,7 @@ const (
     // user traffic: only signed replies prove that Iran's userspace is alive
     // AND that its Echo Reply can reach Foreign.
     reverseDirectProbeInterval = 10 * time.Second
+    directBackgroundProbeInterval = 60 * time.Second
     reverseProofMinInterval = 9 * time.Second
     reverseProofTTL = 25 * time.Second
     reverseSwitchRetryCooldown = 3 * time.Minute
@@ -70,6 +71,8 @@ const (
 var reverseProbeMagic = [4]byte{'P','T','R','4'}
 var reverseProofMagic = [4]byte{'P','R','A','4'}
 var reverseSwitchMagic = [4]byte{'P','T','S','4'}
+var directProbeMagic = [4]byte{'P','T','C','4'}
+var directProofMagic = [4]byte{'P','D','A','4'}
 
 // The 4-byte ID/sequence pairs are scoped to a 25-second challenge lifetime.
 // They are matched against an HMACed nonce; they never change the AEAD keys.
@@ -132,6 +135,11 @@ type reverseTransport struct {
     replayCapacityRejects uint64
     lastValidProbe time.Time
     probeChallenges map[uint32]reverseProbeChallenge
+    directProbeChallenges map[uint32]reverseProbeChallenge
+    lastDirectProbe time.Time
+    lastDirectProof time.Time
+    directProbeChecks uint64
+    directPathProofs uint64
     lastProofSent time.Time
     lastProofAt time.Time
     proofConfirmations int
@@ -325,6 +333,9 @@ func (r *reverseTransport) makeProbe(now time.Time) ([]byte,error) {
 func (r *reverseTransport) makeSwitchProbe(now time.Time) ([]byte,error) {
     return r.makeProbeType(now,reverseSwitchMagic)
 }
+func (r *reverseTransport) makeDirectProbe(now time.Time) ([]byte,error) {
+    return r.makeProbeType(now,directProbeMagic)
+}
 func (r *reverseTransport) makeProbeType(now time.Time,magic [4]byte) ([]byte,error) {
     b:=make([]byte,reverseProbeBytes)
     copy(b[:4],magic[:])
@@ -341,11 +352,17 @@ func (r *reverseTransport) authenticateProbe(frame []byte,now time.Time) bool {
     valid,_:=r.authenticateProbeWithSwitch(frame,now)
     return valid
 }
+func (r *reverseTransport) authenticateDirectProbe(frame []byte,now time.Time) bool {
+    if len(frame)!=reverseProbeBytes || !bytes.Equal(frame[:4],directProbeMagic[:]){return false}
+    valid,_:=r.authenticateProbeWithSwitch(frame,now)
+    return valid
+}
 func (r *reverseTransport) authenticateProbeWithSwitch(frame []byte,now time.Time) (valid,switchRequest bool) {
     if len(frame)!=reverseProbeBytes{return false,false}
     isProbe:=bytes.Equal(frame[:4],reverseProbeMagic[:])
     isSwitch:=bytes.Equal(frame[:4],reverseSwitchMagic[:])
-    if !isProbe && !isSwitch{return false,false}
+    isDirect:=bytes.Equal(frame[:4],directProbeMagic[:])
+    if !isProbe && !isSwitch && !isDirect{return false,false}
     seconds:=int64(binary.BigEndian.Uint64(frame[4:12]))
     delta:=now.Unix()-seconds
     if delta<0 {delta=-delta}
@@ -371,7 +388,7 @@ func (r *reverseTransport) authenticateProbeWithSwitch(frame []byte,now time.Tim
         return false,false
     }
     r.recent[nonce]=now
-    r.lastValidProbe=now
+    if !isDirect{r.lastValidProbe=now}
     return true,isSwitch
 }
 
@@ -384,6 +401,59 @@ func (r *reverseTransport) makeProof(probe []byte) []byte {
     tag:=r.mac(reply[:20])
     copy(reply[20:],tag[:16])
     return reply
+}
+func (r *reverseTransport) makeDirectProof(probe []byte) []byte {
+    if len(probe)!=reverseProbeBytes{return nil}
+    reply:=append([]byte(nil),probe...)
+    copy(reply[:4],directProofMagic[:])
+    tag:=r.mac(reply[:20])
+    copy(reply[20:],tag[:16])
+    return reply
+}
+// Low-rate, authenticated Direct reachability check; it never selects
+// Direct or resets the preferred Reverse session while healthy.
+func (r *reverseTransport) shouldProbeDirect(now time.Time,ready bool) bool {
+    r.mu.Lock();defer r.mu.Unlock()
+    if r.preference!=ICMPAuto || r.selected!=ICMPReverse || !ready{return false}
+    if !r.lastDirectProbe.IsZero() && now.Sub(r.lastDirectProbe)<directBackgroundProbeInterval{return false}
+    r.lastDirectProbe=now
+    r.directProbeChecks++
+    return true
+}
+func (r *reverseTransport) stageDirectProbe(id,seq int,probe []byte,now time.Time) {
+    if len(probe)!=reverseProbeBytes{return}
+    r.mu.Lock();defer r.mu.Unlock()
+    if r.preference!=ICMPAuto || r.selected!=ICMPReverse{return}
+    if r.directProbeChallenges==nil{
+        r.directProbeChallenges=make(map[uint32]reverseProbeChallenge)
+    }
+    for key,ch:=range r.directProbeChallenges{
+        if now.Sub(ch.sentAt)>reverseProofTTL{delete(r.directProbeChallenges,key)}
+    }
+    if len(r.directProbeChallenges)>=8{
+        for key:=range r.directProbeChallenges{delete(r.directProbeChallenges,key);break}
+    }
+    var prefix [20]byte
+    copy(prefix[:],probe[:20])
+    r.directProbeChallenges[probeChallengeKey(id,seq)]=reverseProbeChallenge{first20:prefix,sentAt:now}
+}
+func (r *reverseTransport) cancelDirectProbe(id,seq int){
+    r.mu.Lock();delete(r.directProbeChallenges,probeChallengeKey(id,seq));r.mu.Unlock()
+}
+func (r *reverseTransport) acceptDirectProof(id,seq int,reply []byte,now time.Time) bool {
+    if len(reply)!=reverseProbeBytes||!bytes.Equal(reply[:4],directProofMagic[:]){return false}
+    mac:=r.mac(reply[:20])
+    if !hmac.Equal(reply[20:],mac[:16]){return false}
+    r.mu.Lock();defer r.mu.Unlock()
+    if r.preference!=ICMPAuto || r.selected!=ICMPReverse{return false}
+    key:=probeChallengeKey(id,seq)
+    challenge,ok:=r.directProbeChallenges[key]
+    if !ok || now.Before(challenge.sentAt)||now.Sub(challenge.sentAt)>reverseProofTTL{return false}
+    if !hmac.Equal(reply[4:20],challenge.first20[4:20]){return false}
+    delete(r.directProbeChallenges,key)
+    r.directPathProofs++
+    r.lastDirectProof=now
+    return true
 }
 func (r *reverseTransport) allowDirectPathProof(now time.Time) bool {
     r.mu.Lock();defer r.mu.Unlock()
@@ -745,6 +815,9 @@ type reverseDiagnostics struct {
     ReverseSwitchAttempts uint64
     PollRequests uint64
     PollsSkippedByData uint64
+    DirectProbeChecks uint64
+    DirectPathProofs uint64
+    DirectLastProofAgeSeconds int64
     LastSwitchAgeSeconds int64
     LastUsefulFrameAgeSeconds int64
     FallbackCount uint64
@@ -777,6 +850,11 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         outboundAge=int64(d/time.Millisecond)
     }
     avgDelay,p95Delay:=r.queueDelaySummaryLocked()
+    directProofAge:=int64(-1)
+    if !r.lastDirectProof.IsZero(){
+        directProofAge=int64(now.Sub(r.lastDirectProof).Seconds())
+        if directProofAge<0{directProofAge=0}
+    }
     switchAge:=int64(-1)
     if !r.lastSwitch.IsZero(){
         switchAge=int64(now.Sub(r.lastSwitch).Seconds())
@@ -795,6 +873,8 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         PollIntervalMillis:r.pollPeriodMillis,LastUsefulFrameAgeSeconds:age,
         ReverseProofs:r.reverseProofs,ReverseSwitchAttempts:r.reverseSwitchAttempts,
         PollRequests:r.pollRequests,PollsSkippedByData:r.pollsSkippedByData,
+        DirectProbeChecks:r.directProbeChecks,DirectPathProofs:r.directPathProofs,
+        DirectLastProofAgeSeconds:directProofAge,
         LastSwitchAgeSeconds:switchAge,
         FallbackCount:r.fallbackCount,FallbackReason:r.lastFallbackReason,
         OldestQueueAgeMs:oldest,LastQueueDelayMs:r.lastDeliveredQueueDelayMs,
