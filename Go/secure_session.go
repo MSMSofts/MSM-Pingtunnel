@@ -514,6 +514,9 @@ type secureStatus struct{
  ReverseReturnAttempts uint64 `json:"reverse_return_attempts"`
  ReversePollRequests uint64 `json:"reverse_polls_sent"`
  ReversePollsCoalesced uint64 `json:"reverse_polls_coalesced"`
+ DirectProbeChecks uint64 `json:"direct_probe_checks"`
+ DirectPathProofs uint64 `json:"direct_path_proofs"`
+ DirectLastProofAgeSeconds int64 `json:"direct_last_proof_age_seconds"`
  AutoLastSwitchAgeSeconds int64 `json:"auto_last_switch_age_seconds"`
  ICMPFragmentedDatagrams uint64 `json:"icmp_fragmented_datagrams"`
  ICMPReassembledDatagrams uint64 `json:"icmp_reassembled_datagrams"`
@@ -587,6 +590,9 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.ReverseReturnAttempts=diag.ReverseSwitchAttempts
  report.ReversePollRequests=diag.PollRequests
  report.ReversePollsCoalesced=diag.PollsSkippedByData
+ report.DirectProbeChecks=diag.DirectProbeChecks
+ report.DirectPathProofs=diag.DirectPathProofs
+ report.DirectLastProofAgeSeconds=diag.DirectLastProofAgeSeconds
  report.AutoLastSwitchAgeSeconds=diag.LastSwitchAgeSeconds
  report.ICMPFragmentedDatagrams=icmpFragmentedDatagrams.Load()
  report.ICMPReassembledDatagrams=icmpReassembledDatagrams.Load()
