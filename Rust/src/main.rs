@@ -613,6 +613,14 @@ fn show_security_status() -> Result<()> {
         report["reverse_polls_coalesced"].as_u64()) {
         println!("  Signed Reverse polls sent / coalesced into DATA opportunities: {polls} / {saved}");
     }
+    if let (Some(checks),Some(proofs))=(
+        report["direct_probe_checks"].as_u64(),
+        report["direct_path_proofs"].as_u64()) {
+        println!("  Background Direct checks / authenticated replies: {checks} / {proofs} (Reverse stays preferred)");
+        if let Some(age)=report["direct_last_proof_age_seconds"].as_i64().filter(|age|*age>=0){
+            println!("  Last confirmed Direct test reply: {age}s ago");
+        }
+    }
     if let Some(age)=report["auto_last_switch_age_seconds"].as_i64().filter(|age|*age>=0) {
         println!("  Last ICMP path switch: {age}s ago");
     }
