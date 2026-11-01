@@ -2,7 +2,7 @@
 
 **تونل ICMP رمزنگاری‌شده میان یک VPS ایران و یک VPS خارج** برای انتقال ترافیک TCP یا UDP، با راه‌اندازی و مدیریت ساده از طریق ابزار Rust و هستهٔ Go.
 
-[English](README.en.md) · [نسخهٔ فعلی: v3.3.13](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.13) · [وضعیت تست‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
+[English](README.en.md) · [نسخهٔ آزمایشی فعلی: v3.3.14](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.14) · [وضعیت تست‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
 
 ## امکانات
 
@@ -38,7 +38,7 @@ Pingtunnel **خودش VPN Server نیست**؛ ترافیک کاربر در ای�
 
 **۳. بازگشت محافظت‌شده به Reverse**
 
-پس از ورود به Direct، برنامه وضعیت مسیر Reverse را به‌طور کنترل‌شده بررسی می‌کند. وقتی شرایط بازیابی و احراز هویت فراهم باشد، می‌تواند دوباره به مسیر ترجیحی Reverse برگردد. حداقل فاصله بین تغییر مسیرها برای جلوگیری از جابه‌جایی پیاپی در نظر گرفته شده است. تغییر جهت ممکن است نیازمند مذاکرهٔ مجدد نشست باشد؛ بنابراین **سوییچ کاملاً بدون وقفه تضمین نمی‌شود**.
+پس از ورود به Direct، برنامه وضعیت مسیر Reverse را به‌طور کنترل‌شده بررسی می‌کند. **تا وقتی Direct تبادل رمزنگاری‌شدهٔ سالمی دارد، فقط به‌دلیل ترجیح Reverse مسیر فعال را قطع نمی‌کند؛ پس از اختلال Direct و وجود نیاز واقعی کاربر، مسیر Reverse دوباره بررسی می‌شود.** وقتی شرایط بازیابی و احراز هویت فراهم باشد، می‌تواند دوباره به مسیر ترجیحی Reverse برگردد. حداقل فاصله بین تغییر مسیرها برای جلوگیری از جابه‌جایی پیاپی در نظر گرفته شده است. تغییر جهت ممکن است نیازمند مذاکرهٔ مجدد نشست باشد؛ بنابراین **سوییچ کاملاً بدون وقفه تضمین نمی‌شود**.
 
 تمام این فرایندها **در هستهٔ Go و بدون تغییر دستی کلید Pairing، پورت سرویس یا تنظیمات Exclave/Hysteria 2** انجام می‌شوند. وضعیت جهت فعلی و شمارنده‌های بازیابی را می‌توان با `sudo pingtunnel security` مشاهده کرد.
 
@@ -85,6 +85,8 @@ ICMP Echo Request / Echo Reply (Reverse یا Direct)
 
 ## نصب سریع
 
+> **وضعیت انتشار:** این نسخه یک **Preview** برای اصلاح بازیابی یک‌طرفهٔ ICMP است. تست‌های CI کافی برای اثبات پایداری شبکهٔ واقعی نیستند؛ برای سرورهای عملیاتی قبل از ارتقا، پشتیبان بگیرید و هر دو VPS را هماهنگ ارتقا دهید.
+
 ### ⚠️ بسیار مهم: حتماً ابتدا نصب و راه‌اندازی را روی سرور خارج انجام دهید
 
 > **ترتیب نصب اولیه را رعایت کنید: ۱) سرور خارج → ۲) سرور ایران.**
@@ -96,7 +98,7 @@ ICMP Echo Request / Echo Reply (Reverse یا Direct)
 ابتدا از طریق SSH به **سرور خارج** متصل شوید و نصب را اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.13/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.14/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -108,7 +110,7 @@ sudo pingtunnel setup
 **فقط پس از تکمیل مرحلهٔ خارج** به سرور ایران متصل شوید و اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.13/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.14/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
