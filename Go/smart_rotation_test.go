@@ -17,6 +17,10 @@ func TestSmartRotationThreeHoursKeepsAuthenticatedTraffic(t *testing.T) {
     if err=foreign.BindRegion("foreign");err!=nil{t.Fatal(err)}
     if err=iran.BindICMPDirection("auto");err!=nil{t.Fatal(err)}
     if err=foreign.BindICMPDirection("auto");err!=nil{t.Fatal(err)}
+    // BindICMPDirection normally uses wall-clock time; use our deterministic
+    // timeline here so the exact three-hour boundary is testable.
+    iran.reverse.started=start
+    foreign.reverse.started=start
     h1,err:=iran.SecureControl(start);if err!=nil{t.Fatal(err)}
     h2,err:=foreign.ReceiveSecureControl(h1,start);if err!=nil{t.Fatal(err)}
     h3,err:=iran.ReceiveSecureControl(h2,start);if err!=nil{t.Fatal(err)}
