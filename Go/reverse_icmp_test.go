@@ -318,3 +318,40 @@ func TestFailedOrStaleReverseProbesNeverInterruptDirect(t *testing.T){
         t.Fatal("one-way health checks changed direction")
     }
 }
+
+func TestScheduledDirectProbeDoesNotDisturbHealthyPriorityReverse(t *testing.T) {
+    start:=time.Unix(1855000000,0)
+    key:=bytes.Repeat([]byte{0x61},32)
+    iran,_:=newReverseTransport(ICMPAuto,key,start)
+    foreign,_:=newReverseTransport(ICMPAuto,key,start)
+    if iran.shouldProbeDirect(start,false){t.Fatal("pre-handshake Direct probe sent")}
+    if !iran.shouldProbeDirect(start,true){t.Fatal("healthy Reverse did not schedule Direct check")}
+    if iran.shouldProbeDirect(start.Add(30*time.Second),true){t.Fatal("Direct check exceeded 1/minute")}
+    probe,e:=iran.makeDirectProbe(start);if e!=nil{t.Fatal(e)}
+    id,seq:=0x42a6,42
+    iran.stageDirectProbe(id,seq,probe,start)
+    if !foreign.authenticateDirectProbe(probe,start){t.Fatal("HMACed Direct probe rejected")}
+    proof:=foreign.makeDirectProof(probe)
+    forged:=bytes.Clone(proof);forged[29]^=0x01
+    if iran.acceptDirectProof(id,seq,forged,start){t.Fatal("forged Direct proof accepted")}
+    if iran.acceptDirectProof(id,seq+1,proof,start){t.Fatal("unmatched Direct proof accepted")}
+    if !iran.acceptDirectProof(id,seq,proof,start.Add(80*time.Millisecond)){
+        t.Fatal("paired Direct return path proof rejected")
+    }
+    if iran.acceptDirectProof(id,seq,proof,start.Add(time.Second)){
+        t.Fatal("Direct proof replay accepted")
+    }
+    if iran.direction()!=ICMPReverse || foreign.direction()!=ICMPReverse {
+        t.Fatal("background Direct check switched away from healthy Reverse")
+    }
+    d:=iran.diagnostics(start.Add(time.Second))
+    if d.DirectProbeChecks!=1||d.DirectPathProofs!=1||
+        d.DirectLastProofAgeSeconds!=0 {
+        t.Fatalf("Direct check telemetry wrong: %+v",d)
+    }
+    if !iran.shouldProbeDirect(start.Add(60*time.Second),true){t.Fatal("Direct check not periodic")}
+    if !iran.choose(ICMPDirect,start.Add(130*time.Second)){t.Fatal("setup Direct")}
+    if iran.shouldProbeDirect(start.Add(190*time.Second),true){
+        t.Fatal("Direct health check ran as synthetic traffic on Direct")
+    }
+}
