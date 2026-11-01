@@ -389,6 +389,22 @@ func (p *Client) Run() error {
                     nextPingAt=now
                 }
             }
+            if p.cryptoConfig!=nil && p.cryptoConfig.reverse!=nil &&
+                p.cryptoConfig.reverse.shouldProbeDirect(now,p.cryptoConfig.SecureReady()) {
+                // A single signed probe per minute checks Direct while
+                // Reverse remains absolutely preferred and untouched.
+                // Unlike a new transport session this carries no user data.
+                if peer:=p.serverIP.Load();peer!=nil {
+                    probe,err:=p.cryptoConfig.reverse.makeDirectProbe(now)
+                    if err==nil {
+                        seq:=p.nextSequence()
+                        p.cryptoConfig.reverse.stageDirectProbe(p.id,seq,probe,now)
+                        if !emitEcho(*p.conn,peer,8,p.id,seq,probe) {
+                            p.cryptoConfig.reverse.cancelDirectProbe(p.id,seq)
+                        }
+                    }
+                }
+            }
             if p.cryptoConfig!=nil {p.cryptoConfig.WriteSecureStatus("/run/pingtunnel-security.json")}
             if p.cryptoConfig!=nil {FlushPendingICMP(*p.conn,p.cryptoConfig)}
             // A signed Reverse poll proves only that Foreign->Iran ICMP
