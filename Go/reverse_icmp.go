@@ -369,7 +369,8 @@ func (r *reverseTransport) acceptReverseSwitchProof(id,seq int,reply []byte,now 
     delete(r.probeChallenges,key)
     return true
 }
-// Reverse is the preferred route. Direct is permitted only after sustained
+// Emergency Reverse outage handling is independent of Smart Rotation.
+ // Direct is permitted on sustained authenticated Reverse failure,
 // *local user demand* and independently observed reverse-path failure.
 // The authenticated reverse polls are important: an idle AEAD session can
 // legitimately have no DATA for many minutes while the route stays healthy.
