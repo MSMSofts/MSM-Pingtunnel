@@ -129,7 +129,8 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
 func isReflectedReversePoll(crypto *CryptoConfig, icmpType byte, data []byte) bool {
     return crypto!=nil && crypto.sec!=nil && crypto.sec.region=="foreign" &&
         icmpType==0 && len(data)==reverseProbeBytes &&
-        stdbytes.Equal(data[:len(reverseProbeMagic)],reverseProbeMagic[:])
+        (stdbytes.Equal(data[:len(reverseProbeMagic)],reverseProbeMagic[:]) ||
+         stdbytes.Equal(data[:len(reverseSwitchMagic)],reverseSwitchMagic[:]))
 }
 
 // Unlike PTR4 reflections, PTD4 Echo Replies can also be genuine encrypted
