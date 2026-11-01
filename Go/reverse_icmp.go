@@ -221,12 +221,16 @@ func (r *reverseTransport) fallbackDirect(now time.Time, ready bool, lastAuthent
  reason:=""
  if r.preference==ICMPAuto && r.selected==ICMPReverse && activeDemand {
      if ready {
-         // Once established, neither an idle application nor a single
-         // missing reply can override a continuously verified reverse path.
+         // Authenticated Reverse polls verify only Foreign -> Iran Echo
+         // REQUEST delivery. They do not prove our Echo REPLIES or encrypted
+         // DATA reach Foreign. Under sustained real local demand and after
+         // a prolonged lack of ANY authenticated two-way data, allow the
+         // Direct recovery path even when signed polls still arrive.
+         // Without real application demand the route remains unchanged.
          if elapsed>=reverseEstablishedGrace && demandDuration>=reverseAbsentGrace &&
-           probeAge>=reverseEstablishedGrace && authenticatedAge>=reverseEstablishedGrace {
+           authenticatedAge>=reverseEstablishedGrace {
              allowed=true
-             reason="no_authenticated_reverse_traffic_or_polls"
+             reason="no_authenticated_reverse_feedback"
          }
      } else if r.lastValidProbe.IsZero() || probeAge>=reverseAbsentGrace {
          // No authenticated probes at all despite prolonged live demand:
