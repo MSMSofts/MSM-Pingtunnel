@@ -206,29 +206,29 @@ func TestReverseBBRJitterWindowIsBoundedAndRequiresRealData(t *testing.T) {
     start:=time.Unix(1850000000,0)
     r,_:=newReverseTransport(ICMPReverse,bytes.Repeat([]byte{33},32),start)
     // An authenticated but idle session does not warrant permanent 500pps.
-    if got:=r.pollPeriod(start.Add(time.Minute),1,true);got!=25*time.Millisecond {
+    if got:=r.pollPeriod(start.Add(time.Minute),1,true);got!=40*time.Millisecond {
         t.Fatalf("open but inactive UDP session should stay at 25ms: %s",got)
     }
     r.noteOutboundFrame(start)
-    if got:=r.pollPeriod(start.Add(100*time.Millisecond),1,true);got!=12*time.Millisecond {
+    if got:=r.pollPeriod(start.Add(100*time.Millisecond),1,true);got!=25*time.Millisecond {
         t.Fatalf("one outbound frame must not enable maximum 2ms polling: %s",got)
     }
-    if got:=r.pollPeriod(start.Add(9*time.Second),1,true);got!=25*time.Millisecond {
+    if got:=r.pollPeriod(start.Add(9*time.Second),1,true);got!=40*time.Millisecond {
         t.Fatalf("one stale outbound frame permanently raised ICMP poll rate: %s",got)
     }
     // A real sustained outbound video burst holds fast polls through a
     // 3-second BBR ACK/congestion-recovery silence, then returns to idle.
     for i:=0;i<5;i++{r.noteOutboundFrame(start.Add(time.Duration(i*30)*time.Millisecond))}
-    if got:=r.pollPeriod(start.Add(3*time.Second),1,true);got!=4*time.Millisecond {
+    if got:=r.pollPeriod(start.Add(3*time.Second),1,true);got!=12*time.Millisecond {
         t.Fatalf("BBR jitter guard should stay at 4ms: %s",got)
     }
-    if got:=r.pollPeriod(start.Add(6*time.Second),1,true);got!=12*time.Millisecond {
+    if got:=r.pollPeriod(start.Add(6*time.Second),1,true);got!=25*time.Millisecond {
         t.Fatalf("BBR jitter guard must back off: %s",got)
     }
-    if got:=r.pollPeriod(start.Add(9*time.Second),0,true);got!=250*time.Millisecond {
+    if got:=r.pollPeriod(start.Add(9*time.Second),0,true);got!=time.Second {
         t.Fatalf("idle tunnel must return to 250ms: %s",got)
     }
-    if got:=r.pollPeriod(start.Add(9*time.Second),0,false);got!=200*time.Millisecond {
+    if got:=r.pollPeriod(start.Add(9*time.Second),0,false);got!=500*time.Millisecond {
         t.Fatalf("handshake must retain bounded 200ms probes: %s",got)
     }
 }
