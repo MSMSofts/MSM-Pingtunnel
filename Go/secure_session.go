@@ -506,6 +506,15 @@ type secureStatus struct{
  ReverseWriteFailures uint64 `json:"reverse_write_failures"`
  ICMPWriteFailures uint64 `json:"icmp_write_failures"`
  ICMPWriteEMSGSIZE uint64 `json:"icmp_write_emsgsize"`
+ ICMPUserspaceRequests uint64 `json:"icmp_userspace_echo_requests"`
+ ICMPUserspaceReplies uint64 `json:"icmp_userspace_echo_replies"`
+ ICMPCurrentPPS uint64 `json:"icmp_userspace_pps"`
+ ICMPPeakPPS uint64 `json:"icmp_userspace_peak_pps"`
+ ReversePathProofs uint64 `json:"reverse_path_proofs"`
+ ReverseReturnAttempts uint64 `json:"reverse_return_attempts"`
+ ReversePollRequests uint64 `json:"reverse_polls_sent"`
+ ReversePollsCoalesced uint64 `json:"reverse_polls_coalesced"`
+ AutoLastSwitchAgeSeconds int64 `json:"auto_last_switch_age_seconds"`
  ICMPFragmentedDatagrams uint64 `json:"icmp_fragmented_datagrams"`
  ICMPReassembledDatagrams uint64 `json:"icmp_reassembled_datagrams"`
  ICMPFragmentDrop uint64 `json:"icmp_fragment_drops"`
@@ -571,6 +580,14 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.ReverseWriteFailures=diag.FailedReplies
  report.ICMPWriteFailures=icmpWriteErrors.Load()
  report.ICMPWriteEMSGSIZE=icmpMessageTooLong.Load()
+ report.ICMPUserspaceRequests=icmpRequestsSent.Load()
+ report.ICMPUserspaceReplies=icmpRepliesSent.Load()
+ report.ICMPCurrentPPS,report.ICMPPeakPPS=icmpSentRate(time.Now())
+ report.ReversePathProofs=diag.ReverseProofs
+ report.ReverseReturnAttempts=diag.ReverseSwitchAttempts
+ report.ReversePollRequests=diag.PollRequests
+ report.ReversePollsCoalesced=diag.PollsSkippedByData
+ report.AutoLastSwitchAgeSeconds=diag.LastSwitchAgeSeconds
  report.ICMPFragmentedDatagrams=icmpFragmentedDatagrams.Load()
  report.ICMPReassembledDatagrams=icmpReassembledDatagrams.Load()
  report.ICMPFragmentDrop=icmpFragmentDropped.Load()
