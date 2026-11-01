@@ -621,6 +621,18 @@ fn show_security_status() -> Result<()> {
             println!("  Last confirmed Direct test reply: {age}s ago");
         }
     }
+    if let Some(seconds)=report["smart_rotation_interval_seconds"].as_u64().filter(|s|*s>0) {
+        println!("  Smart Rotation: ACTIVE | schedule every {} hours, only if both paths are authenticated/healthy",seconds/3600);
+        println!("  Rotation due: {} | completed: {} | retry windows: {}",
+            report["smart_rotation_due"].as_bool().unwrap_or(false),
+            report["smart_rotation_count"].as_u64().unwrap_or(0),
+            report["smart_rotation_retries"].as_u64().unwrap_or(0));
+        if let Some(reason)=report["smart_rotation_last_reason"].as_str(){
+            println!("  Last path change reason: {reason}");
+        }
+        println!("  Valid Direct return proofs toward next scheduled handoff: {} / 2",
+            report["smart_direct_proof_confirmations"].as_u64().unwrap_or(0));
+    }
     if let Some(age)=report["auto_last_switch_age_seconds"].as_i64().filter(|age|*age>=0) {
         println!("  Last ICMP path switch: {age}s ago");
     }
