@@ -172,22 +172,38 @@ func TestAutoReverseDirectReverseRecoveryWithAuthenticatedHandshakes(t *testing.
     directPacket,e:=iran.Encrypt([]byte("direct-payload"));if e!=nil{t.Fatal(e)}
     directPlain,e:=foreign.Decrypt(directPacket)
     if e!=nil||string(directPlain)!="direct-payload"{t.Fatalf("Direct AEAD traffic failed: %v",e)}
-    if iran.reverse.needsProbe(at,true) || foreign.reverse.needsProbe(at,true) {
-        t.Fatal("healthy Direct should not be interrupted by speculative Reverse polls")
+    if !iran.reverse.needsProbe(at,true) || !foreign.reverse.needsProbe(at,true) {
+        t.Fatal("AUTO must keep checking preferred Reverse even during healthy Direct")
     }
-
-    // Now Direct becomes stale while the local user needs traffic again;
-    // Foreign's bounded poller starts proving the Reverse candidate path.
+    if !iran.SecureReady() || !foreign.SecureReady() || useReverse(iran) || useReverse(foreign) {
+        t.Fatal("mere scheduled probe cannot tear down healthy Direct")
+    }
+    // Foreign probes on a 10s cadence; Iran verifies each signed request
+    // and returns a different signed userspace Echo Reply (PRA4). The
+    // challenge nonce, matched ICMP ID/seq and MAC prove both network legs
+    // without resetting the established Direct AEAD session.
     back:=start.Add(273*time.Second)
-    iran.reverse.noteDemand(back,true)
-    if !foreign.reverse.needsProbe(back,false){t.Fatal("stale Direct did not retry Reverse probing")}
-    probe,e:=foreign.reverse.makeProbe(back);if e!=nil{t.Fatal(e)}
-    if !iran.reverse.authenticateProbe(probe,back){t.Fatal("fresh Reverse probe rejected")}
-    if !iran.reverse.allowReverseCandidate(back,true,iran.sec.lastPeerTraffic()){
-        t.Fatal("stale Direct blocked automatic Reverse candidate")
+    for i:=0;i<2;i++ {
+        moment:=back.Add(time.Duration(-20+i*10)*time.Second)
+        probe,e:=foreign.reverse.makeProbe(moment);if e!=nil{t.Fatal(e)}
+        id,seq:=17061,100+i
+        foreign.reverse.stageProbe(id,seq,probe,moment)
+        if !iran.reverse.authenticateProbe(probe,moment){t.Fatal("fresh Reverse probe rejected")}
+        if !iran.reverse.allowDirectPathProof(moment){t.Fatal("failed to authorize sparse signed proof")}
+        proof:=iran.reverse.makeProof(probe)
+        if !foreign.reverse.acceptProof(id,seq,proof,moment.Add(50*time.Millisecond)){
+            t.Fatal("paired Reverse return-path proof was rejected")
+        }
+        if !iran.SecureReady()||!foreign.SecureReady() {
+            t.Fatal("path probing destroyed healthy Direct AEAD")
+        }
     }
-    iran.sec.resetForTransportChange()
+    if !foreign.reverse.takeSwitchRequest(back){t.Fatal("confirmed Reverse did not receive priority")}
+    switchProbe,e:=foreign.reverse.makeSwitchProbe(back);if e!=nil{t.Fatal(e)}
+    valid,switchIntent:=iran.reverse.authenticateProbeWithSwitch(switchProbe,back)
+    if !valid||!switchIntent{t.Fatal("authenticated PTS4 switch intent rejected")}
     if !iran.reverse.choose(ICMPReverse,back){t.Fatal("Iran failed to return to Reverse after cooldown")}
+    iran.sec.resetForTransportChange()
 
     // Echo Reply ClientHello, Echo Request ServerHello, Echo Reply Finish,
     // Echo Request Ack: same authenticated four-step handshake as startup.

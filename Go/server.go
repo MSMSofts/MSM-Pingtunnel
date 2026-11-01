@@ -881,7 +881,7 @@ func (p *Server) runReversePoller() {
             recent=!last.IsZero() && now.Sub(last)<90*time.Second
         }
         period:=p.cryptoConfig.reverse.pollPeriod(now,int(p.localConnMapSize.Load()),ready)
-        if !useReverse(p.cryptoConfig) {period=10*time.Second}
+        if !useReverse(p.cryptoConfig) {period=reverseDirectProbeInterval}
         if !p.cryptoConfig.reverse.needsProbe(now,recent) {
             // Recheck liveness periodically but avoid unnecessary probes on
             // a healthy Direct connection.
@@ -890,6 +890,14 @@ func (p *Server) runReversePoller() {
             continue
         }
         p.cryptoConfig.reverse.recordPollInterval(period)
+        if useReverse(p.cryptoConfig) && ready && p.cryptoConfig.reverse.recentOutboundData(now) {
+            // Actual Foreign->Iran encrypted DATA is already an Echo
+            // Request and can carry one queued Iran response. Avoid an
+            // unnecessary extra signed PTR4 poll in the same interval.
+            p.cryptoConfig.reverse.notePollSkippedByData()
+            timer.Reset(period)
+            continue
+        }
         sequence:=int(p.reverseSequence.Add(1)&0xffff)
         sendForeignPoll(*p.conn,peer,0x42A5,sequence,p.cryptoConfig,now,recent)
         if useReverse(p.cryptoConfig) && ready &&

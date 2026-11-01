@@ -129,7 +129,8 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
 func isReflectedReversePoll(crypto *CryptoConfig, icmpType byte, data []byte) bool {
     return crypto!=nil && crypto.sec!=nil && crypto.sec.region=="foreign" &&
         icmpType==0 && len(data)==reverseProbeBytes &&
-        stdbytes.Equal(data[:len(reverseProbeMagic)],reverseProbeMagic[:])
+        (stdbytes.Equal(data[:len(reverseProbeMagic)],reverseProbeMagic[:]) ||
+         stdbytes.Equal(data[:len(reverseSwitchMagic)],reverseSwitchMagic[:]))
 }
 
 // Unlike PTR4 reflections, PTD4 Echo Replies can also be genuine encrypted
@@ -260,12 +261,52 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
             if isReflectedReverseDataEcho(cryptoConfig,bytes[0],echoId,echoSeq,payloadData,now) {
                 continue
             }
+            // A low-rate Direct check is sent by Iran while Reverse
+            // remains the preferred authenticated user transport.
+            if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="foreign" &&
+                int(bytes[0])==8 && stdbytes.HasPrefix(payloadData,directProbeMagic[:]) {
+                if cryptoConfig.reverse.authenticateDirectProbe(payloadData,now) {
+                    proof:=cryptoConfig.reverse.makeDirectProof(payloadData)
+                    _=emitEcho(conn,peer,0,echoId,echoSeq,proof)
+                }
+                continue
+            }
             if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="iran" &&
-                int(bytes[0])==8 && stdbytes.HasPrefix(payloadData,reverseProbeMagic[:]) {
-                if cryptoConfig.reverse.authenticateProbe(payloadData,now) {
-                    // A valid incoming probe only proves the inbound leg.
-                    // Count the link alive only after authenticated two-way data.
-                    startReverseHandshake(conn,peer,echoId,echoSeq,cryptoConfig,now)
+                int(bytes[0])==0 && stdbytes.HasPrefix(payloadData,directProofMagic[:]) {
+                cryptoConfig.reverse.acceptDirectProof(echoId,echoSeq,payloadData,now)
+                continue
+            }
+            // Suppress only the foreign kernel's exact PTC4 auto-echo;
+            // it is not a cryptographic proof of userspace reachability.
+            if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="iran" &&
+                int(bytes[0])==0 && stdbytes.HasPrefix(payloadData,directProbeMagic[:]) {
+                continue
+            }
+            // Reverse health proofs are unrelated to AEAD DATA: validate
+            // them against the exact paired challenge, Echo ID/sequence and
+            // root-key MAC. This does not authenticate or switch a session.
+            if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="foreign" &&
+                int(bytes[0])==0 && stdbytes.HasPrefix(payloadData,reverseProofMagic[:]) {
+                cryptoConfig.reverse.acceptProof(echoId,echoSeq,payloadData,now)
+                continue
+            }
+            if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="iran" &&
+                int(bytes[0])==8 &&
+                (stdbytes.HasPrefix(payloadData,reverseProbeMagic[:]) ||
+                 stdbytes.HasPrefix(payloadData,reverseSwitchMagic[:])) {
+                valid,switchRequest:=cryptoConfig.reverse.authenticateProbeWithSwitch(payloadData,now)
+                if valid {
+                    if !switchRequest && !useReverse(cryptoConfig) {
+                        // Authenticated userspace proof of the Reverse reply
+                        // path while the existing Direct AEAD remains live.
+                        // One extra reply per 10s maximum, not per poll.
+                        if cryptoConfig.reverse.allowDirectPathProof(now) {
+                            proof:=cryptoConfig.reverse.makeProof(payloadData)
+                            _=emitEcho(conn,peer,0,echoId,echoSeq,proof)
+                        }
+                    } else {
+                        startReverseHandshake(conn,peer,echoId,echoSeq,cryptoConfig,now,switchRequest)
+                    }
                 }
                 continue
             }

@@ -2,7 +2,7 @@
 
 **A lightweight, encrypted ICMP tunnel between an Iran VPS and an overseas VPS**, forwarding TCP or UDP traffic through a Go core and a simple Rust manager.
 
-[فارسی](README.md) · [Current preview: v3.3.14](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.14) · [CI status](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0 license](LICENSE)
+[فارسی](README.md) · [Current preview: v3.3.15](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.15) · [CI status](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0 license](LICENSE)
 
 ## Features
 
@@ -25,7 +25,9 @@ Overseas  ── ICMP Echo Request (poll or data) ──>  Iran
 Overseas  <── ICMP Echo Reply (queued data) ────  Iran
 ```
 
-The overseas VPS originates ICMP Echo Requests. When Iran receives an authenticated request, it sends a matching Echo Reply, carrying queued encrypted traffic when available. Overseas-to-Iran data can travel in the request itself. Polling adapts to real traffic activity: it becomes more responsive during active transfers and backs off when idle.
+**Both paths are monitored:** While Reverse is active, Iran sends one signed `PTC4` Direct challenge per **60 seconds**, accepting the `PDA4` response only when the MAC, nonce and ICMP ID/sequence match. This is purely a health check: **Reverse remains selected even if Direct works better or faster.**
+
+The overseas VPS originates ICMP Echo Requests. When Iran receives an authenticated request, it sends a matching Echo Reply, carrying queued encrypted traffic when available. Overseas-to-Iran data can travel in the request itself. Polling adapts to real traffic activity: it becomes more responsive during active transfers and backs off when idle. Version 3.3.15 reduces the synthetic Reverse poll ceiling from 500 to **100 per second** and idle polling to about **1 per second**; synthetic polls coinciding with real encrypted outbound DATA are coalesced. This may reduce peak throughput on packet-hungry links and needs field testing.
 
 **2. Direct — fallback after sustained Reverse-path failure**
 
@@ -38,9 +40,17 @@ If Reverse has been unavailable for a sustained period **while local users are a
 
 **3. Guarded recovery to Reverse**
 
-While using Direct, the core checks whether Reverse can be safely re-established. **A healthy authenticated Direct path is retained; Reverse is retried only after genuine local demand and evidence that Direct has degraded, not merely because Reverse is preferred.** After eligibility checks and authenticated negotiation, it can return to its preferred Reverse path. A minimum dwell interval helps prevent repeated route flapping. Direction changes can require session renegotiation, so **seamless switching is not guaranteed**.
+**In AUTO, Reverse always has absolute priority, regardless of speed, RTT or observed Direct stability.** After proven sustained Reverse failure with real local demand, the core uses Direct as a guarded fallback. While Direct remains fully healthy, Foreign checks Reverse **every 10 seconds**. Iran returns a userspace HMAC-authenticated `PRA4` proof without disturbing the Direct AEAD session. Foreign waits for **two independently matched, valid proofs** (challenge nonce and ICMP ID/sequence), enforces a **60-second minimum dwell**, and then sends an authenticated `PTS4` takeover request. Only then does the normal four-message X25519 session handshake switch the channel back to Reverse. If Reverse cannot complete authentication or actual transfer, Direct fallback is retried with cooldown. **Completely interruption-free switching is not guaranteed.**
 
 The process runs **inside the Go core** without manually changing the pairing key, service ports or Exclave/Hysteria 2 configuration. Run `sudo pingtunnel security` to inspect the selected direction and recovery diagnostics.
+
+### Optional, reversible suppression of duplicate kernel Echo Replies
+
+Linux may automatically Echo Reply to a signed `PTR4` / `PTS4` request while the Go core sends a **different** reply carrying queued data or control. `Source/icmp-echo-dedupe.sh` provides a **peer-IP-scoped nftables rule** that discards **only** kernel reflections with the unchanged PTR4/PTS4 prefixes. It does not suppress normal ping responses, signed `PRA4` replies, authenticated `PTH4` handshakes or `PTD4` data.
+
+This script is **never run by the installer or service**. On the Iran VPS only, after reviewing packet captures, use `sudo bash Source/icmp-echo-dedupe.sh show|apply|remove`; nftables is required. Do not enable it blindly as a purported fix for unproven upstream filtering. The scoped rule is not persisted across reboot automatically.
+
+`sudo pingtunnel security` now displays current and peak **userspace-generated** ICMP packet rates, Reverse polls sent/coalesced, authenticated return proofs, and direction-switch attempts. Kernel-generated replies and provider-level network drops are not included.
 
 ## Encryption and authentication flow
 
@@ -98,7 +108,7 @@ These figures are **one real-world observation**, not a controlled benchmark, a 
 Connect to the **overseas VPS** via SSH and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.14/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.15/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -110,7 +120,7 @@ Select **Foreign**, enter the Iran VPS public IPv4 address, choose **TCP or UDP*
 **Only after finishing overseas setup**, connect to the Iran VPS and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.14/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.15/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~

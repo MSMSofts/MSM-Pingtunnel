@@ -248,3 +248,110 @@ func TestReverseReplayCacheCapacityRejectsAreVisible(t *testing.T) {
         t.Fatalf("rejection count is inconsistent: %+v",d)
     }
 }
+
+func TestScheduledReverseProofAuthenticatesBidirectionalPath(t *testing.T){
+    start:=time.Unix(1850000000,0)
+    key:=bytes.Repeat([]byte{0x41},32)
+    foreign,_:=newReverseTransport(ICMPAuto,key,start)
+    iran,_:=newReverseTransport(ICMPAuto,key,start)
+    switched:=start.Add(100*time.Second)
+    if !foreign.choose(ICMPDirect,switched)||!iran.choose(ICMPDirect,switched){t.Fatal("setup Direct")}
+    if !foreign.needsProbe(switched,true){t.Fatal("healthy Direct disabled periodic Reverse probes")}
+    for i:=0;i<2;i++ {
+        now:=switched.Add(time.Duration(10+i*10)*time.Second)
+        probe,err:=foreign.makeProbe(now);if err!=nil{t.Fatal(err)}
+        id,seq:=0x42a5,20+i
+        foreign.stageProbe(id,seq,probe,now)
+        valid,sw:=iran.authenticateProbeWithSwitch(probe,now)
+        if !valid||sw{t.Fatal("valid ordinary probe rejected or upgraded to switch")}
+        if !iran.allowDirectPathProof(now){t.Fatal("sparse Direct health proof denied")}
+        proof:=iran.makeProof(probe)
+        forged:=bytes.Clone(proof);forged[len(forged)-1]^=1
+        if foreign.acceptProof(id,seq,forged,now){t.Fatal("forged path proof accepted")}
+        if foreign.acceptProof(id,seq+1,proof,now){t.Fatal("unmatched ICMP sequence proof accepted")}
+        if !foreign.acceptProof(id,seq,proof,now.Add(50*time.Millisecond)){
+            t.Fatal("fresh paired return-path proof rejected")
+        }
+        if foreign.acceptProof(id,seq,proof,now.Add(100*time.Millisecond)){
+            t.Fatal("replayed proof accepted")
+        }
+    }
+    if foreign.takeSwitchRequest(switched.Add(30*time.Second)){
+        t.Fatal("Reverse takeover ignored minimum 60-second Direct dwell")
+    }
+    now:=switched.Add(65*time.Second)
+    // The last proof has expired: demand two recent observations.
+    if foreign.takeSwitchRequest(now){t.Fatal("stale proofs initiated takeover")}
+    for i:=0;i<2;i++ {
+        moment:=now.Add(time.Duration(i*10)*time.Second)
+        probe,_:=foreign.makeProbe(moment)
+        id,seq:=0x42a5,50+i
+        foreign.stageProbe(id,seq,probe,moment)
+        valid,_:=iran.authenticateProbeWithSwitch(probe,moment);if !valid{t.Fatal("new valid probe")}
+        proof:=iran.makeProof(probe)
+        if !foreign.acceptProof(id,seq,proof,moment){t.Fatal("proof refused")}
+    }
+    at:=now.Add(11*time.Second)
+    if !foreign.takeSwitchRequest(at){t.Fatal("no scheduled preferred Reverse switch")}
+    if foreign.takeSwitchRequest(at.Add(time.Second)){t.Fatal("duplicate switch without proof")}
+    switchProbe,err:=foreign.makeSwitchProbe(at);if err!=nil{t.Fatal(err)}
+    valid,sw:=iran.authenticateProbeWithSwitch(switchProbe,at)
+    if !valid||!sw{t.Fatal("valid signed switch probe rejected")}
+    if iran.authenticateProbe(switchProbe,at){t.Fatal("replayed switch accepted")}
+    if !iran.choose(ICMPReverse,at){t.Fatal("Reverse priority not restored")}
+}
+func TestFailedOrStaleReverseProbesNeverInterruptDirect(t *testing.T){
+    start:=time.Unix(1850001000,0)
+    key:=bytes.Repeat([]byte{0x42},32)
+    foreign,_:=newReverseTransport(ICMPAuto,key,start)
+    iran,_:=newReverseTransport(ICMPAuto,key,start)
+    at:=start.Add(80*time.Second)
+    if !foreign.choose(ICMPDirect,at)||!iran.choose(ICMPDirect,at){t.Fatal("setup Direct")}
+    for n:=1;n<=1000;n++{
+        now:=at.Add(time.Duration(n)*time.Second)
+        // Signed request arrival at Iran proves only Foreign -> Iran.
+        p,_:=foreign.makeProbe(now)
+        if !iran.authenticateProbe(p,now){t.Fatal("signed probe rejected")}
+        if foreign.takeSwitchRequest(now){t.Fatal("one-way probes took over live Direct")}
+    }
+    if foreign.direction()!=ICMPDirect||iran.direction()!=ICMPDirect{
+        t.Fatal("one-way health checks changed direction")
+    }
+}
+
+func TestScheduledDirectProbeDoesNotDisturbHealthyPriorityReverse(t *testing.T) {
+    start:=time.Unix(1855000000,0)
+    key:=bytes.Repeat([]byte{0x61},32)
+    iran,_:=newReverseTransport(ICMPAuto,key,start)
+    foreign,_:=newReverseTransport(ICMPAuto,key,start)
+    if iran.shouldProbeDirect(start,false){t.Fatal("pre-handshake Direct probe sent")}
+    if !iran.shouldProbeDirect(start,true){t.Fatal("healthy Reverse did not schedule Direct check")}
+    if iran.shouldProbeDirect(start.Add(30*time.Second),true){t.Fatal("Direct check exceeded 1/minute")}
+    probe,e:=iran.makeDirectProbe(start);if e!=nil{t.Fatal(e)}
+    id,seq:=0x42a6,42
+    iran.stageDirectProbe(id,seq,probe,start)
+    if !foreign.authenticateDirectProbe(probe,start){t.Fatal("HMACed Direct probe rejected")}
+    proof:=foreign.makeDirectProof(probe)
+    forged:=bytes.Clone(proof);forged[29]^=0x01
+    if iran.acceptDirectProof(id,seq,forged,start){t.Fatal("forged Direct proof accepted")}
+    if iran.acceptDirectProof(id,seq+1,proof,start){t.Fatal("unmatched Direct proof accepted")}
+    if !iran.acceptDirectProof(id,seq,proof,start.Add(80*time.Millisecond)){
+        t.Fatal("paired Direct return path proof rejected")
+    }
+    if iran.acceptDirectProof(id,seq,proof,start.Add(time.Second)){
+        t.Fatal("Direct proof replay accepted")
+    }
+    if iran.direction()!=ICMPReverse || foreign.direction()!=ICMPReverse {
+        t.Fatal("background Direct check switched away from healthy Reverse")
+    }
+    d:=iran.diagnostics(start.Add(time.Second))
+    if d.DirectProbeChecks!=1||d.DirectPathProofs!=1||
+        d.DirectLastProofAgeSeconds!=0 {
+        t.Fatalf("Direct check telemetry wrong: %+v",d)
+    }
+    if !iran.shouldProbeDirect(start.Add(60*time.Second),true){t.Fatal("Direct check not periodic")}
+    if !iran.choose(ICMPDirect,start.Add(130*time.Second)){t.Fatal("setup Direct")}
+    if iran.shouldProbeDirect(start.Add(190*time.Second),true){
+        t.Fatal("Direct health check ran as synthetic traffic on Direct")
+    }
+}
