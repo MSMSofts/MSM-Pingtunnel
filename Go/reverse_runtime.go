@@ -131,7 +131,7 @@ func startReverseHandshake(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *C
     replyReverse(conn,peer,id,seq,c)
 }
 
-func sendForeignPoll(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoConfig,now time.Time,recentlyAuthenticated bool) {
+func sendForeignPoll(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoConfig,now time.Time,recentlyAuthenticated bool,activeConnections ...int) {
     if c==nil||c.sec==nil||c.sec.region!="foreign"||c.reverse==nil {return}
     authenticated:=recentlyAuthenticated
     // A long-idle authenticated direct link is not automatically considered
@@ -140,8 +140,9 @@ func sendForeignPoll(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoC
     // A poll is only a candidate path. Foreign selects Reverse AFTER
     // receiving an authenticated ClientHello inside the matching Echo Reply.
     last:=c.sec.lastPeerTraffic()
-    emergency:=c.SecureReady() && !last.IsZero() && now.Sub(last)>=150*time.Second &&
-        !recentlyAuthenticated
+    demand:=len(activeConnections)>0 && activeConnections[0]>0
+    emergency:=c.SecureReady() && demand && !last.IsZero() &&
+        now.Sub(last)>=150*time.Second && !recentlyAuthenticated
     switchRequest:=c.reverse.takeSwitchRequest(now,emergency)
     var probe []byte
     var err error
