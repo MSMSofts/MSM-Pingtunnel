@@ -162,7 +162,18 @@ func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr,
  if peer==nil||len(encrypted)==0{return}
  if useReverse(crypto) {
   if crypto.sec.region=="iran" {
-   crypto.reverse.enqueue(encrypted,time.Now())
+   now:=time.Now()
+   if crypto.reverse.enqueue(encrypted,now) &&
+       crypto.SecureReady() && crypto.reverse.allowBacklogWake(now) {
+       // This single signed hint is generated only for genuine queued
+       // encrypted DATA. It carries no user content and cannot change
+       // direction, AEAD keys or the Smart Rotation state machine.
+       if wake,err:=crypto.reverse.makeBacklogWake(now);err==nil {
+           if emitEcho(conn,peer,8,id,sequence,wake) {
+               crypto.reverse.noteBacklogWakeSent()
+           }
+       }
+   }
    return
   }
   proto=8
@@ -259,6 +270,28 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
             // encrypted DATA/QUIC ACKs also start with PTD4. Reject only
             // an exact reflection of our own recent outbound ciphertext.
             if isReflectedReverseDataEcho(cryptoConfig,bytes[0],echoId,echoSeq,payloadData,now) {
+                continue
+            }
+            // An Iran-origin PTW4 is a short, root-HMAC-authenticated
+            // notification that Reverse DATA has entered the Iran FIFO.
+            // The foreign poller wakes immediately instead of sleeping for
+            // up to 1s at the conservative 1Hz idle cadence. Invalid or
+            // replayed hints are ignored; no switch/rekey/application
+            // data is performed on this control frame.
+            if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="foreign" &&
+                int(bytes[0])==8 && stdbytes.HasPrefix(payloadData,reverseWakeMagic[:]) {
+                if useReverse(cryptoConfig) && cryptoConfig.SecureReady() &&
+                    cryptoConfig.reverse.authenticateBacklogWake(payloadData,now) {
+                    cryptoConfig.reverse.noteAuthenticatedBacklogWake(now)
+                }
+                continue
+            }
+            // Discard only the kernel reflection of our own PTW4 request
+            // on Iran. A reflection cannot be treated as peer application
+            // DATA or a valid proof of the Reverse response route.
+            if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="iran" &&
+                int(bytes[0])==0 && len(payloadData)==reverseProbeBytes &&
+                stdbytes.HasPrefix(payloadData,reverseWakeMagic[:]) {
                 continue
             }
             // Session-preserving, HMACed three-hour Reverse->Direct handoff.
