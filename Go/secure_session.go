@@ -514,6 +514,10 @@ type secureStatus struct{
  ReverseReturnAttempts uint64 `json:"reverse_return_attempts"`
  ReversePollRequests uint64 `json:"reverse_polls_sent"`
  ReversePollsCoalesced uint64 `json:"reverse_polls_coalesced"`
+ ReverseBacklogWakesSent uint64 `json:"reverse_backlog_wakes_sent"`
+ ReverseBacklogWakesAccepted uint64 `json:"reverse_backlog_wakes_accepted"`
+ ReverseBacklogWakesRateLimited uint64 `json:"reverse_backlog_wakes_rate_limited"`
+ ReverseWakeBurstRemainingMs int64 `json:"reverse_wake_burst_remaining_ms"`
  DirectProbeChecks uint64 `json:"direct_probe_checks"`
  DirectPathProofs uint64 `json:"direct_path_proofs"`
  DirectLastProofAgeSeconds int64 `json:"direct_last_proof_age_seconds"`
@@ -596,6 +600,10 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.ReverseReturnAttempts=diag.ReverseSwitchAttempts
  report.ReversePollRequests=diag.PollRequests
  report.ReversePollsCoalesced=diag.PollsSkippedByData
+ report.ReverseBacklogWakesSent=diag.BacklogWakeSent
+ report.ReverseBacklogWakesAccepted=diag.BacklogWakeAccepted
+ report.ReverseBacklogWakesRateLimited=diag.BacklogWakeRateLimited
+ report.ReverseWakeBurstRemainingMs=diag.BacklogWakeActiveMs
  report.DirectProbeChecks=diag.DirectProbeChecks
  report.DirectPathProofs=diag.DirectPathProofs
  report.DirectLastProofAgeSeconds=diag.DirectLastProofAgeSeconds
