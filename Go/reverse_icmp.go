@@ -642,18 +642,39 @@ func (r *reverseTransport) acceptProof(id,seq int,reply []byte,now time.Time) bo
 }
 // Call on the foreign poller only, after two separate successful proofs.
 // Never reset the healthy Direct AEAD session merely due to a timer.
-func (r *reverseTransport) takeSwitchRequest(now time.Time) bool {
+// Foreign schedules Direct->Reverse after three hours when both paths are
+// proven, or earlier only on a sustained Direct outage with local demand.
+// Once a signed takeover is started, retry every 2s for up to 30s in case
+// the matching PTA4 ACK was lost. No half-verified path can force a switch.
+func (r *reverseTransport) takeSwitchRequest(now time.Time,emergency ...bool) bool {
     r.mu.Lock();defer r.mu.Unlock()
-    if r.preference!=ICMPAuto || r.selected!=ICMPDirect ||
-        r.proofConfirmations<reverseRequiredProofs ||
+    if r.preference!=ICMPAuto || r.selected!=ICMPDirect{return false}
+    if !r.lastSwitch.IsZero() && now.Sub(r.lastSwitch)<reverseMinDwell{return false}
+    if r.pendingReverseSwitch {
+        if now.Sub(r.lastSwitchAttempt)>smartRotationRetryWindow {
+            r.pendingReverseSwitch=false
+            r.proofConfirmations=0
+            r.lastSwitchAttempt=now
+            r.rotationRetryCount++
+            return false
+        }
+        if now.Sub(r.reverseSwitchAttemptAt)<smartRotationRetryInterval{return false}
+        r.reverseSwitchAttemptAt=now
+        r.reverseSwitchRetries++
+        return true
+    }
+    urgent:=len(emergency)>0 && emergency[0]
+    if !r.rotationDueLocked(now) && !urgent{return false}
+    if r.proofConfirmations<reverseRequiredProofs ||
         r.lastProofAt.IsZero() || now.Sub(r.lastProofAt)>reverseProofTTL ||
-        (!r.lastSwitch.IsZero() && now.Sub(r.lastSwitch)<reverseMinDwell) ||
         (!r.lastSwitchAttempt.IsZero() && now.Sub(r.lastSwitchAttempt)<reverseSwitchRetryCooldown) {
         return false
     }
     r.lastSwitchAttempt=now
+    r.reverseSwitchAttemptAt=now
     r.reverseSwitchAttempts++
     r.proofConfirmations=0
+    r.pendingReverseSwitch=true
     return true
 }
 func (r *reverseTransport) notePollSent(){
