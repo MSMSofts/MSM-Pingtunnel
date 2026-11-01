@@ -373,18 +373,29 @@ func (p *Client) Run() error {
 
 			now := time.Now()
             p.adaptive.OnTick(now)
+            // Count only real local application demand. A new/idle process
+            // must not tear down a healthy, quiet encrypted session.
+            hasDemand := p.activeConnCount()>0 ||
+                (p.hasLocalDemand.Load() && now.Sub(p.lastActivity())<30*time.Second)
             if p.cryptoConfig!=nil && p.cryptoConfig.reverse!=nil {
                 r:=p.cryptoConfig.reverse
-                r.noteDemand(now,p.activeConnCount()>0||(p.hasLocalDemand.Load()&&now.Sub(p.lastActivity())<30*time.Second))
+                r.noteDemand(now,hasDemand)
                 if r.fallbackDirect(now,p.cryptoConfig.SecureReady(),p.cryptoConfig.sec.lastPeerTraffic()) {
+                    loggo.Info("Reverse failover: sustained user demand without authenticated two-way ICMP; attempting Direct")
                     p.cryptoConfig.sec.resetForTransportChange()
                     nextPingAt=now
                 }
             }
             if p.cryptoConfig!=nil {p.cryptoConfig.WriteSecureStatus("/run/pingtunnel-security.json")}
             if p.cryptoConfig!=nil {FlushPendingICMP(*p.conn,p.cryptoConfig)}
-            if p.cryptoConfig != nil && !useReverse(p.cryptoConfig) && p.cryptoConfig.RecoverSecureSession(now, p.activeConnCount()>0 || now.Sub(p.lastActivity())<30*time.Second) {
-                loggo.Info("Smart Recovery: restarting authenticated ephemeral session after sustained silence")
+            // A signed Reverse poll proves only that Foreign->Iran ICMP
+            // Requests arrive. It does NOT prove that Iran's encrypted Echo
+            // Replies reach Foreign. Renegotiate after sustained authenticated
+            // silence with real user demand, in Reverse AND Direct modes.
+            // In Reverse, the next authenticated poll carries a fresh X25519
+            // ClientHello inside its matching Echo Reply. No idle reset.
+            if p.cryptoConfig != nil && p.cryptoConfig.RecoverSecureSession(now,hasDemand) {
+                loggo.Info("Smart Recovery: rekeying stale authenticated session after user demand (Reverse/Direct)")
                 nextPingAt=now
             }
             if lastAdaptiveStatus.IsZero() || now.Sub(lastAdaptiveStatus) >= 10*time.Second {
