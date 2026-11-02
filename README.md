@@ -2,7 +2,7 @@
 
 **تونل ICMP رمزنگاری‌شده میان یک VPS ایران و یک VPS خارج** برای انتقال ترافیک TCP یا UDP، با راه‌اندازی و مدیریت ساده از طریق ابزار Rust و هستهٔ Go.
 
-[English](README.en.md) · [نسخهٔ آزمایشی فعلی: v3.3.17](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.17) · [وضعیت تست‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
+[English](README.en.md) · [نسخهٔ آزمایشی فعلی: v3.3.18](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.18) · [وضعیت تست‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
 
 ## امکانات
 
@@ -99,7 +99,7 @@ ICMP Echo Request / Echo Reply (Reverse یا Direct)
 ابتدا از طریق SSH به **سرور خارج** متصل شوید و نصب را اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.17/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.18/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -111,7 +111,7 @@ sudo pingtunnel setup
 **فقط پس از تکمیل مرحلهٔ خارج** به سرور ایران متصل شوید و اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.17/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.18/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
