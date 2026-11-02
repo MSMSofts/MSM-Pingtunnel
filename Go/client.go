@@ -583,7 +583,7 @@ func (p *Client) AcceptTcpConn(conn *net.TCPConn, targetAddr string) {
     perf := p.adaptive.Parameters(p.tcpmode_buffersize, p.tcpmode_maxwin, p.tcpmode_resend_timems)
 	fm := network.NewFrameMgr(FRAME_MAX_SIZE, FRAME_MAX_ID, perf.BufferBytes, perf.Window, perf.ResendMs, p.tcpmode_compress, p.tcpmode_stat)
 	if p.congestion == "bb" {
-		fm.SetCongestion(&network.BBCongestion{})
+		fm.SetCongestion(newBBControl())
 	}
 
 	clientConn := &ClientConn{tcpaddr: tcpsrcaddr, id: uuid, tcpmode: p.tcpmode, activity: make(chan struct{}, 1),
@@ -847,11 +847,11 @@ func (p *Client) Accept() error {
 
 	loggo.Info("client waiting local accept udp")
 
-	bytes := make([]byte, 10240)
+	bytes := make([]byte, udpMaxDatagramBytes)
 
 	for !p.exit.Load() {
 		p.listenConn.SetReadDeadline(time.Now().Add(time.Millisecond * 100))
-		n, srcaddr, err := p.listenConn.ReadFromUDP(bytes)
+		n, srcaddr, truncated, err := readUDPDatagram(p.listenConn, bytes)
 		if err != nil {
 			nerr, ok := err.(net.Error)
 			if !ok || !nerr.Timeout() {
@@ -859,7 +859,8 @@ func (p *Client) Accept() error {
 				continue
 			}
 		}
-		if n <= 0 {
+		if n <= 0 || truncated {
+            if truncated { loggo.Info("drop truncated local UDP datagram") }
 			continue
 		}
 
@@ -1187,12 +1188,12 @@ func (p *Client) recvSock5UDP(relayConn *net.UDPConn, expectedIP net.IP, expecte
 	p.workResultLock.Add(1)
 	defer p.workResultLock.Done()
 
-	bytes := make([]byte, 65535)
+	bytes := make([]byte, udpMaxDatagramBytes)
 	var sourceAddr *net.UDPAddr
 
 	for !p.exit.Load() {
 		relayConn.SetReadDeadline(time.Now().Add(time.Millisecond * 100))
-		n, srcaddr, err := relayConn.ReadFromUDP(bytes)
+		n, srcaddr, truncated, err := readUDPDatagram(relayConn, bytes)
 		if err != nil {
 			nerr, ok := err.(net.Error)
 			if ok && nerr.Timeout() {
@@ -1203,7 +1204,8 @@ func (p *Client) recvSock5UDP(relayConn *net.UDPConn, expectedIP net.IP, expecte
 			}
 			return
 		}
-		if n <= 0 {
+		if n <= 0 || truncated {
+            if truncated { loggo.Info("drop truncated SOCKS5 UDP datagram") }
 			continue
 		}
 

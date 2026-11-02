@@ -264,7 +264,7 @@ func (p *Server) processDataPacketNewConn(id string, packet *Packet) *ServerConn
 		fm := network.NewFrameMgr(FRAME_MAX_SIZE, FRAME_MAX_ID, (int)(packet.my.TcpmodeBuffersize), (int)(packet.my.TcpmodeMaxwin), (int)(packet.my.TcpmodeResendTimems), (int)(packet.my.TcpmodeCompress),
 			(int)(packet.my.TcpmodeStat))
 		if p.congestion == "bb" {
-			fm.SetCongestion(&network.BBCongestion{})
+			fm.SetCongestion(newBBControl())
 		}
 
 		localConn := &ServerConn{timeout: (int)(packet.my.Timeout), tcpconn: c, tcpaddrTarget: ipaddrTarget, id: id, rproto: (int)(packet.my.Rproto), fm: fm, tcpmode: (int)(packet.my.Tcpmode), activity: make(chan struct{}, 1)}
@@ -668,12 +668,12 @@ func (p *Server) Recv(conn *ServerConn, id string, src *net.IPAddr) {
 
 	loggo.Info("server waiting target response %s -> %s %s", conn.udpTargetString(), conn.id, conn.conn.LocalAddr().String())
 
-	bytes := make([]byte, 2000)
+	bytes := make([]byte, udpMaxDatagramBytes)
 
 	for !p.exit.Load() {
 
 		conn.conn.SetReadDeadline(time.Now().Add(time.Millisecond * 100))
-		n, srcAddr, err := conn.conn.ReadFromUDP(bytes)
+		n, srcAddr, truncated, err := readUDPDatagram(conn.conn, bytes)
 		if err != nil {
 			nerr, ok := err.(net.Error)
 			if !ok || !nerr.Timeout() {
@@ -682,7 +682,8 @@ func (p *Server) Recv(conn *ServerConn, id string, src *net.IPAddr) {
 				return
 			}
 		}
-		if n <= 0 {
+		if n <= 0 || truncated {
+            if truncated { loggo.Info("drop truncated target UDP response") }
 			continue
 		}
 
