@@ -583,7 +583,7 @@ func (p *Client) AcceptTcpConn(conn *net.TCPConn, targetAddr string) {
     perf := p.adaptive.Parameters(p.tcpmode_buffersize, p.tcpmode_maxwin, p.tcpmode_resend_timems)
 	fm := network.NewFrameMgr(FRAME_MAX_SIZE, FRAME_MAX_ID, perf.BufferBytes, perf.Window, perf.ResendMs, p.tcpmode_compress, p.tcpmode_stat)
 	if p.congestion == "bb" {
-		fm.SetCongestion(&network.BBCongestion{})
+		fm.SetCongestion(newBBControl())
 	}
 
 	clientConn := &ClientConn{tcpaddr: tcpsrcaddr, id: uuid, tcpmode: p.tcpmode, activity: make(chan struct{}, 1),
