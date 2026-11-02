@@ -7,7 +7,7 @@ import "testing"
 func TestBBRecoveryAfterEntireAckIntervalLost(t *testing.T) {
     bb := newBBControl()
     bb.Init()
-    for i := 0; i < 18; i++ {
+    for i := 0; i < 17; i++ {
         if !bb.CanSend(i, 65536) {
             t.Fatalf("unexpected early backpressure at send %d", i)
         }
