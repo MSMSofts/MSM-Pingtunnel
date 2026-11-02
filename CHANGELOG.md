@@ -1,3 +1,10 @@
+## [3.3.18 preview] — TCP ACK-loss recovery and UDP datagram integrity
+
+- **TCP recovery:** use the upstream loss-safe bandwidth-balancing controller on both endpoints, avoiding permanent window stalls after a fully lost ACK update interval. Includes recovery and healthy-feedback tests.
+- **UDP/QUIC correctness:** expand Iran inbound and Foreign target-response read buffers to 65,535 bytes; preserve full SOCKS5 UDP datagrams. Linux `ReadMsgUDP` now detects `MSG_TRUNC` and discards truncated packets instead of forwarding corrupted prefixes.
+- **Compatibility:** Wire v4, configuration schema 3, existing pairing keys, the Reverse poller, and optional ICMP fragmentation/FEC settings are unchanged. A matched two-peer upgrade is recommended.
+- **CI:** Go unit tests, race detector, Rust tests, Linux AMD64/ARM64 builds, and release manifest/checksums. Laboratory CI does not establish real-world throughput, RTT, or service stability; validate on representative VPS traffic before deployment.
+
 # Changelog / تاریخچه تغییرات
 
 ## [3.3.17 preview] — Lower latency on data-driven Reverse wakeups, bounded busy polling
