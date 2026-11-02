@@ -264,7 +264,7 @@ func (p *Server) processDataPacketNewConn(id string, packet *Packet) *ServerConn
 		fm := network.NewFrameMgr(FRAME_MAX_SIZE, FRAME_MAX_ID, (int)(packet.my.TcpmodeBuffersize), (int)(packet.my.TcpmodeMaxwin), (int)(packet.my.TcpmodeResendTimems), (int)(packet.my.TcpmodeCompress),
 			(int)(packet.my.TcpmodeStat))
 		if p.congestion == "bb" {
-			fm.SetCongestion(&network.BBCongestion{})
+			fm.SetCongestion(newBBControl())
 		}
 
 		localConn := &ServerConn{timeout: (int)(packet.my.Timeout), tcpconn: c, tcpaddrTarget: ipaddrTarget, id: id, rproto: (int)(packet.my.Rproto), fm: fm, tcpmode: (int)(packet.my.Tcpmode), activity: make(chan struct{}, 1)}
