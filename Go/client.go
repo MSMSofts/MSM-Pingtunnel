@@ -847,11 +847,11 @@ func (p *Client) Accept() error {
 
 	loggo.Info("client waiting local accept udp")
 
-	bytes := make([]byte, 10240)
+	bytes := make([]byte, udpMaxDatagramBytes)
 
 	for !p.exit.Load() {
 		p.listenConn.SetReadDeadline(time.Now().Add(time.Millisecond * 100))
-		n, srcaddr, err := p.listenConn.ReadFromUDP(bytes)
+		n, srcaddr, truncated, err := readUDPDatagram(p.listenConn, bytes)
 		if err != nil {
 			nerr, ok := err.(net.Error)
 			if !ok || !nerr.Timeout() {
@@ -859,7 +859,8 @@ func (p *Client) Accept() error {
 				continue
 			}
 		}
-		if n <= 0 {
+		if n <= 0 || truncated {
+            if truncated { loggo.Info("drop truncated local UDP datagram") }
 			continue
 		}
 
@@ -1187,12 +1188,12 @@ func (p *Client) recvSock5UDP(relayConn *net.UDPConn, expectedIP net.IP, expecte
 	p.workResultLock.Add(1)
 	defer p.workResultLock.Done()
 
-	bytes := make([]byte, 65535)
+	bytes := make([]byte, udpMaxDatagramBytes)
 	var sourceAddr *net.UDPAddr
 
 	for !p.exit.Load() {
 		relayConn.SetReadDeadline(time.Now().Add(time.Millisecond * 100))
-		n, srcaddr, err := relayConn.ReadFromUDP(bytes)
+		n, srcaddr, truncated, err := readUDPDatagram(relayConn, bytes)
 		if err != nil {
 			nerr, ok := err.(net.Error)
 			if ok && nerr.Timeout() {
@@ -1203,7 +1204,8 @@ func (p *Client) recvSock5UDP(relayConn *net.UDPConn, expectedIP net.IP, expecte
 			}
 			return
 		}
-		if n <= 0 {
+		if n <= 0 || truncated {
+            if truncated { loggo.Info("drop truncated SOCKS5 UDP datagram") }
 			continue
 		}
 
