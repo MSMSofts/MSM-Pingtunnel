@@ -862,8 +862,9 @@ func (p *Server) updateConnError() {
 
  
 // Keep the reverse leg's ICMP receive opportunities bounded and adaptive.
-// Poll only after direct negotiation has failed (or reverse is configured).
-// The foreign VPS always owns Echo Requests; Iran replies to those requests.
+// Foreign always sends signed Echo Requests while Reverse is active. In
+// Direct fallback it continues a bounded health probe every 10 seconds and
+// retries verified Reverse handoff requests every 2 seconds until matched.
 func (p *Server) runReversePoller() {
     defer failOnUnexpectedWorkerExit("reverse ICMP poller",&p.exit)
     // One adaptive timer instead of a permanent high-frequency ticker:
@@ -891,7 +892,9 @@ func (p *Server) runReversePoller() {
             recent=!last.IsZero() && now.Sub(last)<90*time.Second
         }
         period:=p.cryptoConfig.reverse.pollPeriod(now,int(p.localConnMapSize.Load()),ready)
-        if !useReverse(p.cryptoConfig) {period=reverseDirectProbeInterval}
+        if !useReverse(p.cryptoConfig) {
+            period=p.cryptoConfig.reverse.directMonitorPeriod()
+        }
         if !p.cryptoConfig.reverse.needsProbe(now,recent) {
             // Recheck liveness periodically but avoid unnecessary probes on
             // a healthy Direct connection.
