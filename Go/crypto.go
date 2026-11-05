@@ -140,7 +140,9 @@ func (c *CryptoConfig) WriteSecureStatus(path string){
   reverseProbeAge=c.reverse.probeAge(now)
   diag=c.reverse.diagnostics(now)
  }
- c.sec.writeStatusWithDirection(path,direction,reverseProbeAge,diag)
+ policy:=""
+ if c.reverse!=nil {policy=string(c.reverse.preference)}
+ c.sec.writeStatusWithDirection(path,direction,reverseProbeAge,diag,policy)
 }
 func (c *CryptoConfig) SecureStats()sessionStats{
  if c.sec==nil{return sessionStats{}}
