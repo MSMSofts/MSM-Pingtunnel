@@ -156,6 +156,13 @@ func reverseEchoKindForMessage(msgType uint32) reverseEchoKind {
     }
 }
 
+// Only genuine encrypted application DATA may accelerate Reverse polling.
+// Idle keepalive PING, KICK, and handshake controls never create a PTW4
+// wake burst: the baseline 1Hz timer already provides their opportunity.
+func shouldWakeReverseFromMessage(msgType uint32) bool {
+    return msgType==uint32(MyMsg_DATA)
+}
+
 // Send an already-encrypted payload without re-wrapping MyMsg or allocating
 // a second session sequence. Used for draining authenticated pending packets.
 func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr, proto int, encrypted []byte, crypto *CryptoConfig, msgType uint32) {
@@ -163,7 +170,8 @@ func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr,
  if useReverse(crypto) {
   if crypto.sec.region=="iran" {
    now:=time.Now()
-   if crypto.reverse.enqueue(encrypted,now) &&
+   queued:=crypto.reverse.enqueue(encrypted,now)
+   if queued && shouldWakeReverseFromMessage(msgType) &&
        crypto.SecureReady() && crypto.reverse.allowBacklogWake(now) {
        // This single signed hint is generated only for genuine queued
        // encrypted DATA. It carries no user content and cannot change
