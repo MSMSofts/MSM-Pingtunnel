@@ -558,6 +558,11 @@ type secureStatus struct{
  SmartRotationRetryCount uint64 `json:"smart_rotation_retries"`
  SmartRotationLastReason string `json:"smart_rotation_last_reason,omitempty"`
  SmartDirectProofConfirmations int `json:"smart_direct_proof_confirmations"`
+ AutoRoutePolicy string `json:"auto_route_policy"`
+ AutoPreferredReverseReturns uint64 `json:"auto_preferred_reverse_returns"`
+ AutoReverseProofConfirmations int `json:"auto_reverse_proof_confirmations"`
+ AutoPendingReverseHandoff bool `json:"auto_pending_reverse_handoff"`
+ AutoReverseLastProofAgeMs int64 `json:"auto_reverse_last_proof_age_ms"`
  ICMPFragmentedDatagrams uint64 `json:"icmp_fragmented_datagrams"`
  ICMPReassembledDatagrams uint64 `json:"icmp_reassembled_datagrams"`
  ICMPFragmentDrop uint64 `json:"icmp_fragment_drops"`
@@ -612,7 +617,7 @@ func (s *secureSession) status()secureStatus{
 func (s *secureSession) writeStatus(path string) {
  s.writeStatusWithDirection(path,"direct",-1,reverseDiagnostics{LastUsefulFrameAgeSeconds:-1})
 }
-func (s *secureSession) writeStatusWithDirection(path string,direction string,reverseProbeAge int64,diag reverseDiagnostics) {
+func (s *secureSession) writeStatusWithDirection(path string,direction string,reverseProbeAge int64,diag reverseDiagnostics,policy ...string) {
  report:=s.status()
  report.ICMPDirection=direction
  report.ReverseProbeAgeSeconds=reverseProbeAge
@@ -646,6 +651,17 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.SmartRotationRetryCount=diag.RotationRetryCount
  report.SmartRotationLastReason=diag.LastRotationReason
  report.SmartDirectProofConfirmations=diag.DirectProofConfirmations
+ if len(policy)>0 {
+    switch policy[0] {
+    case "auto":report.AutoRoutePolicy="reverse_preferred_direct_on_failure"
+    case "reverse":report.AutoRoutePolicy="reverse_only"
+    case "direct":report.AutoRoutePolicy="direct_only"
+    }
+ }
+ report.AutoPreferredReverseReturns=diag.PreferredReverseReturns
+ report.AutoReverseProofConfirmations=diag.ReverseProofConfirmations
+ report.AutoPendingReverseHandoff=diag.PendingPreferredReverse
+ report.AutoReverseLastProofAgeMs=diag.LastReverseProofAgeMs
  report.ICMPFragmentedDatagrams=icmpFragmentedDatagrams.Load()
  report.ICMPReassembledDatagrams=icmpReassembledDatagrams.Load()
  report.ICMPFragmentDrop=icmpFragmentDropped.Load()

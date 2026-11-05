@@ -249,7 +249,7 @@ func TestReverseReplayCacheCapacityRejectsAreVisible(t *testing.T) {
     }
 }
 
-func TestScheduledReverseProofAuthenticatesBidirectionalPath(t *testing.T){
+func TestPreferredReverseProofAuthenticatesBidirectionalPath(t *testing.T){
     start:=time.Unix(1850000000,0)
     key:=bytes.Repeat([]byte{0x41},32)
     foreign,_:=newReverseTransport(ICMPAuto,key,start)
@@ -279,27 +279,56 @@ func TestScheduledReverseProofAuthenticatesBidirectionalPath(t *testing.T){
     if foreign.takeSwitchRequest(switched.Add(30*time.Second)){
         t.Fatal("Reverse takeover ignored minimum 60-second Direct dwell")
     }
-    now:=switched.Add(smartRotationInterval-20*time.Second)
-    // The old proof has expired. A rotation needs two NEW proofs near
-    // the scheduled three-hour boundary.
-    if foreign.takeSwitchRequest(now){t.Fatal("stale proofs initiated takeover")}
+    // The previous proofs have expired. Require two NEW matches close
+    // to the end of the Direct stabilization interval.
+    if foreign.takeSwitchRequest(switched.Add(50*time.Second)){
+        t.Fatal("stale proofs initiated takeover")
+    }
     for i:=0;i<2;i++ {
-        moment:=now.Add(time.Duration(i*10)*time.Second)
+        moment:=switched.Add(time.Duration(45+i*10)*time.Second)
         probe,_:=foreign.makeProbe(moment)
         id,seq:=0x42a5,50+i
         foreign.stageProbe(id,seq,probe,moment)
         valid,_:=iran.authenticateProbeWithSwitch(probe,moment);if !valid{t.Fatal("new valid probe")}
+        if !iran.allowDirectPathProof(moment){t.Fatal("Iran rejected fresh roundtrip proof")}
         proof:=iran.makeProof(probe)
-        if !foreign.acceptProof(id,seq,proof,moment){t.Fatal("proof refused")}
+        if !foreign.acceptProof(id,seq,proof,moment.Add(50*time.Millisecond)){t.Fatal("proof refused")}
     }
-    at:=switched.Add(smartRotationInterval+time.Second)
-    if !foreign.takeSwitchRequest(at){t.Fatal("eligible scheduled Reverse switch was not requested")}
-    if foreign.takeSwitchRequest(at.Add(time.Second)){t.Fatal("duplicate switch without proof")}
+    at:=switched.Add(65*time.Second)
+    if !foreign.takeSwitchRequest(at){t.Fatal("verified preferred Reverse did not recover after 65s")}
+    if foreign.directMonitorPeriod()!=smartRotationRetryInterval{
+        t.Fatal("signed takeover must retry every 2 seconds")
+    }
+    if foreign.takeSwitchRequest(at.Add(time.Second)){t.Fatal("duplicate switch too soon")}
     switchProbe,err:=foreign.makeSwitchProbe(at);if err!=nil{t.Fatal(err)}
+    foreign.stageReverseSwitch(0x42a5,200,switchProbe,at)
     valid,sw:=iran.authenticateProbeWithSwitch(switchProbe,at)
     if !valid||!sw{t.Fatal("valid signed switch probe rejected")}
     if iran.authenticateProbe(switchProbe,at){t.Fatal("replayed switch accepted")}
-    if !iran.rotateKeepingSession(ICMPReverse,at,"smart_rotation_to_reverse"){t.Fatal("scheduled Reverse not restored")}
+    if !iran.rotateKeepingSession(ICMPReverse,at,"preferred_reverse_recovered"){
+        t.Fatal("Iran refused preferred Reverse")
+    }
+    forged:=iran.makeSwitchAck(switchProbe,reverseSwitchAckMagic)
+    forged[len(forged)-1]^=1
+    if foreign.acceptReverseSwitchProof(0x42a5,200,forged,at.Add(20*time.Millisecond)){
+        t.Fatal("forged PTA4 handoff ACK accepted")
+    }
+    ack:=iran.makeSwitchAck(switchProbe,reverseSwitchAckMagic)
+    if !foreign.acceptReverseSwitchProof(0x42a5,200,ack,at.Add(50*time.Millisecond)){
+        t.Fatal("signed PTA4 handoff ACK rejected")
+    }
+    if !foreign.rotateKeepingSession(ICMPReverse,at.Add(50*time.Millisecond),"preferred_reverse_recovered"){
+        t.Fatal("Foreign failed to complete preferred Reverse")
+    }
+    if foreign.direction()!=ICMPReverse || iran.direction()!=ICMPReverse {
+        t.Fatal("split routing after verified takeover")
+    }
+    if foreign.directMonitorPeriod()!=reverseDirectProbeInterval{
+        t.Fatal("handoff retry interval remained in force after recovery")
+    }
+    if foreign.diagnostics(at.Add(time.Second)).PreferredReverseReturns!=1 {
+        t.Fatal("preferred Reverse recovery not counted")
+    }
 }
 func TestFailedOrStaleReverseProbesNeverInterruptDirect(t *testing.T){
     start:=time.Unix(1850001000,0)

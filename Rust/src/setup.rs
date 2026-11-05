@@ -133,7 +133,7 @@ pub(crate) fn wizard() -> Result<()> {
     println!("  This server: {region} | Peer: {peer}");
     println!("  Forwarding: {}:{} ({transport})", if region=="iran" { "Iran listen" } else { "Foreign loopback target" }, port);
     println!("  Security: mandatory authenticated auto-AEAD; no plaintext fallback.");
-    println!("  ICMP direction: Auto (Reverse first; Direct after reverse timeout).");
+    println!("  ICMP direction: Auto (Reverse preferred; Direct on sustained outage; signed auto-return).");
     println!("  Auto performance: enabled on Iran; BB congestion in Go.");
     // Always save only after all five answers passed validation.
     store_config(&cfg)?;

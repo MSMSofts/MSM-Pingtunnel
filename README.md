@@ -2,7 +2,7 @@
 
 **تونل ICMP رمزنگاری‌شده میان یک VPS ایران و یک VPS خارج** برای انتقال ترافیک TCP یا UDP، با راه‌اندازی و مدیریت ساده از طریق ابزار Rust و هستهٔ Go.
 
-[English](README.en.md) · [نسخهٔ آزمایشی فعلی: v3.3.19](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.19) · [وضعیت تست‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
+[English](README.en.md) · [نسخهٔ آزمایشی فعلی: v3.3.20](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.20) · [وضعیت تست‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
 
 ## امکانات
 
@@ -26,6 +26,15 @@ Pingtunnel **خودش VPN Server نیست**؛ ترافیک کاربر در ای�
 `sudo pingtunnel security` جهت فعال، تعداد چرخش‌ها، علت آخرین جابه‌جایی، دورهٔ سه‌ساعته، تأییدهای معتبر هر مسیر و نرخ ICMP فضای کاربر را نمایش می‌دهد. نرخ Poll مصنوعی Reverse در انتقال فعال حداکثر حدود **۱۲۵ درخواست در ثانیه** (در حالت بیکار حدود **۱ درخواست در ثانیه**) است؛ این سقف، محدودیت مجموع بسته‌های DATA کاربر نیست.
 
 **مهم:** هدف Smart Rotation توزیع زمانی بار بین دو الگوی ICMP و کاهش احتمال برخورد با محدودیتِ مختص یک جهت است. مجموع ترافیک یا خط‌مشی ناشناختهٔ Anti-DDoS را تغییر نمی‌دهد و تضمینی برای جلوگیری از فیلترینگ وجود ندارد. هر دو VPS باید نسخهٔ جدید را با هم اجرا کنند؛ نسخهٔ قدیمی منطق پیام‌های تأیید چرخش را نمی‌شناسد.
+
+### مسیر خودکار Reverse-first با بازگشت پایدار (3.3.20)
+
+حالت **Auto** همیشه از **معکوس** شروع می‌کند و دیگر صرفاً با گذشت سه ساعت به مستقیم جابه‌جا نمی‌شود. اگر معکوس با وجود تقاضای واقعی برای ارتباط، طی بازهٔ محافظتی طولانی از کار افتاد، مسیر **مستقیم** جایگزین می‌شود. در حالت مستقیم، خارج هر ۱۰ ثانیه مسیر معکوس را با درخواست امضاشده آزمایش می‌کند؛ پس از **دو پاسخ مستقل و معتبر** و رعایت حداقل ۶۰ ثانیه فاصلهٔ جابه‌جایی، بازگشت امضاشده به معکوس انجام می‌شود.
+
+در انتقال داده، برای پیام‌های DATA خارج در حالت معکوس شناسهٔ ICMP مستقل ایجاد می‌شود و بیدارباش فوری فقط برای DATA واقعی فعال می‌شود، نه Pingهای معمول. شمارهٔ Wire، کلید Pairing و قالب پیکربندی ثابت هستند.
+
+مقایسهٔ فنی کامل با هستهٔ اصلی: `docs/ORIGINAL_SEND_COMPARE_REVERSE_FIRST.md`.
+این نسخه **Preview** است و تضمین کاهش پینگ در شبکهٔ واقعی نیست.
 
 ### اصلاح لگ در بازی طولانی (3.3.19)
 
@@ -113,7 +122,7 @@ ICMP Echo Request / Echo Reply (Reverse یا Direct)
 ابتدا از طریق SSH به **سرور خارج** متصل شوید و نصب را اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.19/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.20/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -125,7 +134,7 @@ sudo pingtunnel setup
 **فقط پس از تکمیل مرحلهٔ خارج** به سرور ایران متصل شوید و اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.19/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.20/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~

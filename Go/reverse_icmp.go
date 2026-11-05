@@ -52,11 +52,13 @@ const (
     directBackgroundProbeInterval = 60 * time.Second
     reverseProofMinInterval = 9 * time.Second
     reverseProofTTL = 25 * time.Second
-    reverseSwitchRetryCooldown = 3 * time.Minute
-    // Rotation is measured from the last completed path change (or start).
-    // No change is attempted merely because the clock fired: a valid
-    // independently authenticated return-path proof must also exist.
-    smartRotationInterval = 3 * time.Hour
+    // After a failed takeover retry fresh independent proofs after a
+    // bounded cooldown; do not wait hours while healthy Reverse is back.
+    reverseSwitchRetryCooldown = 30 * time.Second
+    // Auto now has a stable preferred path: Reverse. Never rotate a
+    // healthy Reverse route on a clock. Retain a zero-valued legacy status
+    // field for monitors reading smart_rotation_interval_seconds.
+    smartRotationInterval = 0 * time.Second
     smartDirectProofMaxAge = 95 * time.Second
     smartRotationRetryInterval = 2 * time.Second
     smartRotationRetryWindow = 30 * time.Second
@@ -162,6 +164,7 @@ type reverseTransport struct {
     directRotationSequence uint64
     pendingReverseSwitch bool
     scheduledRotations uint64
+    preferredReverseReturns uint64
     rotationRetryCount uint64
     lastRotationReason string
     directProbeChecks uint64
@@ -293,6 +296,7 @@ func (r *reverseTransport) rotateKeepingSession(direction ICMPDirection,now time
     r.lastSwitch=now
     r.lastRotationReason=reason
     r.scheduledRotations++
+    if direction==ICMPReverse {r.preferredReverseReturns++}
     r.proofConfirmations=0
     r.directProofConfirmations=0
     r.lastProofAt=time.Time{}
@@ -303,41 +307,17 @@ func (r *reverseTransport) rotateKeepingSession(direction ICMPDirection,now time
     r.pendingReverseSwitch=false
     return true
 }
+// Legacy API is deliberately inert: rotating Reverse->Direct on a timer
+// conflicts with the preferred-Reverse policy and causes unnecessary jitter.
+// Direct is selected only by fallbackDirect after a sustained Reverse outage.
 func (r *reverseTransport) rotationDueLocked(now time.Time) bool {
-    since:=r.started
-    if !r.lastSwitch.IsZero(){since=r.lastSwitch}
-    return !now.Before(since)&&now.Sub(since)>=smartRotationInterval
+    return false
 }
 func (r *reverseTransport) rotationDue(now time.Time) bool {
-    r.mu.Lock();defer r.mu.Unlock()
-    return r.preference==ICMPAuto && r.rotationDueLocked(now)
+    return false
 }
-// The Iran side owns Reverse->Direct scheduled moves. A sparse Direct path
-// proof must be recent, from two distinct matched PTC4/PDA4 exchanges.
 func (r *reverseTransport) shouldRequestDirectRotation(now time.Time,ready bool) bool {
-    r.mu.Lock();defer r.mu.Unlock()
-    if r.preference!=ICMPAuto || r.selected!=ICMPReverse || !ready ||
-        !r.rotationDueLocked(now) || r.directProofConfirmations<2 ||
-        r.lastDirectProof.IsZero() || now.Sub(r.lastDirectProof)>smartDirectProofMaxAge {
-        return false
-    }
-    if !r.directRotationRequestedAt.IsZero() {
-        if now.Sub(r.directRotationRequestedAt)>smartRotationRetryWindow {
-            r.directRotationRequestedAt=time.Time{}
-            r.directRotationAttemptAt=now
-            r.directProofConfirmations=0
-            r.rotationRetryCount++
-            return false
-        }
-        if now.Sub(r.directRotationAttemptAt)<smartRotationRetryInterval{return false}
-    } else {
-        if !r.directRotationAttemptAt.IsZero() &&
-            now.Sub(r.directRotationAttemptAt)<smartRotationFailedCooldown {return false}
-        r.directRotationRequestedAt=now
-    }
-    r.directRotationAttemptAt=now
-    r.directRotationSequence++
-    return true
+    return false
 }
 // A pending request keeps the same socket/session as Reverse and retries the
 // HMACed handoff until its paired foreign userspace ACK arrives.
@@ -707,9 +687,10 @@ func (r *reverseTransport) acceptProof(id,seq int,reply []byte,now time.Time) bo
 }
 // Call on the foreign poller only, after two separate successful proofs.
 // Never reset the healthy Direct AEAD session merely due to a timer.
-// Foreign schedules Direct->Reverse after three hours when both paths are
-// proven, or earlier only on a sustained Direct outage with local demand.
-// Once a signed takeover is started, retry every 2s for up to 30s in case
+// Foreign returns Direct->Reverse as soon as it has two independent,
+// fresh authenticated return-path proofs and the minimum dwell is met,
+// even when Direct is working. No timed healthy-path rotation or user
+// demand is needed. Retry every 2s for up to 30s in case
 // the matching PTA4 ACK was lost. No half-verified path can force a switch.
 func (r *reverseTransport) takeSwitchRequest(now time.Time,emergency ...bool) bool {
     r.mu.Lock();defer r.mu.Unlock()
@@ -728,8 +709,8 @@ func (r *reverseTransport) takeSwitchRequest(now time.Time,emergency ...bool) bo
         r.reverseSwitchRetries++
         return true
     }
-    urgent:=len(emergency)>0 && emergency[0]
-    if !r.rotationDueLocked(now) && !urgent{return false}
+    // The optional legacy emergency argument is ignored: only matched,
+    // fresh, independent PRA4 proofs authorize a preferred-route takeover.
     if r.proofConfirmations<reverseRequiredProofs ||
         r.lastProofAt.IsZero() || now.Sub(r.lastProofAt)>reverseProofTTL ||
         (!r.lastSwitchAttempt.IsZero() && now.Sub(r.lastSwitchAttempt)<reverseSwitchRetryCooldown) {
@@ -741,6 +722,16 @@ func (r *reverseTransport) takeSwitchRequest(now time.Time,emergency ...bool) bo
     r.proofConfirmations=0
     r.pendingReverseSwitch=true
     return true
+}
+// During an authenticated PTA4 handoff use bounded 2s retransmission
+// intervals, otherwise a Direct-mode 10s health probe is sufficient.
+func (r *reverseTransport) directMonitorPeriod() time.Duration {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    if r.selected==ICMPDirect && r.pendingReverseSwitch {
+        return smartRotationRetryInterval
+    }
+    return reverseDirectProbeInterval
 }
 func (r *reverseTransport) notePollSent(){
     r.mu.Lock();r.pollRequests++;r.mu.Unlock()
@@ -1042,6 +1033,10 @@ type reverseDiagnostics struct {
     ReverseProofs uint64
     ReverseSwitchAttempts uint64
     ScheduledRotations uint64
+    PreferredReverseReturns uint64
+    ReverseProofConfirmations int
+    PendingPreferredReverse bool
+    LastReverseProofAgeMs int64
     RotationRetryCount uint64
     RotationDue bool
     LastRotationReason string
@@ -1087,6 +1082,12 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         outboundAge=int64(d/time.Millisecond)
     }
     avgDelay,p95Delay:=r.queueDelaySummaryLocked()
+    reverseProofAge:=int64(-1)
+    if !r.lastProofAt.IsZero() {
+        d:=now.Sub(r.lastProofAt)
+        if d<0{d=0}
+        reverseProofAge=int64(d/time.Millisecond)
+    }
     directProofAge:=int64(-1)
     if !r.lastDirectProof.IsZero(){
         directProofAge=int64(now.Sub(r.lastDirectProof).Seconds())
@@ -1113,7 +1114,10 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         ReplayCapacityRejects:r.replayCapacityRejects,
         PollIntervalMillis:r.pollPeriodMillis,LastUsefulFrameAgeSeconds:age,
         ReverseProofs:r.reverseProofs,ReverseSwitchAttempts:r.reverseSwitchAttempts,
-        ScheduledRotations:r.scheduledRotations,RotationRetryCount:r.rotationRetryCount,
+        ScheduledRotations:r.scheduledRotations,PreferredReverseReturns:r.preferredReverseReturns,
+        ReverseProofConfirmations:r.proofConfirmations,PendingPreferredReverse:r.pendingReverseSwitch,
+        LastReverseProofAgeMs:reverseProofAge,
+        RotationRetryCount:r.rotationRetryCount,
         RotationDue:r.rotationDueLocked(now),LastRotationReason:r.lastRotationReason,
         DirectProofConfirmations:r.directProofConfirmations,
         PollRequests:r.pollRequests,PollsSkippedByData:r.pollsSkippedByData,

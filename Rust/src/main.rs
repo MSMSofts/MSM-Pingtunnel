@@ -576,6 +576,18 @@ fn show_security_status() -> Result<()> {
     println!("  Config schema: {} | Wire version: {}",report["config_schema"],report["wire_version"]);
     println!("  Region: {}",report["region"].as_str().unwrap_or("unknown"));
     if let Some(direction)=report["icmp_direction"].as_str(){println!("  ICMP initiation: {direction}");}
+    if report["auto_route_policy"].as_str()==Some("reverse_preferred_direct_on_failure") {
+        println!("  AUTO policy: Reverse preferred, Direct only on confirmed failure");
+        if report["icmp_direction"].as_str()==Some("direct") {
+            println!("  Reverse health check: every 10s; 2 signed return-path proofs required");
+            println!("  Reverse proofs: {} / 2 | last proof age: {} ms | takeover pending: {}",
+                report["auto_reverse_proof_confirmations"].as_u64().unwrap_or(0),
+                report["auto_reverse_last_proof_age_ms"],
+                report["auto_pending_reverse_handoff"].as_bool().unwrap_or(false));
+        }
+        println!("  Verified returns to preferred Reverse: {}",
+            report["auto_preferred_reverse_returns"].as_u64().unwrap_or(0));
+    }
     if let Some(count)=report["auto_direct_fallback_count"].as_u64().filter(|value|*value>0){
         println!("  Emergency Reverse→Direct failovers: {count}");
         if let Some(reason)=report["auto_direct_fallback_reason"].as_str(){
@@ -630,6 +642,8 @@ fn show_security_status() -> Result<()> {
             println!("  Last confirmed Direct test reply: {age}s ago");
         }
     }
+    // Legacy versions expose a nonzero Smart Rotation interval. v3.3.20
+    // explicitly disables healthy Reverse->Direct timer switches.
     if let Some(seconds)=report["smart_rotation_interval_seconds"].as_u64().filter(|s|*s>0) {
         println!("  Smart Rotation: ACTIVE | schedule every {} hours, only if both paths are authenticated/healthy",seconds/3600);
         println!("  Rotation due: {} | completed: {} | retry windows: {}",

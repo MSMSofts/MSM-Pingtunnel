@@ -177,7 +177,8 @@ func (p *Server) processPacket(packet *Packet) {
 		t := time.Time{}
 		t.UnmarshalBinary(packet.my.Data)
 		loggo.Info("ping from %s %s %d %d %d", packet.src.String(), t.String(), packet.my.Rproto, packet.echoId, packet.echoSeq)
-		sendICMP(packet.echoId, packet.echoSeq, *p.conn, packet.src, "", "", (uint32)(MyMsg_PING), packet.my.Data,
+		echoID,echoSeq:=p.applicationEchoIdentity(packet.echoId,packet.echoSeq)
+        sendICMP(echoID,echoSeq, *p.conn, packet.src, "", "", (uint32)(MyMsg_PING), packet.my.Data,
 			(int)(packet.my.Rproto), -1, p.key,
 			0, 0, 0, 0, 0, 0,
 			0, p.cryptoConfig)
@@ -431,7 +432,8 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
 		for e := sendlist.Front(); e != nil; e = e.Next() {
 			f := e.Value.(*network.Frame)
 			mb, _ := conn.fm.MarshalFrame(f)
-			sendICMP(int(conn.echoId.Load()), int(conn.echoSeq.Load()), *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
+			echoID,echoSeq:=p.applicationEchoIdentity(int(conn.echoId.Load()),int(conn.echoSeq.Load()))
+            sendICMP(echoID, echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
 				conn.rproto, -1, p.key, 0,
 				0, 0, 0, 0, 0,
 				0, p.cryptoConfig)
@@ -533,7 +535,8 @@ mainLoop:
 					loggo.Error("Error tcp Marshal %s %s %s", conn.id, conn.tcpaddrTarget.String(), err)
 					continue
 				}
-				sendICMP(int(conn.echoId.Load()), int(conn.echoSeq.Load()), *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
+				echoID,echoSeq:=p.applicationEchoIdentity(int(conn.echoId.Load()),int(conn.echoSeq.Load()))
+            sendICMP(echoID, echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
 					conn.rproto, -1, p.key, 0,
 					0, 0, 0, 0, 0,
 					0, p.cryptoConfig)
@@ -619,7 +622,8 @@ mainLoop:
 		for e := sendlist.Front(); e != nil; e = e.Next() {
 			f := e.Value.(*network.Frame)
 			mb, _ := conn.fm.MarshalFrame(f)
-			sendICMP(int(conn.echoId.Load()), int(conn.echoSeq.Load()), *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
+			echoID,echoSeq:=p.applicationEchoIdentity(int(conn.echoId.Load()),int(conn.echoSeq.Load()))
+            sendICMP(echoID, echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
 				conn.rproto, -1, p.key, 0,
 				0, 0, 0, 0, 0,
 				0, p.cryptoConfig)
@@ -706,7 +710,8 @@ func (p *Server) Recv(conn *ServerConn, id string, src *net.IPAddr) {
 			payload = parsedPayload
 		}
 
-		sendICMP(int(conn.echoId.Load()), int(conn.echoSeq.Load()), *p.conn, src, targetAddr, id, (uint32)(MyMsg_DATA), payload,
+		echoID,echoSeq:=p.applicationEchoIdentity(int(conn.echoId.Load()),int(conn.echoSeq.Load()))
+            sendICMP(echoID, echoSeq, *p.conn, src, targetAddr, id, (uint32)(MyMsg_DATA), payload,
 			conn.rproto, -1, p.key, 0,
 			0, 0, 0, 0, 0,
 			0, p.cryptoConfig)
@@ -822,6 +827,7 @@ func (p *Server) deleteServerConn(uuid string) {
 }
 
 func (p *Server) remoteError(echoId int, echoSeq int, uuid string, rprpto int, src *net.IPAddr) {
+    echoId,echoSeq=p.applicationEchoIdentity(echoId,echoSeq)
 	sendICMP(echoId, echoSeq, *p.conn, src, "", uuid, (uint32)(MyMsg_KICK), []byte{},
 		rprpto, -1, p.key,
 		0, 0, 0, 0, 0, 0, 0,
@@ -862,8 +868,23 @@ func (p *Server) updateConnError() {
 
  
 // Keep the reverse leg's ICMP receive opportunities bounded and adaptive.
-// Poll only after direct negotiation has failed (or reverse is configured).
-// The foreign VPS always owns Echo Requests; Iran replies to those requests.
+// Foreign always sends signed Echo Requests while Reverse is active. In
+// Direct fallback it continues a bounded health probe every 10 seconds and
+// retries verified Reverse handoff requests every 2 seconds until matched.
+// In the original Direct ICMP exchange, Foreign reuses Iran's incoming
+// Echo ID/sequence for the matching Echo Reply. Reverse is different:
+// Foreign initiates Echo Requests itself, so every DATA/PING/KICK request
+// needs its own sequence. Reusing the last Iran reply sequence for all
+// Foreign DATA can look like duplicate ICMP traffic to network middleboxes.
+// Share one atomic sequence generator with the authenticated poller.
+func (p *Server) applicationEchoIdentity(lastID,lastSequence int) (int,int) {
+    if p.cryptoConfig!=nil && p.cryptoConfig.sec!=nil &&
+       p.cryptoConfig.sec.region=="foreign" && useReverse(p.cryptoConfig) {
+        return 0x42A5,int(p.reverseSequence.Add(1)&0xffff)
+    }
+    return lastID,lastSequence
+}
+
 func (p *Server) runReversePoller() {
     defer failOnUnexpectedWorkerExit("reverse ICMP poller",&p.exit)
     // One adaptive timer instead of a permanent high-frequency ticker:
@@ -891,7 +912,9 @@ func (p *Server) runReversePoller() {
             recent=!last.IsZero() && now.Sub(last)<90*time.Second
         }
         period:=p.cryptoConfig.reverse.pollPeriod(now,int(p.localConnMapSize.Load()),ready)
-        if !useReverse(p.cryptoConfig) {period=reverseDirectProbeInterval}
+        if !useReverse(p.cryptoConfig) {
+            period=p.cryptoConfig.reverse.directMonitorPeriod()
+        }
         if !p.cryptoConfig.reverse.needsProbe(now,recent) {
             // Recheck liveness periodically but avoid unnecessary probes on
             // a healthy Direct connection.
@@ -918,6 +941,13 @@ func (p *Server) runReversePoller() {
             // and authenticated Iran->foreign data recently.
             sendICMP(0x42A5,sequence,*p.conn,peer,"","",uint32(MyMsg_PING),nil,
                 8,0,p.key,0,0,0,0,0,0,0,p.cryptoConfig)
+        }
+        // A new PTS4 attempt may have been started by sendForeignPoll.
+        // Re-evaluate after emitting it so the FIRST retransmission comes
+        // after 2s rather than waiting for the ordinary 10s check.
+        if !useReverse(p.cryptoConfig) {
+            period=p.cryptoConfig.reverse.directMonitorPeriod()
+            p.cryptoConfig.reverse.recordPollInterval(period)
         }
         timer.Reset(period)
     }

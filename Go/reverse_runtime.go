@@ -103,12 +103,12 @@ func replyReverse(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoConf
 func startReverseHandshake(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoConfig,now time.Time,switchRequested bool,frameProbe []byte) {
     if c==nil || c.reverse==nil || c.sec==nil || c.sec.region!="iran" {return}
     if c.reverse.preference==ICMPDirect{return}
-    // Scheduled handoff uses a distinct authenticated PTS4 request.
-    // Do not discard active AEAD keys or queued application frames. A
+    // Recovery to preferred Reverse uses a distinct authenticated PTS4
+    // request. Do not discard active AEAD keys or queued frames. A
     // matching PTA4 reply lets Foreign switch only after Iran has agreed.
     if switchRequested && c.SecureReady() {
         if !useReverse(c) {
-            if !c.reverse.rotateKeepingSession(ICMPReverse,now,"smart_rotation_to_reverse"){return}
+            if !c.reverse.rotateKeepingSession(ICMPReverse,now,"preferred_reverse_recovered"){return}
         }
         ack:=c.reverse.makeSwitchAck(frameProbe,reverseSwitchAckMagic)
         if len(ack)>0 {_=emitEcho(conn,peer,0,id,seq,ack)}
@@ -137,13 +137,14 @@ func sendForeignPoll(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoC
     // A long-idle authenticated direct link is not automatically considered
     // offline; real app demand or authenticated link degradation is required.
     if !c.reverse.needsProbe(now,authenticated){return}
-    // A poll is only a candidate path. Foreign selects Reverse AFTER
-    // receiving an authenticated ClientHello inside the matching Echo Reply.
-    last:=c.sec.lastPeerTraffic()
-    demand:=len(activeConnections)>0 && activeConnections[0]>0
-    emergency:=c.SecureReady() && demand && !last.IsZero() &&
-        now.Sub(last)>=150*time.Second && !recentlyAuthenticated
-    switchRequest:=c.reverse.takeSwitchRequest(now,emergency)
+    // While Direct is active, a poll only asks for an independent signed
+    // PRA4 proof; two recent matches permit a PTS4/ PTA4 takeover without
+    // dropping the current session. Neither a poll nor a mere Ping switches
+    // routes. During initial pairing an authenticated ClientHello may select
+    // the negotiated path.
+    // Never hold the preferred-route return hostage to Direct failure
+    // or application activity. Two fresh PRA4 roundtrips are mandatory.
+    switchRequest:=c.reverse.takeSwitchRequest(now)
     var probe []byte
     var err error
     if switchRequest {
