@@ -86,12 +86,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.0'
-      - name: Clone pinned upstream Go core
+      - name: Clone pinned upstream Go 3.1 release core
         run: |
           git clone https://github.com/esrrhs/pingtunnel.git upstream
           cd upstream
-          git checkout --detach df16e52771ee67f1f9770ec68763b425672a36fc
-          test "$(git rev-parse HEAD)" = "df16e52771ee67f1f9770ec68763b425672a36fc"
+          git checkout --detach ec5bae5f74322f3da174b7651bc4cbc6af7558cd
+          test "$(git rev-parse HEAD)" = "ec5bae5f74322f3da174b7651bc4cbc6af7558cd"
       - name: Overlay Go crypto and adaptive performance source
         run: |
           cp Go/*.go upstream/
@@ -151,7 +151,7 @@ jobs:
         run: |
           {
             printf 'release=v3.3.18\nconfig_schema=3\nwire=4\n'
-            printf 'upstream_go=df16e52771ee67f1f9770ec68763b425672a36fc\n'
+            printf 'upstream_go=ec5bae5f74322f3da174b7651bc4cbc6af7558cd\n'
             printf 'source_commit=%s\n' "$GITHUB_SHA"
             (cd dist && sha256sum pingtunnel-core-linux-* pingtunnel-manager-linux-* | grep -v '\.sha256') 
           } > dist/release-manifest.txt
