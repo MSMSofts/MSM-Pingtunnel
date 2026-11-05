@@ -17,7 +17,7 @@ SECURITY_NAMES = {
     "state", "last_valid_age_seconds", "recoveries", "replay_drops",
     "authentication_failures", "pending_packets", "expired_or_overflow_packets",
 }
-SECURITY_PREFIXES = ("icmp_", "reverse_", "smart_", "auto_", "direct_")
+SECURITY_PREFIXES = ("icmp_", "reverse_", "smart_", "auto_", "direct_", "udp_")
 PERF_NAMES = {
     "profile", "rtt_samples", "rtt_ms", "jitter_ms", "probe_loss_estimate",
     "recent_rtt_samples", "recent_rtt_ms", "recent_jitter_ms",
