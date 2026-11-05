@@ -922,6 +922,13 @@ func (p *Server) runReversePoller() {
             sendICMP(0x42A5,sequence,*p.conn,peer,"","",uint32(MyMsg_PING),nil,
                 8,0,p.key,0,0,0,0,0,0,0,p.cryptoConfig)
         }
+        // A new PTS4 attempt may have been started by sendForeignPoll.
+        // Re-evaluate after emitting it so the FIRST retransmission comes
+        // after 2s rather than waiting for the ordinary 10s check.
+        if !useReverse(p.cryptoConfig) {
+            period=p.cryptoConfig.reverse.directMonitorPeriod()
+            p.cryptoConfig.reverse.recordPollInterval(period)
+        }
         timer.Reset(period)
     }
 }
