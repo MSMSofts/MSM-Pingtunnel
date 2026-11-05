@@ -224,7 +224,7 @@ func FlushPendingICMP(conn icmp.PacketConn, crypto *CryptoConfig) {
  }
 }
 
-func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.PacketConn, recv chan<- *Packet, cryptoConfig *CryptoConfig) {
+func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.PacketConn, recv chan<- *Packet, cryptoConfig *CryptoConfig, udpMode ...bool) {
 
 	defer common.CrashLog()
 
@@ -461,18 +461,14 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
         packet := &Packet{my: my,
             src: icmpSrcToIPAddr(srcaddr),
             echoId: echoId, echoSeq: echoSeq}
-        // A blocked dispatcher must not trap the sole ICMP receiver.
-        select {
-        case recv <- packet:
-        default:
-            stalled := time.NewTimer(3 * time.Second)
-            select {
-            case recv <- packet:
-                stalled.Stop()
-            case <-stalled.C:
-                loggo.Error("ICMP dispatcher blocked for 3s; restarting receiver")
-                return
-            }
+        // TCP preserves the established fail-safe dispatcher behavior.
+        // On UDP, forwarding seconds-old backlogged game/QUIC packets
+        // increases latency. Bound the pending queue and drop ONLY UDP DATA
+        // immediately on overflow; keep control messages on the safe path.
+        latencySensitiveUDP := len(udpMode) > 0 && udpMode[0]
+        if !enqueueICMPPacket(recv, packet, latencySensitiveUDP) {
+            loggo.Error("ICMP dispatcher blocked for 3s; restarting receiver")
+            return
         }
 	}
 }
