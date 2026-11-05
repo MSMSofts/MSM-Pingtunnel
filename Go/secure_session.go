@@ -17,7 +17,6 @@ import (
  "os"
  "errors"
  "io"
- "math/big"
  "net"
  "sync"
  "time"
@@ -39,24 +38,53 @@ const(
  secureHeaderSize=4+1+16+8
  replayBits=1024
 )
-type secureReplay struct{
+// A fixed 1024-bit replay window, independent of session lifetime.
+//
+// The previous math/big.Int.Lsh implementation never masked old high bits.
+// Its memory and per-packet CPU cost grew with EVERY authenticated packet,
+// causing progressive latency during long, high-PPS UDP/QUIC sessions.
+// Word shifts run in constant bounded work (16 uint64s) without allocations.
+type secureReplay struct {
  highest uint64
- bits big.Int
+ bits [replayBits / 64]uint64
 }
-func (r *secureReplay) accept(n uint64)bool{
- if n==0{return false}
- if r.highest==0{r.highest=n;r.bits.SetBit(&r.bits,0,1);return true}
- if n>r.highest{
-  delta:=n-r.highest
-  if delta>=replayBits{r.bits.SetInt64(0)}else{r.bits.Lsh(&r.bits,uint(delta))}
-  r.highest=n
-  r.bits.SetBit(&r.bits,0,1)
+func (r *secureReplay) accept(n uint64) bool {
+ if n == 0 { return false }
+ if r.highest == 0 {
+  r.highest = n
+  r.bits[0] = 1
   return true
  }
- delta:=r.highest-n
- if delta>=replayBits{return false}
- if r.bits.Bit(int(delta))!=0{return false}
- r.bits.SetBit(&r.bits,int(delta),1)
+ if n > r.highest {
+  delta := n - r.highest
+  if delta >= replayBits {
+   r.bits = [replayBits / 64]uint64{}
+  } else {
+   words := int(delta / 64)
+   shift := uint(delta % 64)
+   // Traverse high to low so each source word remains intact until read.
+   for i := len(r.bits) - 1; i >= 0; i-- {
+    if i < words {
+     r.bits[i] = 0
+     continue
+    }
+    value := r.bits[i-words] << shift
+    if shift != 0 && i > words {
+     value |= r.bits[i-words-1] >> (64 - shift)
+    }
+    r.bits[i] = value
+   }
+  }
+  r.highest = n
+  r.bits[0] |= 1
+  return true
+ }
+ delta := r.highest - n
+ if delta >= replayBits { return false }
+ word := int(delta / 64)
+ mask := uint64(1) << uint(delta % 64)
+ if r.bits[word]&mask != 0 { return false }
+ r.bits[word] |= mask
  return true
 }
 type sessionKeys struct{
