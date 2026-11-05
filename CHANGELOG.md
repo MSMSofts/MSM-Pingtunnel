@@ -1,3 +1,14 @@
+## [3.3.20 preview] — Reverse-first AUTO and verified failback
+
+- Start and remain on Reverse in Auto; remove the legacy three-hour rotation from a healthy Reverse path to Direct.
+- Preserve sustained-failure Direct fallback and the authenticated X25519/AEAD session rules. Foreign continuously tests Reverse while Direct is active at a bounded 10-second cadence, uses two distinct signed PRA4 return-path proofs, respects a 60-second dwell, and initiates a PTS4/PTA4 matched-acknowledgment handoff back to Reverse even when Direct is healthy.
+- Reduce pending takeover retransmission delay to 2 seconds, with a bounded window/cooldown and no speculative switch on unmatched/forged proofs.
+- Fix reverse foreign DATA sends to use fresh Echo Request sequence numbers; preserve original matching Echo ID/Seq behavior in Direct.
+- Restrict PTW4 immediate wake notices to real application DATA so idle keepalive PING does not cause unnecessary accelerated polls.
+- Expose reverse-first state, verified proof counts, recovery attempts and pending handoff in secure diagnostics and Rust status.
+- Compare historical upstream immediate UDP datagram forwarding to fork Direct/Reverse behavior in `docs/ORIGINAL_SEND_COMPARE_REVERSE_FIRST.md`.
+- No change to Wire v4, config schema 3, pairing keys, UDP-FEC default or manual direct/reverse settings. Real VPS gameplay verification is required.
+
 ## [3.3.19 preview] — Long-session game/QUIC latency and reproducible builds
 
 - Fix the unbounded Wire v4 replay bitmap: use a fixed 1024-bit / 128-byte window instead of shifting an ever-growing `big.Int` after each authenticated frame.
