@@ -617,7 +617,7 @@ func (s *secureSession) status()secureStatus{
 func (s *secureSession) writeStatus(path string) {
  s.writeStatusWithDirection(path,"direct",-1,reverseDiagnostics{LastUsefulFrameAgeSeconds:-1})
 }
-func (s *secureSession) writeStatusWithDirection(path string,direction string,reverseProbeAge int64,diag reverseDiagnostics) {
+func (s *secureSession) writeStatusWithDirection(path string,direction string,reverseProbeAge int64,diag reverseDiagnostics,policy ...string) {
  report:=s.status()
  report.ICMPDirection=direction
  report.ReverseProbeAgeSeconds=reverseProbeAge
@@ -651,7 +651,13 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.SmartRotationRetryCount=diag.RotationRetryCount
  report.SmartRotationLastReason=diag.LastRotationReason
  report.SmartDirectProofConfirmations=diag.DirectProofConfirmations
- report.AutoRoutePolicy="reverse_preferred_direct_on_failure"
+ if len(policy)>0 {
+    switch policy[0] {
+    case "auto":report.AutoRoutePolicy="reverse_preferred_direct_on_failure"
+    case "reverse":report.AutoRoutePolicy="reverse_only"
+    case "direct":report.AutoRoutePolicy="direct_only"
+    }
+ }
  report.AutoPreferredReverseReturns=diag.PreferredReverseReturns
  report.AutoReverseProofConfirmations=diag.ReverseProofConfirmations
  report.AutoPendingReverseHandoff=diag.PendingPreferredReverse
