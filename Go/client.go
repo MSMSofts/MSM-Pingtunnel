@@ -405,22 +405,9 @@ func (p *Client) Run() error {
                     }
                 }
             }
-            if p.cryptoConfig!=nil && p.cryptoConfig.reverse!=nil &&
-                p.cryptoConfig.reverse.shouldRequestDirectRotation(now,p.cryptoConfig.SecureReady()) {
-                // Scheduled switch only when the Direct return path has at
-                // least two fresh signed proofs. Iran remains on Reverse
-                // until a matched foreign userspace PTB4 ACK is received.
-                if peer:=p.serverIP.Load();peer!=nil {
-                    probe,err:=p.cryptoConfig.reverse.makeDirectSwitchProbe(now)
-                    if err==nil {
-                        seq:=p.nextSequence()
-                        p.cryptoConfig.reverse.stageDirectSwitch(p.id,seq,probe,now)
-                        if !emitEcho(*p.conn,peer,8,p.id,seq,probe) {
-                            p.cryptoConfig.reverse.cancelDirectProbe(p.id,seq)
-                        }
-                    }
-                }
-            }
+            // Reverse remains preferred for the entire session. The
+            // authenticated Direct health check above is observation only;
+            // time-based Reverse->Direct switches have been removed.
             if p.cryptoConfig!=nil && p.cryptoConfig.reverse!=nil &&
                 !useReverse(p.cryptoConfig) && p.cryptoConfig.SecureReady() {
                 // Scheduled rotation keeps the same AEAD session. Forward
