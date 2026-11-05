@@ -537,6 +537,8 @@ type secureStatus struct{
  ICMPUserspaceRequests uint64 `json:"icmp_userspace_echo_requests"`
  ICMPUserspaceReplies uint64 `json:"icmp_userspace_echo_replies"`
  ICMPCurrentPPS uint64 `json:"icmp_userspace_pps"`
+ UDPQueueOverflowDrops uint64 `json:"udp_dispatch_overflow_drops"`
+ UDPTruncatedDatagrams uint64 `json:"udp_truncated_datagrams"`
  ICMPPeakPPS uint64 `json:"icmp_userspace_peak_pps"`
  ReversePathProofs uint64 `json:"reverse_path_proofs"`
  ReverseReturnAttempts uint64 `json:"reverse_return_attempts"`
@@ -623,6 +625,8 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.ICMPWriteEMSGSIZE=icmpMessageTooLong.Load()
  report.ICMPUserspaceRequests=icmpRequestsSent.Load()
  report.ICMPUserspaceReplies=icmpRepliesSent.Load()
+ report.UDPQueueOverflowDrops=udpIngressOverflowDrops.Load()
+ report.UDPTruncatedDatagrams=udpTruncatedDatagrams.Load()
  report.ICMPCurrentPPS,report.ICMPPeakPPS=icmpSentRate(time.Now())
  report.ReversePathProofs=diag.ReverseProofs
  report.ReverseReturnAttempts=diag.ReverseSwitchAttempts
