@@ -350,11 +350,11 @@ func (p *Client) Run() error {
         }()
     }
 
-	recv := make(chan *Packet, 10000)
+	recv := make(chan *Packet, packetQueueCapacity(p.tcpmode == 0))
 	p.recvcontrol = make(chan int, 1)
 	go func(){
   defer failOnUnexpectedWorkerExit("ICMP receiver",&p.exit)
-  recvICMP(&p.workResultLock,&p.exit,*p.conn,recv,p.cryptoConfig)
+  recvICMP(&p.workResultLock,&p.exit,*p.conn,recv,p.cryptoConfig,p.tcpmode == 0)
  }()
 
 	go func() {

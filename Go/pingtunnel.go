@@ -224,14 +224,19 @@ func FlushPendingICMP(conn icmp.PacketConn, crypto *CryptoConfig) {
  }
 }
 
-func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.PacketConn, recv chan<- *Packet, cryptoConfig *CryptoConfig) {
+// Maximal ICMPv4 datagrams can exceed the former 10,240-byte receive
+// buffer when application UDP datagrams are large. Without this, Linux
+// truncation could yield an AEAD failure or drop an otherwise valid packet.
+const icmpReadBufferBytes = 65535
+
+func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.PacketConn, recv chan<- *Packet, cryptoConfig *CryptoConfig, udpMode ...bool) {
 
 	defer common.CrashLog()
 
 	(*workResultLock).Add(1)
 	defer (*workResultLock).Done()
 
-	bytes := make([]byte, 10240)
+	bytes := make([]byte, icmpReadBufferBytes)
     var fragmented authenticatedReassembler
 	for !exit.Load() {
 		conn.SetReadDeadline(time.Now().Add(time.Millisecond * 100))
@@ -461,18 +466,14 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
         packet := &Packet{my: my,
             src: icmpSrcToIPAddr(srcaddr),
             echoId: echoId, echoSeq: echoSeq}
-        // A blocked dispatcher must not trap the sole ICMP receiver.
-        select {
-        case recv <- packet:
-        default:
-            stalled := time.NewTimer(3 * time.Second)
-            select {
-            case recv <- packet:
-                stalled.Stop()
-            case <-stalled.C:
-                loggo.Error("ICMP dispatcher blocked for 3s; restarting receiver")
-                return
-            }
+        // TCP preserves the established fail-safe dispatcher behavior.
+        // On UDP, forwarding seconds-old backlogged game/QUIC packets
+        // increases latency. Bound the pending queue and drop ONLY UDP DATA
+        // immediately on overflow; keep control messages on the safe path.
+        latencySensitiveUDP := len(udpMode) > 0 && udpMode[0]
+        if !enqueueICMPPacket(recv, packet, latencySensitiveUDP) {
+            loggo.Error("ICMP dispatcher blocked for 3s; restarting receiver")
+            return
         }
 	}
 }

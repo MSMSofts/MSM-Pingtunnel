@@ -2,7 +2,7 @@
 
 **تونل ICMP رمزنگاری‌شده میان یک VPS ایران و یک VPS خارج** برای انتقال ترافیک TCP یا UDP، با راه‌اندازی و مدیریت ساده از طریق ابزار Rust و هستهٔ Go.
 
-[English](README.en.md) · [نسخهٔ آزمایشی فعلی: v3.3.18](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.18) · [وضعیت تست‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
+[English](README.en.md) · [نسخهٔ آزمایشی فعلی: v3.3.19](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.19) · [وضعیت تست‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
 
 ## امکانات
 
@@ -26,6 +26,20 @@ Pingtunnel **خودش VPN Server نیست**؛ ترافیک کاربر در ای�
 `sudo pingtunnel security` جهت فعال، تعداد چرخش‌ها، علت آخرین جابه‌جایی، دورهٔ سه‌ساعته، تأییدهای معتبر هر مسیر و نرخ ICMP فضای کاربر را نمایش می‌دهد. نرخ Poll مصنوعی Reverse در انتقال فعال حداکثر حدود **۱۲۵ درخواست در ثانیه** (در حالت بیکار حدود **۱ درخواست در ثانیه**) است؛ این سقف، محدودیت مجموع بسته‌های DATA کاربر نیست.
 
 **مهم:** هدف Smart Rotation توزیع زمانی بار بین دو الگوی ICMP و کاهش احتمال برخورد با محدودیتِ مختص یک جهت است. مجموع ترافیک یا خط‌مشی ناشناختهٔ Anti-DDoS را تغییر نمی‌دهد و تضمینی برای جلوگیری از فیلترینگ وجود ندارد. هر دو VPS باید نسخهٔ جدید را با هم اجرا کنند؛ نسخهٔ قدیمی منطق پیام‌های تأیید چرخش را نمی‌شناسد.
+
+### اصلاح لگ در بازی طولانی (3.3.19)
+
+در هستهٔ نسخهٔ قبلی، بیت‌های قدیمی پنجرهٔ محافظت Replay حذف نمی‌شدند؛
+در ترافیک پیوسته UDP/QUIC هزینه پردازش هر بسته به‌مرور افزایش می‌یافت.
+این پنجره اکنون ۱۰۲۴ بیت ثابت است. صف UDP نیز به ۲۵۶ بسته محدود شده و
+در ازدحام شدید، افت بسته به‌طور صریح ثبت می‌شود؛ به‌جای آن‌که گیرنده
+ICMP تا سه ثانیه منتظر صف بماند. بافر دریافت ICMP به ۶۵٬۵۳۵ بایت افزایش یافته است.
+
+این نسخه **Preview** است و تا پیش از آزمون طولانی‌مدت روی دو VPS، تضمینی برای
+رفع قطعی مشکل بازی یا کاهش پینگ وجود ندارد. ابزار ثبت اندازه‌گیری:
+`Source/long_session_probe.py` و توضیحات `docs/LONG_SESSION_LAG_AUDIT.md`.
+مرجع Go اولیه اکنون در `Upstream/pingtunnel-df16/` نگهداری می‌شود تا
+ساخت‌ها پس از تغییر تاریخچهٔ مخزن اصلی نیز قابل تکرار باشند.
 
 ### کاهش تأخیر اولیه و بهبود پاسخ‌گویی Reverse (3.3.17)
 
@@ -99,7 +113,7 @@ ICMP Echo Request / Echo Reply (Reverse یا Direct)
 ابتدا از طریق SSH به **سرور خارج** متصل شوید و نصب را اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.18/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.19/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -111,7 +125,7 @@ sudo pingtunnel setup
 **فقط پس از تکمیل مرحلهٔ خارج** به سرور ایران متصل شوید و اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.18/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.19/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~

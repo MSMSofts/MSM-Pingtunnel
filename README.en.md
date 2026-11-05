@@ -2,7 +2,7 @@
 
 **A lightweight, encrypted ICMP tunnel between an Iran VPS and an overseas VPS**, forwarding TCP or UDP traffic through a Go core and a simple Rust manager.
 
-[فارسی](README.md) · [Current preview: v3.3.18](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.18) · [CI status](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0 license](LICENSE)
+[فارسی](README.md) · [Current preview: v3.3.19](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.19) · [CI status](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0 license](LICENSE)
 
 ## Features
 
@@ -26,6 +26,21 @@ For the default `icmp_direction: "auto"`, **the old unconditional Reverse Priori
 `sudo pingtunnel security` reports active direction, last change reason, three-hour schedule, paired path proofs, rotations/retries and userspace-generated ICMP rates. Synthetic Reverse polling peaks at about **125 polls/s** when genuinely busy and remains near **1 poll/s** while idle; DATA traffic has a separate packet rate.
 
 **Limitations:** Rotation redistributes use between two ICMP exchange patterns; it does not reduce total application bandwidth, override provider anti-DDoS rules or guarantee no future filtering. Both peers must run the same new Go core/manager version because older peers do not recognize the signed handoff ACK frames.
+
+### Long-running game / QUIC latency fixes (3.3.19)
+
+The previous anti-replay `big.Int` bitmap grew with total authenticated
+packets, increasing per-packet decryption work during sustained sessions.
+It now uses a fixed 1024-bit window. The UDP-only authenticated dispatcher
+is capped at 256 queued packets; on saturation it counts dropped UDP DATA
+rather than blocking the sole ICMP receiver for up to 3 seconds. ICMP
+receive capacity is now 65,535 bytes.
+
+This is a **Preview**, not a demonstrated fix for any particular live VPS.
+Compare two-hour gaming runs before and after upgrading both peers.
+Diagnostics: `Source/long_session_probe.py` and
+`docs/LONG_SESSION_LAG_AUDIT.md`. The upstream Go 1.26 source snapshot
+is vendored under `Upstream/pingtunnel-df16/` for reproducible builds.
 
 ### Lower first-packet latency during idle Reverse (3.3.17)
 
@@ -99,7 +114,7 @@ These figures are **one real-world observation**, not a controlled benchmark, a 
 Connect to the **overseas VPS** via SSH and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.18/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.19/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -111,7 +126,7 @@ Select **Foreign**, enter the Iran VPS public IPv4 address, choose **TCP or UDP*
 **Only after finishing overseas setup**, connect to the Iran VPS and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.18/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.19/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~

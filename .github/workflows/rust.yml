@@ -86,12 +86,16 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.0'
-      - name: Clone pinned upstream Go core
+      - name: Prepare verified pinned upstream Go source
         run: |
-          git clone https://github.com/esrrhs/pingtunnel.git upstream
-          cd upstream
-          git checkout --detach df16e52771ee67f1f9770ec68763b425672a36fc
-          test "$(git rev-parse HEAD)" = "df16e52771ee67f1f9770ec68763b425672a36fc"
+          # The Oct-2026 upstream Git commit was orphaned by an unrelated
+          # upstream history rewrite. Keep the exact original Go 1.26 source
+          # snapshot in this repository to make every future build stable.
+          mkdir upstream
+          cp -a Upstream/pingtunnel-df16/. upstream/
+          test -f upstream/go.mod
+          test -f upstream/LICENSE
+          grep -Fxq 'go 1.26.0' upstream/go.mod
       - name: Overlay Go crypto and adaptive performance source
         run: |
           cp Go/*.go upstream/
@@ -107,7 +111,7 @@ jobs:
         run: |
           cd upstream
           go build -o /tmp/pingtunnel-security-verify ./cmd
-          test "$(/tmp/pingtunnel-security-verify -security-protocol)" = "pingtunnel-go-core=3.3.18 config-schema=3 wire=4"
+          test "$(/tmp/pingtunnel-security-verify -security-protocol)" = "pingtunnel-go-core=3.3.19 config-schema=3 wire=4"
           if /tmp/pingtunnel-security-verify -c /tmp/does-not-exist-pingtunnel-config.json; then
             echo "Go core returned success for an invalid config" >&2
             exit 1
@@ -150,15 +154,15 @@ jobs:
       - name: Build release compatibility manifest
         run: |
           {
-            printf 'release=v3.3.18\nconfig_schema=3\nwire=4\n'
+            printf 'release=v3.3.19\nconfig_schema=3\nwire=4\n'
             printf 'upstream_go=df16e52771ee67f1f9770ec68763b425672a36fc\n'
             printf 'source_commit=%s\n' "$GITHUB_SHA"
             (cd dist && sha256sum pingtunnel-core-linux-* pingtunnel-manager-linux-* | grep -v '\.sha256') 
           } > dist/release-manifest.txt
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v3.3.18
-          name: Pingtunnel Manager 3.3.18 — secure wire v4
+          tag_name: v3.3.19
+          name: Pingtunnel Manager 3.3.19 — secure wire v4
           prerelease: true
           make_latest: false
           files: dist/*
