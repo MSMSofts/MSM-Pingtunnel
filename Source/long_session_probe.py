@@ -45,7 +45,7 @@ def numerical_fields(source, names=None, prefixes=()):
             continue
         if (names is not None and key not in names) and not key.startswith(prefixes):
             continue
-        if type(value) in (int, float, bool) or key in ("state", "profile") and isinstance(value, str):
+        if type(value) in (int, float, bool) or key in ("state", "profile", "icmp_direction") and isinstance(value, str):
             result[key] = value
     return result
 
