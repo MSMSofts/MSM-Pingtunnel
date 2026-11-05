@@ -39,6 +39,25 @@ was available during the source audit.
    place. The security status now exposes
    `udp_truncated_datagrams` as well as dispatcher-overflow drops.
 
+4. **Raw ICMP receive buffer size:** despite the v3.3.18 UDP socket
+   improvements, the encrypted ICMP read path still allocated only
+   10,240 bytes. The receiver now buffers up to 65,535 bytes so the
+   raw ICMP layer does not silently truncate an otherwise valid larger
+   encrypted datagram. This is an integrity fix, not a recommendation
+   to increase UDP gaming packet sizes.
+
+## Reproducible Go source
+
+The original pinned upstream commit `df16e52771ee67f1f9770ec68763b425672a36fc`
+became disconnected from upstream's public Git refs after a history
+rewrite. New upstream tags introduced unrelated and incompatible
+APIs/Go dependencies. Instead of swapping a new core underneath
+Wire v4, the project now archives the 25 text/module/license files of
+the verified original source under `Upstream/pingtunnel-df16/`. Its
+`SNAPSHOT.md` lists every verified Git blob SHA. CI overlays current
+`Go/*.go` onto this immutable local base and retains Go 1.26.0.
+No runtime network configuration or cryptographic protocol is changed.
+
 ## Other bounded or scheduled behavior checked
 
 - Reverse encrypted FIFO is already capped at 256 frames / 2 MiB and
