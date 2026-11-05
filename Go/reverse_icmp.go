@@ -1034,6 +1034,9 @@ type reverseDiagnostics struct {
     ReverseSwitchAttempts uint64
     ScheduledRotations uint64
     PreferredReverseReturns uint64
+    ReverseProofConfirmations int
+    PendingPreferredReverse bool
+    LastReverseProofAgeMs int64
     RotationRetryCount uint64
     RotationDue bool
     LastRotationReason string
@@ -1079,6 +1082,12 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         outboundAge=int64(d/time.Millisecond)
     }
     avgDelay,p95Delay:=r.queueDelaySummaryLocked()
+    reverseProofAge:=int64(-1)
+    if !r.lastProofAt.IsZero() {
+        d:=now.Sub(r.lastProofAt)
+        if d<0{d=0}
+        reverseProofAge=int64(d/time.Millisecond)
+    }
     directProofAge:=int64(-1)
     if !r.lastDirectProof.IsZero(){
         directProofAge=int64(now.Sub(r.lastDirectProof).Seconds())
@@ -1106,6 +1115,8 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         PollIntervalMillis:r.pollPeriodMillis,LastUsefulFrameAgeSeconds:age,
         ReverseProofs:r.reverseProofs,ReverseSwitchAttempts:r.reverseSwitchAttempts,
         ScheduledRotations:r.scheduledRotations,PreferredReverseReturns:r.preferredReverseReturns,
+        ReverseProofConfirmations:r.proofConfirmations,PendingPreferredReverse:r.pendingReverseSwitch,
+        LastReverseProofAgeMs:reverseProofAge,
         RotationRetryCount:r.rotationRetryCount,
         RotationDue:r.rotationDueLocked(now),LastRotationReason:r.lastRotationReason,
         DirectProofConfirmations:r.directProofConfirmations,
