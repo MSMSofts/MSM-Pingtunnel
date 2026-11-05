@@ -558,6 +558,11 @@ type secureStatus struct{
  SmartRotationRetryCount uint64 `json:"smart_rotation_retries"`
  SmartRotationLastReason string `json:"smart_rotation_last_reason,omitempty"`
  SmartDirectProofConfirmations int `json:"smart_direct_proof_confirmations"`
+ AutoRoutePolicy string `json:"auto_route_policy"`
+ AutoPreferredReverseReturns uint64 `json:"auto_preferred_reverse_returns"`
+ AutoReverseProofConfirmations int `json:"auto_reverse_proof_confirmations"`
+ AutoPendingReverseHandoff bool `json:"auto_pending_reverse_handoff"`
+ AutoReverseLastProofAgeMs int64 `json:"auto_reverse_last_proof_age_ms"`
  ICMPFragmentedDatagrams uint64 `json:"icmp_fragmented_datagrams"`
  ICMPReassembledDatagrams uint64 `json:"icmp_reassembled_datagrams"`
  ICMPFragmentDrop uint64 `json:"icmp_fragment_drops"`
@@ -646,6 +651,11 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.SmartRotationRetryCount=diag.RotationRetryCount
  report.SmartRotationLastReason=diag.LastRotationReason
  report.SmartDirectProofConfirmations=diag.DirectProofConfirmations
+ report.AutoRoutePolicy="reverse_preferred_direct_on_failure"
+ report.AutoPreferredReverseReturns=diag.PreferredReverseReturns
+ report.AutoReverseProofConfirmations=diag.ReverseProofConfirmations
+ report.AutoPendingReverseHandoff=diag.PendingPreferredReverse
+ report.AutoReverseLastProofAgeMs=diag.LastReverseProofAgeMs
  report.ICMPFragmentedDatagrams=icmpFragmentedDatagrams.Load()
  report.ICMPReassembledDatagrams=icmpReassembledDatagrams.Load()
  report.ICMPFragmentDrop=icmpFragmentDropped.Load()
