@@ -224,6 +224,11 @@ func FlushPendingICMP(conn icmp.PacketConn, crypto *CryptoConfig) {
  }
 }
 
+// Maximal ICMPv4 datagrams can exceed the former 10,240-byte receive
+// buffer when application UDP datagrams are large. Without this, Linux
+// truncation could yield an AEAD failure or drop an otherwise valid packet.
+const icmpReadBufferBytes = 65535
+
 func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.PacketConn, recv chan<- *Packet, cryptoConfig *CryptoConfig, udpMode ...bool) {
 
 	defer common.CrashLog()
@@ -231,7 +236,7 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
 	(*workResultLock).Add(1)
 	defer (*workResultLock).Done()
 
-	bytes := make([]byte, 10240)
+	bytes := make([]byte, icmpReadBufferBytes)
     var fragmented authenticatedReassembler
 	for !exit.Load() {
 		conn.SetReadDeadline(time.Now().Add(time.Millisecond * 100))
