@@ -1,3 +1,13 @@
+## [3.3.19 preview] — Long-session game/QUIC latency and reproducible builds
+
+- Fix the unbounded Wire v4 replay bitmap: use a fixed 1024-bit / 128-byte window instead of shifting an ever-growing `big.Int` after each authenticated frame.
+- Add 600k-packet longevity and randomized out-of-order/replay reference tests, including overflow boundaries and performance benchmark.
+- Limit UDP-only application dispatch backlogs to 256 packets; drop and count excess DATA instead of blocking ICMP reception for up to 3 seconds. TCP and UDP control paths keep their prior behavior.
+- Raise the ICMP receive buffer from 10,240 to 65,535 bytes and expose UDP truncation/dispatch overflow counters.
+- Add secret-free two-hour process/RTT/UDP queue sampler and CI tests; archive the verified October 2026 upstream Go 1.26 snapshot so builds no longer depend on rewritten external git history.
+- **Compatibility:** Wire v4, config schema 3, existing pairing keys and Smart Rotation behavior unchanged. Keep both endpoints version-aligned.
+- **Validation:** CI and race testing verify code invariants; only real two-hour gameplay traces on BOTH servers can confirm the reported one-hour latency spike is resolved.
+
 ## [3.3.18 preview] — TCP ACK-loss recovery and UDP datagram integrity
 
 - **TCP recovery:** use the upstream loss-safe bandwidth-balancing controller on both endpoints, avoiding permanent window stalls after a fully lost ACK update interval. Includes recovery and healthy-feedback tests.
