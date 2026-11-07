@@ -366,6 +366,7 @@ func (r *reverseTransport) acceptDirectSwitchProof(id,seq int,reply []byte,now t
         return false
     }
     delete(r.directProbeChallenges,key)
+    r.pendingDirectSwitch=false
     return true
 }
 func (r *reverseTransport) makeSwitchAck(probe []byte,magic [4]byte) []byte {
@@ -606,10 +607,13 @@ func (r *reverseTransport) authenticateProbeWithSwitch(frame []byte,now time.Tim
 
 // Only a matched, one-time, MAC-authenticated userspace Echo Reply proves
 // that the Reverse route has recovered while Direct is still active.
-func (r *reverseTransport) makeProof(probe []byte) []byte {
+func (r *reverseTransport) makeProof(probe []byte,at ...time.Time) []byte {
+    now:=time.Now()
+    if len(at)>0 {now=at[0]}
     r.mu.Lock()
     hasDemand:=r.preference==ICMPAutoDirect && r.selected==ICMPDirect &&
-        !r.lastDemand.IsZero() && time.Since(r.lastDemand)<5*time.Second
+        !r.lastDemand.IsZero() && !now.Before(r.lastDemand) &&
+        now.Sub(r.lastDemand)<5*time.Second
     r.mu.Unlock()
     if hasDemand{return r.makeSwitchAck(probe,reverseFallbackProofMagic)}
     return r.makeSwitchAck(probe,reverseProofMagic)
@@ -778,6 +782,51 @@ func (r *reverseTransport) takeSwitchRequest(now time.Time,emergency ...bool) bo
     r.pendingReverseSwitch=true
     return true
 }
+// Direct-first recovery is symmetric with the Reverse-first verified return:
+// two independent HMAC-proven PTC4/PDA4 roundtrips trigger a signed PTX4.
+// Only the Iranian peer requests this switch, and it must see a matching
+// PTB4 acknowledgment before leaving Reverse. The foreign side handles
+// lost-ACK retransmissions idempotently.
+func (r *reverseTransport) takeDirectSwitchRequest(now time.Time) bool {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    if r.preference!=ICMPAutoDirect || r.selected!=ICMPReverse {return false}
+    if !r.lastSwitch.IsZero() && now.Sub(r.lastSwitch)<reverseMinDwell{return false}
+    if r.pendingDirectSwitch {
+        if now.Sub(r.lastDirectSwitchAttempt)>smartRotationRetryWindow {
+            r.pendingDirectSwitch=false
+            r.directProofConfirmations=0
+            r.lastDirectSwitchAttempt=now
+            r.rotationRetryCount++
+            return false
+        }
+        if now.Sub(r.directSwitchAttemptAt)<smartRotationRetryInterval{return false}
+        r.directSwitchAttemptAt=now
+        return true
+    }
+    if r.directProofConfirmations<reverseRequiredProofs ||
+        r.lastDirectProof.IsZero() ||
+        now.Sub(r.lastDirectProof)>reverseProofTTL ||
+        (!r.lastDirectSwitchAttempt.IsZero() &&
+          now.Sub(r.lastDirectSwitchAttempt)<reverseSwitchRetryCooldown) {
+        return false
+    }
+    r.pendingDirectSwitch=true
+    r.lastDirectSwitchAttempt=now
+    r.directSwitchAttemptAt=now
+    r.reverseSwitchAttempts++
+    return true
+}
+
+// True only for the selected Direct-first AUTO policy. A paired PTX4
+// cannot switch either fixed/manual direction or Reverse-preferred AUTO.
+func (r *reverseTransport) allowSignedDirectTakeover() (selected ICMPDirection,ok bool) {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    if r.preference!=ICMPAutoDirect{return "",false}
+    return r.selected,true
+}
+
 // During an authenticated PTA4 handoff use bounded 2s retransmission
 // intervals, otherwise a Direct-mode 10s health probe is sufficient.
 func (r *reverseTransport) directMonitorPeriod() time.Duration {
