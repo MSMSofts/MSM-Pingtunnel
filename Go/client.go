@@ -470,7 +470,12 @@ func (p *Client) Run() error {
             // silence with real user demand, in Reverse AND Direct modes.
             // In Reverse, the next authenticated poll carries a fresh X25519
             // ClientHello inside its matching Echo Reply. No idle reset.
-            if p.cryptoConfig != nil && p.cryptoConfig.RecoverSecureSession(now,hasDemand) {
+            shouldRekey:=hasDemand
+            if p.cryptoConfig!=nil && p.cryptoConfig.reverse!=nil &&
+                p.cryptoConfig.reverse.deferDirectRecoveryRekey(now) {
+                shouldRekey=false
+            }
+            if p.cryptoConfig != nil && p.cryptoConfig.RecoverSecureSession(now,shouldRekey) {
                 loggo.Info("Smart Recovery: rekeying stale authenticated session after user demand (Reverse/Direct)")
                 nextPingAt=now
             }
