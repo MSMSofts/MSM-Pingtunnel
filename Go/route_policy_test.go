@@ -161,6 +161,30 @@ func TestDirectFirstHandoffReplaysAndCooldown(t *testing.T) {
     if iran.takeDirectSwitchRequest(at.Add(32*time.Second)){t.Fatal("stale proof bypassed cooldown")}
 }
 
+func TestDirectFirstRekeyWaitsForSignedFallbackAttempt(t *testing.T) {
+    start:=time.Unix(1901010000,0)
+    iran,_:=routeTestPair(t,ICMPAutoDirect,start)
+    iran.noteDemand(start.Add(10*time.Second),true)
+    for _,d:=range []time.Duration{11*time.Second,35*time.Second,100*time.Second,200*time.Second}{
+        if !iran.deferDirectRecoveryRekey(start.Add(d)){
+            t.Fatalf("active Direct-first demand rekeyed before fallback window, age=%s",d)
+        }
+    }
+    if iran.deferDirectRecoveryRekey(start.Add(311*time.Second)){
+        t.Fatal("Direct-first recovery rekey stayed suppressed past five-minute demand window")
+    }
+    reverse,_:=routeTestPair(t,ICMPAuto,start)
+    reverse.noteDemand(start.Add(10*time.Second),true)
+    if reverse.deferDirectRecoveryRekey(start.Add(60*time.Second)){
+        t.Fatal("Reverse-first recovery behavior changed")
+    }
+    manual,_:=routeTestPair(t,ICMPDirect,start)
+    manual.noteDemand(start.Add(10*time.Second),true)
+    if manual.deferDirectRecoveryRekey(start.Add(60*time.Second)){
+        t.Fatal("Manual Direct suppressed its normal rekey indefinitely")
+    }
+}
+
 func TestQueueHintKeepsUndeliveredGameFrameWarmWithoutOldSnapshot(t *testing.T) {
     now:=time.Unix(1901006000,0)
     _,foreign:=routeTestPair(t,ICMPAuto,now)
