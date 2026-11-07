@@ -185,6 +185,18 @@ type reverseTransport struct {
     backlogWakeSent uint64
     backlogWakeAccepted uint64
     backlogWakeRateLimited uint64
+    // Authenticated PTQ4 reports actual remote queue demand without leaking
+    // application data. These are separate from routing handoff proofs.
+    queueHintSeen map[[8]byte]time.Time
+    queueHintAt time.Time
+    queueHintDepth int
+    queueHintAgeMs int
+    queueHintBytes int
+    queueHintReceived uint64
+    queueHintRejected uint64
+    // If socket writes begin failing, reduce ICMP poll pressure temporarily.
+    lastObservedICMPWriteFailures uint64
+    pollBackoffUntil time.Time
     // Buffered signal removes the artificial 1s idle wait from the first
     // application packet while preserving the ordinary 1Hz idle cadence.
     pollWakeup chan struct{}
@@ -223,6 +235,9 @@ func newReverseTransport(preference ICMPDirection, key []byte, now time.Time) (*
     if len(key)!=32 {return nil, errors.New("reverse transport requires a 32-byte shared pairing key")}
     if _,err:=ParseICMPDirection(string(preference));err!=nil{return nil,err}
     r:=&reverseTransport{preference:preference,selected:ICMPReverse,started:now,
+        // This counter is process-global. Only NEW failures after creating
+        // the transport may trigger a 3-second adaptive poll backoff.
+        lastObservedICMPWriteFailures:icmpWriteErrors.Load(),
         pollWakeup:make(chan struct{},1)}
     copy(r.secret[:],key)
     if preference==ICMPDirect {r.selected=ICMPDirect}
@@ -918,6 +933,14 @@ func (r *reverseTransport) recordPollInterval(period time.Duration) {
 }
 func (r *reverseTransport) noteUsefulFrame(now time.Time) {
     r.mu.Lock();defer r.mu.Unlock()
+    // A successfully authenticated, reassembled DATA message is an
+    // independent sign of completed Reverse delivery. Reduce the remote
+    // backlog estimate instead of polling for packets already received.
+    // Partial fragments do not reach this function.
+    if r.queueHintDepth>0 && !r.queueHintAt.IsZero() &&
+        !now.Before(r.queueHintAt) && now.Sub(r.queueHintAt)<reverseWakeBurst {
+        r.queueHintDepth--
+    }
     if !r.lastUsefulFrame.IsZero() && now.Sub(r.lastUsefulFrame)>=0 &&
         now.Sub(r.lastUsefulFrame)<350*time.Millisecond {
         if r.usefulBurst<1024{r.usefulBurst++}
@@ -972,15 +995,45 @@ func (r *reverseTransport) pollPeriod(now time.Time,activeConns int,ready bool) 
                 if period>20*time.Millisecond {period=20*time.Millisecond}
             }
         }
-        // Burst mode requires a fresh, root-key authenticated wake from a
-        // peer with actually queued DATA. It automatically expires after
-        // 1.2s rather than imposing permanent high-frequency idle polls.
+        // Smart queue-aware scheduling: Iranian PTQ4 signals are signed
+        // observations of actual encrypted FIFO depth and oldest age, not
+        // guesses based on a TCP congestion window or a video buffer.
+        // Fresh pressure speeds polling; a drained/stale queue decays back
+        // to the ordinary demand-driven rate. Single-packet game bursts
+        // avoid an unconditional 125 Hz poll storm.
         if !r.backlogPollUntil.IsZero() &&
-            !now.Before(r.lastAcceptedWake) &&
-            now.Before(r.backlogPollUntil) &&
-            period>reverseFastPollPeriod {
-            period=reverseFastPollPeriod
+            !now.Before(r.lastAcceptedWake) && now.Before(r.backlogPollUntil) {
+            hintFresh:=!r.queueHintAt.IsZero() && !now.Before(r.queueHintAt) &&
+                now.Sub(r.queueHintAt)<reverseWakeBurst
+            if hintFresh {
+                if r.queueHintDepth>0 {
+                    hintTarget:=reverseQueueHintPollInterval(r.queueHintDepth,r.queueHintAgeMs)
+                    // Rapid attack, slower decay: on a brand-new genuine
+                    // game packet give the queue an immediate small 8ms
+                    // retry window; once the initial 120ms passes, use
+                    // measured backlog rather than keeping 125 polls/s.
+                    if now.Sub(r.queueHintAt)<120*time.Millisecond {
+                        hintTarget=reverseFastPollPeriod
+                    }
+                    if period>hintTarget {period=hintTarget}
+                }
+            } else if period>reverseFastPollPeriod {
+                // Older PTW4 peers cannot report queue measurements. Keep
+                // their existing 8ms bounded wake behavior compatible.
+                period=reverseFastPollPeriod
+            }
         }
+    }
+    // ICMP socket errors are an immediate local congestion signal: do
+    // not drive 125 polls/s into an already failing raw socket. Use a
+    // bounded 3-second respite with 25ms minimum; resume automatically.
+    errorsNow:=icmpWriteErrors.Load()
+    if errorsNow>r.lastObservedICMPWriteFailures {
+        r.pollBackoffUntil=now.Add(3*time.Second)
+        r.lastObservedICMPWriteFailures=errorsNow
+    }
+    if now.Before(r.pollBackoffUntil) && period<25*time.Millisecond {
+        period=25*time.Millisecond
     }
     r.pollPeriodMillis=int(period/time.Millisecond)
     return period
@@ -1047,6 +1100,13 @@ type reverseDiagnostics struct {
     BacklogWakeAccepted uint64
     BacklogWakeRateLimited uint64
     BacklogWakeActiveMs int64
+    QueueHintDepth int
+    QueueHintAgeMs int
+    QueueHintBytes int
+    QueueHintAgeSinceReceivedMs int64
+    QueueHintsReceived uint64
+    QueueHintsRejected uint64
+    PollBackoffRemainingMs int64
     DirectProbeChecks uint64
     DirectPathProofs uint64
     DirectLastProofAgeSeconds int64
@@ -1093,6 +1153,16 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         directProofAge=int64(now.Sub(r.lastDirectProof).Seconds())
         if directProofAge<0{directProofAge=0}
     }
+    hintAgeSince:=int64(-1)
+    if !r.queueHintAt.IsZero() {
+        gap:=now.Sub(r.queueHintAt)
+        if gap<0 {gap=0}
+        hintAgeSince=int64(gap/time.Millisecond)
+    }
+    backoffRemaining:=int64(0)
+    if now.Before(r.pollBackoffUntil) {
+        backoffRemaining=int64(r.pollBackoffUntil.Sub(now)/time.Millisecond)
+    }
     wakeRemaining:=int64(0)
     if now.Before(r.backlogPollUntil) {
         wakeRemaining=int64(r.backlogPollUntil.Sub(now)/time.Millisecond)
@@ -1124,6 +1194,10 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         BacklogWakeSent:r.backlogWakeSent,BacklogWakeAccepted:r.backlogWakeAccepted,
         BacklogWakeRateLimited:r.backlogWakeRateLimited,
         BacklogWakeActiveMs:wakeRemaining,
+        QueueHintDepth:r.queueHintDepth,QueueHintAgeMs:r.queueHintAgeMs,
+        QueueHintBytes:r.queueHintBytes,QueueHintAgeSinceReceivedMs:hintAgeSince,
+        QueueHintsReceived:r.queueHintReceived,QueueHintsRejected:r.queueHintRejected,
+        PollBackoffRemainingMs:backoffRemaining,
         DirectProbeChecks:r.directProbeChecks,DirectPathProofs:r.directPathProofs,
         DirectLastProofAgeSeconds:directProofAge,
         LastSwitchAgeSeconds:switchAge,

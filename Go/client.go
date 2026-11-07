@@ -383,6 +383,20 @@ func (p *Client) Run() error {
             if p.cryptoConfig!=nil && p.cryptoConfig.reverse!=nil {
                 r:=p.cryptoConfig.reverse
                 r.noteDemand(now,hasDemand)
+                // The upstream data loop sends a PTQ4 hint on fresh DATA.
+                // If a single datagram remains queued without further
+                // local packets, a bounded 1Hz health tick also advertises
+                // its increasing wait, avoiding a silent stalled FIFO.
+                if useReverse(p.cryptoConfig) && p.cryptoConfig.SecureReady() &&
+                    r.allowBacklogWake(now) {
+                    if peer:=p.serverIP.Load();peer!=nil {
+                        if hint,err:=r.makeQueueHint(now);err==nil && len(hint)>0 {
+                            if emitEcho(*p.conn,peer,8,p.id,p.nextSequence(),hint) {
+                                r.noteBacklogWakeSent()
+                            }
+                        }
+                    }
+                }
                 if r.fallbackDirect(now,p.cryptoConfig.SecureReady(),p.cryptoConfig.sec.lastPeerTraffic()) {
                     loggo.Info("Reverse failover: sustained user demand without authenticated two-way ICMP; attempting Direct")
                     p.cryptoConfig.sec.resetForTransportChange()

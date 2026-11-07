@@ -1,3 +1,14 @@
+## [3.3.21 preview] — Authenticated queue-aware Reverse adaptive pacing
+
+- New 44-byte root-HMAC-authenticated PTQ4 queue hints report true Iran Reverse FIFO depth, oldest age and queued bytes. The metrics are masked with a separate nonce-derived key stream; no application payloads or pairing keys are sent.
+- Foreign checks pinned peer, signed timestamp, 64-bit nonce/replay map, limits, and rate; queue hints cannot alter the routing state or decrypt data.
+- Fast attack at 8ms for 120ms after real queued DATA, then 8–16ms automatically from queue pressure. Stale/empty hints return to established demand-based behavior.
+- Three-second >=25ms poll backoff during local ICMP write errors. No request rate below 8ms (125 adaptive polls/s).
+- The authenticated delivered DATA stream gradually decreases estimated remote FIFO depth; an existing 1Hz Iran tick re-advertises isolated waiting packets.
+- Retain PTW4 compatibility, Wire v4, config schema 3, pairing keys and Reverse-first/Direct-fallback/verified-return AUTO route policy.
+- Show authenticated remote queue depth, wait age, hint staleness, accepted/rejected counts and temporary backoff in `pingtunnel security`; add deterministic, forgery, replay and performance tests.
+- Preview: deploy on both VPS peers together and benchmark game packet RTT/p95/p99 and video stalls before claiming performance gains.
+
 ## [3.3.20 preview] — Reverse-first AUTO and verified failback
 
 - Start and remain on Reverse in Auto; remove the legacy three-hour rotation from a healthy Reverse path to Direct.

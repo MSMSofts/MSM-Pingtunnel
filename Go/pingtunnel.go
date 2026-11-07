@@ -176,8 +176,8 @@ func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr,
        // This single signed hint is generated only for genuine queued
        // encrypted DATA. It carries no user content and cannot change
        // direction, AEAD keys or the Smart Rotation state machine.
-       if wake,err:=crypto.reverse.makeBacklogWake(now);err==nil {
-           if emitEcho(conn,peer,8,id,sequence,wake) {
+       if hint,err:=crypto.reverse.makeQueueHint(now);err==nil && len(hint)>0 {
+           if emitEcho(conn,peer,8,id,sequence,hint) {
                crypto.reverse.noteBacklogWakeSent()
            }
        }
@@ -285,26 +285,32 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
             if isReflectedReverseDataEcho(cryptoConfig,bytes[0],echoId,echoSeq,payloadData,now) {
                 continue
             }
-            // An Iran-origin PTW4 is a short, root-HMAC-authenticated
-            // notification that Reverse DATA has entered the Iran FIFO.
-            // The foreign poller wakes immediately instead of sleeping for
-            // up to 1s at the conservative 1Hz idle cadence. Invalid or
-            // replayed hints are ignored; no switch/rekey/application
-            // data is performed on this control frame.
+            // PTQ4 is a root-HMAC-authenticated queue-depth/age wake.
+            // PTW4 remains supported for compatibility. Both are strictly
+            // informational and never count as Reverse path-switch proofs.
             if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="foreign" &&
-                int(bytes[0])==8 && stdbytes.HasPrefix(payloadData,reverseWakeMagic[:]) {
-                if useReverse(cryptoConfig) && cryptoConfig.SecureReady() &&
-                    cryptoConfig.reverse.authenticateBacklogWake(payloadData,now) {
-                    cryptoConfig.reverse.noteAuthenticatedBacklogWake(now)
+                int(bytes[0])==8 &&
+                (stdbytes.HasPrefix(payloadData,reverseWakeMagic[:]) ||
+                 stdbytes.HasPrefix(payloadData,reverseQueueHintMagic[:])) {
+                if useReverse(cryptoConfig) && cryptoConfig.SecureReady() {
+                    if stdbytes.HasPrefix(payloadData,reverseQueueHintMagic[:]) {
+                        if cryptoConfig.reverse.authenticateQueueHint(payloadData,now) {
+                            cryptoConfig.reverse.noteAuthenticatedBacklogWake(now)
+                        }
+                    } else if cryptoConfig.reverse.authenticateBacklogWake(payloadData,now) {
+                        cryptoConfig.reverse.noteAuthenticatedBacklogWake(now)
+                    }
                 }
                 continue
             }
-            // Discard only the kernel reflection of our own PTW4 request
-            // on Iran. A reflection cannot be treated as peer application
-            // DATA or a valid proof of the Reverse response route.
+            // The local kernel can reflect our Iran-origin signed requests.
+            // Never treat PTQ4/PTW4 reflections as encrypted application DATA.
             if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="iran" &&
-                int(bytes[0])==0 && len(payloadData)==reverseProbeBytes &&
-                stdbytes.HasPrefix(payloadData,reverseWakeMagic[:]) {
+                int(bytes[0])==0 &&
+                ((len(payloadData)==reverseProbeBytes &&
+                  stdbytes.HasPrefix(payloadData,reverseWakeMagic[:])) ||
+                 (len(payloadData)==reverseQueueHintBytes &&
+                  stdbytes.HasPrefix(payloadData,reverseQueueHintMagic[:]))) {
                 continue
             }
             // Legacy timed PTx4/PTB4 Reverse->Direct handoffs must not

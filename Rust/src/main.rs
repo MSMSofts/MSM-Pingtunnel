@@ -625,6 +625,20 @@ fn show_security_status() -> Result<()> {
         report["reverse_polls_coalesced"].as_u64()) {
         println!("  Signed Reverse polls sent / coalesced into DATA opportunities: {polls} / {saved}");
     }
+    if let Some(count)=report["reverse_queue_hints_received"].as_u64().filter(|c|*c>0) {
+        println!("  Authenticated remote queue hints: received {count}, rejected {}",
+            report["reverse_queue_hints_rejected"]);
+        println!("  Last remote queue: {} packets / {} bytes / oldest {}ms | hint age {}ms",
+            report["reverse_remote_queue_hint_depth"],
+            report["reverse_remote_queue_hint_bytes"],
+            report["reverse_remote_queue_hint_oldest_ms"],
+            report["reverse_remote_queue_hint_age_ms"]);
+        println!("  Queue-aware adaptive poll interval: {}ms (minimum 8ms, including write-error backoff)",
+            report["reverse_poll_interval_ms"]);
+    }
+    if let Some(backoff)=report["reverse_poll_backoff_remaining_ms"].as_i64().filter(|v|*v>0) {
+        println!("  Local ICMP write failures: poll pressure reduced for {backoff}ms");
+    }
     if let (Some(sent),Some(received),Some(limited))=(
         report["reverse_backlog_wakes_sent"].as_u64(),
         report["reverse_backlog_wakes_accepted"].as_u64(),
