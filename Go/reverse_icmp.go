@@ -73,6 +73,11 @@ const (
     reverseUnconfirmedGrace = 150 * time.Second
     reverseEstablishedGrace = 150 * time.Second
     reverseMinDwell = 60 * time.Second
+    // Direct-first: unlike Reverse-first, a missing initial handshake
+    // must be recoverable through independent signed reverse proofs.
+    directFirstInitialGrace = 90 * time.Second
+    directFirstDemandGrace = 20 * time.Second
+    directFirstReplySilence = 35 * time.Second
     reverseFrameTTL = 12 * time.Second
     reverseQueueMaxFrames = 256
     reverseQueueMaxBytes = 2 * 1024 * 1024
@@ -618,17 +623,47 @@ func (r *reverseTransport) authenticateProbeWithSwitch(frame []byte,now time.Tim
     return true,isSwitch
 }
 
-// Only a matched, one-time, MAC-authenticated userspace Echo Reply proves
-// that the Reverse route has recovered while Direct is still active.
+// A PRF4 proof is a signed declaration by Iran that authenticated Direct
+// replies are NOT arriving despite genuine local application demand. This
+// cannot be inferred from the last data RECEIVED by Foreign: on a one-way
+// failure Iran->Foreign still works but Foreign->Iran does not. An idle or
+// healthy Direct route always returns the ordinary PRA4 proof instead.
+//
+// at[0] is the testable local clock. at[1] is Iran's last authenticated
+// Foreign->Iran arrival, not a Foreign-side observation. Require BOTH
+// measurements to authorize an emergency direction change. With no prior
+// established session, allow startup recovery only after a 90s initial
+// wait and sustained demand; never treat an immediate empty timestamp as
+// evidence of a broken session.
 func (r *reverseTransport) makeProof(probe []byte,at ...time.Time) []byte {
     now:=time.Now()
     if len(at)>0 {now=at[0]}
     r.mu.Lock()
-    hasDemand:=r.preference==ICMPAutoDirect && r.selected==ICMPDirect &&
+    activeDemand:=r.preference==ICMPAutoDirect && r.selected==ICMPDirect &&
         !r.lastDemand.IsZero() && !now.Before(r.lastDemand) &&
-        now.Sub(r.lastDemand)<5*time.Second
+        now.Sub(r.lastDemand)<5*time.Second &&
+        !r.demandSince.IsZero() && !now.Before(r.demandSince)
+    priorStart:=r.started
+    demandAt:=r.demandSince
     r.mu.Unlock()
-    if hasDemand{return r.makeSwitchAck(probe,reverseFallbackProofMagic)}
+    staleDirect:=false
+    if len(at)>1 && activeDemand {
+        lastPeer:=at[1]
+        if lastPeer.IsZero() {
+            // No authenticated Direct handshake ever completed; give it 90s.
+            staleDirect=!now.Before(priorStart) &&
+                now.Sub(priorStart)>=directFirstInitialGrace &&
+                now.Sub(demandAt)>=directFirstDemandGrace
+        } else {
+            // Direct completed before; recover from one-way stalls after
+            // 35 seconds of missing replies and 20 seconds of demand. An idle tunnel is
+            // not interpreted as failure by this check.
+            staleDirect=!now.Before(lastPeer) &&
+                now.Sub(lastPeer)>=directFirstReplySilence &&
+                now.Sub(demandAt)>=directFirstDemandGrace
+        }
+    }
+    if staleDirect {return r.makeSwitchAck(probe,reverseFallbackProofMagic)}
     return r.makeSwitchAck(probe,reverseProofMagic)
 }
 func (r *reverseTransport) makeDirectProof(probe []byte) []byte {

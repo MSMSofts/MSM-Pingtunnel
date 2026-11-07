@@ -351,7 +351,12 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
             // proof or timer alone. Application keys stay unchanged.
             if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="foreign" &&
                 int(bytes[0])==0 && stdbytes.HasPrefix(payloadData,reverseSwitchAckMagic[:]) {
-                if cryptoConfig.SecureReady() &&
+                // A pinned, root-MAC authenticated PTA4 may safely
+                // change the ICMP initiator before an AEAD session exists
+                // if Direct-first initial pairing could never complete.
+                // It does not mark the application session authenticated.
+                if (cryptoConfig.SecureReady() ||
+                    cryptoConfig.reverse.preference==ICMPAutoDirect) &&
                     cryptoConfig.reverse.acceptReverseSwitchProof(echoId,echoSeq,payloadData,now) &&
                     cryptoConfig.reverse.rotateKeepingSession(ICMPReverse,now,"verified_reverse_available") {
                     // Immediately offer a matching Echo Request so Iran's
@@ -402,7 +407,7 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
                         // path while the existing Direct AEAD remains live.
                         // One extra reply per 10s maximum, not per poll.
                         if cryptoConfig.reverse.allowDirectPathProof(now) {
-                            proof:=cryptoConfig.reverse.makeProof(payloadData,now)
+                            proof:=cryptoConfig.reverse.makeProof(payloadData,now,cryptoConfig.sec.lastPeerTraffic())
                             _=emitEcho(conn,peer,0,echoId,echoSeq,proof)
                         }
                     } else {
