@@ -235,6 +235,9 @@ func newReverseTransport(preference ICMPDirection, key []byte, now time.Time) (*
     if len(key)!=32 {return nil, errors.New("reverse transport requires a 32-byte shared pairing key")}
     if _,err:=ParseICMPDirection(string(preference));err!=nil{return nil,err}
     r:=&reverseTransport{preference:preference,selected:ICMPReverse,started:now,
+        // This counter is process-global. Only NEW failures after creating
+        // the transport may trigger a 3-second adaptive poll backoff.
+        lastObservedICMPWriteFailures:icmpWriteErrors.Load(),
         pollWakeup:make(chan struct{},1)}
     copy(r.secret[:],key)
     if preference==ICMPDirect {r.selected=ICMPDirect}
