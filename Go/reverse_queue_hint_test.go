@@ -28,8 +28,11 @@ func TestQueueAwarePollingUsesActualAuthenticatedBacklog(t *testing.T){
     if hint[0]!='P'||hint[1]!='T'||hint[2]!='Q'||hint[3]!='4' {t.Fatal("hint magic")}
     if !foreign.authenticateQueueHint(hint,start) {t.Fatal("authenticated queue hint rejected")}
     if !foreign.noteAuthenticatedBacklogWake(start){t.Fatal("missed poller wake")}
-    if p:=foreign.pollPeriod(start.Add(10*time.Millisecond),0,true);p!=16*time.Millisecond {
-        t.Fatalf("single game datagram should request 16ms, got %s",p)
+    if p:=foreign.pollPeriod(start.Add(10*time.Millisecond),0,true);p!=8*time.Millisecond {
+        t.Fatalf("new game datagram should get immediate 8ms burst, got %s",p)
+    }
+    if p:=foreign.pollPeriod(start.Add(200*time.Millisecond),0,true);p!=16*time.Millisecond {
+        t.Fatalf("single game packet should decay to measured 16ms, got %s",p)
     }
     if foreign.authenticateQueueHint(hint,start.Add(100*time.Millisecond)) {
         t.Fatal("replayed queue demand was accepted")
