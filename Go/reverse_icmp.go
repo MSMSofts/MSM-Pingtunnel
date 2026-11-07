@@ -1027,8 +1027,12 @@ func (r *reverseTransport) noteUsefulFrame(now time.Time) {
     // backlog estimate instead of polling for packets already received.
     // Partial fragments do not reach this function.
     if r.queueHintDepth>0 && !r.queueHintAt.IsZero() &&
-        !now.Before(r.queueHintAt) && now.Sub(r.queueHintAt)<reverseWakeBurst {
+        !now.Before(r.queueHintAt) && now.Sub(r.queueHintAt)<6*time.Second {
         r.queueHintDepth--
+        if r.queueHintDepth==0 {
+            r.queueHintBytes=0
+            r.queueHintAgeMs=0
+        }
     }
     if !r.lastUsefulFrame.IsZero() && now.Sub(r.lastUsefulFrame)>=0 &&
         now.Sub(r.lastUsefulFrame)<350*time.Millisecond {
@@ -1084,6 +1088,12 @@ func (r *reverseTransport) pollPeriod(now time.Time,activeConns int,ready bool) 
                 if period>20*time.Millisecond {period=20*time.Millisecond}
             }
         }
+        // Keep authenticated, not-yet-drained remote pressure warm for
+        // at most 6s rather than prematurely sleeping at a 1s cadence.
+        // The 25ms floor disappears when all reported DATA arrives.
+        if r.queueHintDepth>0 && !r.queueHintAt.IsZero() &&
+            !now.Before(r.queueHintAt) && now.Sub(r.queueHintAt)<6*time.Second &&
+            period>25*time.Millisecond { period=25*time.Millisecond }
         // Smart queue-aware scheduling: Iranian PTQ4 signals are signed
         // observations of actual encrypted FIFO depth and oldest age, not
         // guesses based on a TCP congestion window or a video buffer.
@@ -1135,6 +1145,7 @@ func (r *reverseTransport) noteDeliveredFrame(created,now time.Time) {
     ms:=int64(delay/time.Millisecond)
     r.mu.Lock();defer r.mu.Unlock()
     r.deliveredFrames++
+    r.lastDeliveredAt=now
     r.lastDeliveredQueueDelayMs=ms
     if ms>r.maxDeliveredQueueDelayMs {r.maxDeliveredQueueDelayMs=ms}
     if delay>=250*time.Millisecond {r.delayedFrames++}
@@ -1212,6 +1223,7 @@ type reverseDiagnostics struct {
     MeanQueueDelayMs int64
     P95QueueDelayMs int64
     DeliveryDelaySampleCount int
+    LastDeliveryAgeSeconds int64
     LastOutboundDataAgeMs int64
 }
 func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
@@ -1242,6 +1254,12 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         directProofAge=int64(now.Sub(r.lastDirectProof).Seconds())
         if directProofAge<0{directProofAge=0}
     }
+    deliveryAge:=int64(-1)
+    if !r.lastDeliveredAt.IsZero() {
+        d:=now.Sub(r.lastDeliveredAt)
+        if d<0 {d=0}
+        deliveryAge=int64(d/time.Second)
+    }
     hintAgeSince:=int64(-1)
     if !r.queueHintAt.IsZero() {
         gap:=now.Sub(r.queueHintAt)
@@ -1260,6 +1278,10 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
     if !r.lastSwitch.IsZero(){
         switchAge=int64(now.Sub(r.lastSwitch).Seconds())
         if switchAge<0{switchAge=0}
+    }
+    reportedDepth,reportedOldest,reportedBytes:=r.queueHintDepth,r.queueHintAgeMs,r.queueHintBytes
+    if r.queueHintAt.IsZero() || now.Sub(r.queueHintAt)>reverseWakeBurst {
+        reportedDepth,reportedOldest,reportedBytes=0,0,0
     }
     return reverseDiagnostics{Pending:len(r.pending),PendingBytes:r.pendingBytes,
         QueuePeak:r.queuePeak,QueueDrops:r.drops,FailedReplies:r.failedReplies,
@@ -1283,8 +1305,8 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         BacklogWakeSent:r.backlogWakeSent,BacklogWakeAccepted:r.backlogWakeAccepted,
         BacklogWakeRateLimited:r.backlogWakeRateLimited,
         BacklogWakeActiveMs:wakeRemaining,
-        QueueHintDepth:r.queueHintDepth,QueueHintAgeMs:r.queueHintAgeMs,
-        QueueHintBytes:r.queueHintBytes,QueueHintAgeSinceReceivedMs:hintAgeSince,
+        QueueHintDepth:reportedDepth,QueueHintAgeMs:reportedOldest,
+        QueueHintBytes:reportedBytes,QueueHintAgeSinceReceivedMs:hintAgeSince,
         QueueHintsReceived:r.queueHintReceived,QueueHintsRejected:r.queueHintRejected,
         PollBackoffRemainingMs:backoffRemaining,
         DirectProbeChecks:r.directProbeChecks,DirectPathProofs:r.directPathProofs,
@@ -1296,7 +1318,7 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         DelayedFrames:r.delayedFrames,VeryDelayedFrames:r.veryDelayedFrames,
         MeanQueueDelayMs:avgDelay,P95QueueDelayMs:p95Delay,
         DeliveryDelaySampleCount:r.deliveryDelaySampleCount,
-        LastOutboundDataAgeMs:outboundAge}
+        LastDeliveryAgeSeconds:deliveryAge,LastOutboundDataAgeMs:outboundAge}
 }
 
 // Observed inbound authenticated reverse probes are separately reported.
