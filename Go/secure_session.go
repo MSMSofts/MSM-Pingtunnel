@@ -593,6 +593,7 @@ type secureStatus struct{
  ReverseMeanDeliveryDelayMs int64 `json:"reverse_mean_delivery_delay_ms"`
  ReverseP95DeliveryDelayMs int64 `json:"reverse_p95_delivery_delay_ms"`
  ReverseDeliveryDelaySamples int `json:"reverse_delivery_delay_samples"`
+ ReverseLastDeliveryAgeSeconds int64 `json:"reverse_last_delivery_age_seconds"`
  ReverseLastOutboundDataAgeMs int64 `json:"reverse_last_outbound_data_age_ms"`
  ReverseLastDataAge int64 `json:"reverse_last_data_age_seconds"`
  AutoFallbackCount uint64 `json:"auto_direct_fallback_count"`
@@ -668,8 +669,9 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  if len(policy)>0 {
     switch policy[0] {
     case "auto":report.AutoRoutePolicy="reverse_preferred_direct_on_failure"
-    case "reverse":report.AutoRoutePolicy="reverse_only"
-    case "direct":report.AutoRoutePolicy="direct_only"
+    case "auto_direct":report.AutoRoutePolicy="direct_preferred_reverse_on_failure"
+    case "reverse":report.AutoRoutePolicy="manual_reverse"
+    case "direct":report.AutoRoutePolicy="manual_direct"
     }
  }
  report.AutoPreferredReverseReturns=diag.PreferredReverseReturns
@@ -699,6 +701,7 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.ReverseMeanDeliveryDelayMs=diag.MeanQueueDelayMs
  report.ReverseP95DeliveryDelayMs=diag.P95QueueDelayMs
  report.ReverseDeliveryDelaySamples=diag.DeliveryDelaySampleCount
+ report.ReverseLastDeliveryAgeSeconds=diag.LastDeliveryAgeSeconds
  report.ReverseLastOutboundDataAgeMs=diag.LastOutboundDataAgeMs
  report.ReverseLastDataAge=diag.LastUsefulFrameAgeSeconds
  report.AutoFallbackCount=diag.FallbackCount
