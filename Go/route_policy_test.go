@@ -60,13 +60,21 @@ func TestManualRoutesNeverSwitchEvenOnDemandAndSignedProofs(t *testing.T) {
     }
 }
 
+// The real client samples local demand once per second. A single synthetic
+// note every 10 seconds resets demandSince by design; test genuine sustained
+// demand with the same 1Hz pattern as production.
+func keepRouteDemand(r *reverseTransport,from,to time.Time) {
+    for at:=from;!at.After(to);at=at.Add(time.Second) {
+        r.noteDemand(at,true)
+    }
+}
+
 func TestDirectFirstFallbackRequiresTwoDemandProofsAndStaleAEAD(t *testing.T) {
     start:=time.Unix(1901002000,0)
     iran,foreign:=routeTestPair(t,ICMPAutoDirect,start)
     t1:=start.Add(91*time.Second)
-    iran.noteDemand(start.Add(41*time.Second),true)
+    keepRouteDemand(iran,start.Add(41*time.Second),t1.Add(10*time.Second))
     for _,now:=range []time.Time{t1,t1.Add(10*time.Second)} {
-        iran.noteDemand(now,true)
         probe,err:=foreign.makeProbe(now);if err!=nil{t.Fatal(err)}
         seq:=int(now.Sub(start)/time.Second)+10
         foreign.stageProbe(0x42a5,seq,probe,now)
@@ -116,9 +124,8 @@ func TestDirectFirstRejectsIdleAndForgedFallbackProof(t *testing.T) {
 func TestDirectFirstOneWayReplyLossVsHealthyDirect(t *testing.T) {
     start:=time.Unix(1901011100,0)
     iran,foreign:=routeTestPair(t,ICMPAutoDirect,start)
-    iran.noteDemand(start.Add(10*time.Second),true)
+    keepRouteDemand(iran,start.Add(10*time.Second),start.Add(61*time.Second))
     for j,at:=range []time.Time{start.Add(51*time.Second),start.Add(61*time.Second)}{
-        iran.noteDemand(at,true)
         probe,err:=foreign.makeProbe(at);if err!=nil{t.Fatal(err)}
         foreign.stageProbe(3333,100+j,probe,at)
         valid,_:=iran.authenticateProbeWithSwitch(probe,at)
@@ -150,14 +157,13 @@ func TestDirectFirstStartupFailureRecoversOnlyWithDemandAndDelay(t *testing.T){
     start:=time.Unix(1901012100,0)
     iran,foreign:=routeTestPair(t,ICMPAutoDirect,start)
     early:=start.Add(60*time.Second)
-    iran.noteDemand(start.Add(10*time.Second),true)
-    iran.noteDemand(early,true)
+    keepRouteDemand(iran,start.Add(10*time.Second),early)
     probe,err:=foreign.makeProbe(early);if err!=nil{t.Fatal(err)}
     if proof:=iran.makeProof(probe,early,time.Time{});!bytes.Equal(proof[:4],reverseProofMagic[:]){
         t.Fatal("initial Direct handshake was abandoned before 90s")
     }
+    keepRouteDemand(iran,start.Add(61*time.Second),start.Add(105*time.Second))
     for i,at:=range []time.Time{start.Add(95*time.Second),start.Add(105*time.Second)}{
-        iran.noteDemand(at,true)
         probe,err:=foreign.makeProbe(at);if err!=nil{t.Fatal(err)}
         foreign.stageProbe(1904,30+i,probe,at)
         if valid,_:=iran.authenticateProbeWithSwitch(probe,at);!valid{t.Fatal("startup PTR4 was not authenticated")}
