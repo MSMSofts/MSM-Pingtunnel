@@ -29,6 +29,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify Bash installer syntax
         run: bash -n Source/*.sh
+      - name: Verify Release notes migration script syntax
+        run: python3 -m py_compile Source/publish_release_history.py
       - run: cargo test --manifest-path Rust/Cargo.toml
       - name: Verify Auto Tune is not exposed through the CLI
         run: |
@@ -141,6 +143,19 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check whether versioned release already exists
+        id: version_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v3.3.22 --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo 'exists=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'exists=false' >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/download-artifact@v4
         with:
           pattern: rust-linux-*
@@ -160,11 +175,12 @@ jobs:
             (cd dist && sha256sum pingtunnel-core-linux-* pingtunnel-manager-linux-* | grep -v '\.sha256') 
           } > dist/release-manifest.txt
       - uses: softprops/action-gh-release@v2
+        if: steps.version_release.outputs.exists == 'false'
         with:
           tag_name: v3.3.22
           name: Pingtunnel Manager 3.3.22 — secure wire v4
-          prerelease: true
-          make_latest: false
+          prerelease: false
+          make_latest: true
           files: dist/*
           fail_on_unmatched_files: true
           overwrite_files: false
@@ -177,3 +193,10 @@ jobs:
           files: dist/*
           fail_on_unmatched_files: true
           overwrite_files: true
+      - name: Migrate historical notes and promote v3.3.22
+        if: startsWith(github.event.head_commit.message, 'docs(release):')
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 Source/publish_release_history.py --dry-run
+          python3 Source/publish_release_history.py
