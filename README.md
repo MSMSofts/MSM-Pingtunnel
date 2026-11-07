@@ -2,7 +2,7 @@
 
 **تونل ICMP رمزنگاری‌شده برای انتقال ترافیک TCP/UDP بین یک VPS ایران و یک VPS خارج، با هستهٔ Go و مدیر Rust.**
 
-[English](README.en.md) · [آخرین نسخه پایدار: v3.3.22](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.22) · [توضیحات همه نسخه‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
+[English](README.en.md) · [آخرین نسخه پایدار: v3.3.23](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.23) · [توضیحات همه نسخه‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
 
 ## ویژگی‌ها
 
@@ -75,7 +75,7 @@ ICMP Echo Request / Echo Reply (Reverse یا Direct)
 
 ## نصب سریع
 
-> **انتشار پایدار 3.3.22:** انتشار پایدار GitHub با تست‌های موفق CI در AMD64/ARM64. این برچسب، تضمین تأخیر بازی یا پایداری در تمام شبکه‌ها نیست؛ قبل از ارتقا از تنظیمات نسخهٔ فعلی پشتیبان بگیرید و هر دو VPS را هماهنگ به‌روزرسانی کنید.
+> **انتشار پایدار 3.3.23:** انتشار پایدار GitHub با تست‌های موفق CI در AMD64/ARM64. این برچسب، تضمین تأخیر بازی یا پایداری در تمام شبکه‌ها نیست؛ قبل از ارتقا از تنظیمات نسخهٔ فعلی پشتیبان بگیرید و هر دو VPS را هماهنگ به‌روزرسانی کنید.
 
 ### ⚠️ بسیار مهم: حتماً ابتدا نصب و راه‌اندازی را روی سرور خارج انجام دهید
 
@@ -88,7 +88,7 @@ ICMP Echo Request / Echo Reply (Reverse یا Direct)
 ابتدا از طریق SSH به **سرور خارج** متصل شوید و نصب را اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.22/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.23/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -100,7 +100,7 @@ sudo pingtunnel setup
 **فقط پس از تکمیل مرحلهٔ خارج** به سرور ایران متصل شوید و اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.22/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.23/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
