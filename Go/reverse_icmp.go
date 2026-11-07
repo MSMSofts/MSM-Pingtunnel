@@ -997,6 +997,13 @@ func (r *reverseTransport) pollPeriod(now time.Time,activeConns int,ready bool) 
             if hintFresh {
                 if r.queueHintDepth>0 {
                     hintTarget:=reverseQueueHintPollInterval(r.queueHintDepth,r.queueHintAgeMs)
+                    // Rapid attack, slower decay: on a brand-new genuine
+                    // game packet give the queue an immediate small 8ms
+                    // retry window; once the initial 120ms passes, use
+                    // measured backlog rather than keeping 125 polls/s.
+                    if now.Sub(r.queueHintAt)<120*time.Millisecond {
+                        hintTarget=reverseFastPollPeriod
+                    }
                     if period>hintTarget {period=hintTarget}
                 }
             } else if period>reverseFastPollPeriod {
