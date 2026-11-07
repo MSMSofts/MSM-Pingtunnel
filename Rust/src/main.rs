@@ -710,11 +710,16 @@ fn show_security_status() -> Result<()> {
     if let Some(count)=report["reverse_queue_hints_received"].as_u64().filter(|c|*c>0) {
         println!("  Authenticated remote queue hints: received {count}, rejected {}",
             report["reverse_queue_hints_rejected"]);
-        println!("  Last remote queue: {} packets / {} bytes / oldest {}ms | hint age {}ms",
-            report["reverse_remote_queue_hint_depth"],
-            report["reverse_remote_queue_hint_bytes"],
-            report["reverse_remote_queue_hint_oldest_ms"],
-            report["reverse_remote_queue_hint_age_ms"]);
+        let age=report["reverse_remote_queue_hint_age_ms"].as_i64().unwrap_or(-1);
+        if age<0 || age>1200 {
+            println!("  Remote queue: no FRESH report; last hint was {age}ms ago (not live queue pressure)");
+        } else {
+            println!("  Last remote queue: {} packets / {} bytes / oldest {}ms | hint age {}ms",
+                report["reverse_remote_queue_hint_depth"],
+                report["reverse_remote_queue_hint_bytes"],
+                report["reverse_remote_queue_hint_oldest_ms"],
+                report["reverse_remote_queue_hint_age_ms"]);
+        }
         println!("  Queue-aware adaptive poll interval: {}ms (minimum 8ms, including write-error backoff)",
             report["reverse_poll_interval_ms"]);
     }
@@ -780,6 +785,13 @@ fn show_security_status() -> Result<()> {
         println!("  Reverse very slow (>1s) frames: {}",report["reverse_very_delayed_frames"]);
         println!("  Reverse successful send queue delay mean/P95 (last 128): {} / {} ms ({} samples)",
             report["reverse_mean_delivery_delay_ms"],report["reverse_p95_delivery_delay_ms"],report["reverse_delivery_delay_samples"]);
+        if let Some(age)=report["reverse_last_delivery_age_seconds"].as_i64().filter(|v|*v>=0) {
+            if age>60 {
+                println!("  NOTE: these queue delay samples are HISTORICAL (last delivery {age}s ago), not live lag.");
+            } else {
+                println!("  Last successful queued Reverse delivery: {age}s ago");
+            }
+        }
         println!("  Reverse ICMP reply write failures: {}",report["reverse_write_failures"]);
         println!("  Filtered kernel PTR4 Echo reflections: {}",report["reverse_poll_echo_reflections"]);
         println!("  Filtered exact PTD4 DATA Echo reflections: {}",report["reverse_data_echo_reflections"]);
