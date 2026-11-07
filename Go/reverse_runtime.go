@@ -144,7 +144,16 @@ func sendForeignPoll(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoC
     // the negotiated path.
     // Never hold the preferred-route return hostage to Direct failure
     // or application activity. Two fresh PRA4 roundtrips are mandatory.
-    switchRequest:=c.reverse.takeSwitchRequest(now)
+    directDegraded:=false
+    if c.reverse.preference==ICMPAutoDirect && c.SecureReady() &&
+        !authenticated {
+        last:=c.sec.lastPeerTraffic()
+        // A long-idle Direct connection is not sufficient evidence;
+        // foreign also requires two fresh signed PRF4 replies showing
+        // the Iranian client's actual application demand.
+        directDegraded=!last.IsZero() && now.Sub(last)>=90*time.Second
+    }
+    switchRequest:=c.reverse.takeSwitchRequest(now,directDegraded)
     var probe []byte
     var err error
     if switchRequest {
