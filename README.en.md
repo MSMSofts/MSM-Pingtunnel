@@ -1,100 +1,39 @@
 # MSM Pingtunnel
 
-**A lightweight, encrypted ICMP tunnel between an Iran VPS and an overseas VPS**, forwarding TCP or UDP traffic through a Go core and a simple Rust manager.
+**An authenticated, encrypted ICMP tunnel for forwarding TCP/UDP traffic between two Linux VPSs, with a Go transport core and a Rust control menu.**
 
-[فارسی](README.md) · [Current preview: v3.3.22](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.22) · [CI status](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0 license](LICENSE)
+[فارسی](README.md) · [Latest stable: v3.3.22](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.22) · [All release notes](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0](LICENSE)
 
 ## Features
 
-- **Authenticated encryption:** 256-bit pairing key, ephemeral secure sessions, peer authentication and replay protection.
-- **Three routing policies:** automatic Reverse-first, automatic Direct-first, and manual locked direction; no scheduled timed rotation.
-- **TCP or UDP forwarding:** Connect applications such as Hysteria 2 or Xray running on the overseas VPS.
-- **Unified management:** Setup wizard, systemd service controls, logs, health checks, security reports and passive performance metrics.
-- **Conservative defaults:** Experimental ICMP segmentation and UDP parity repair are disabled by default; existing connection settings are preserved.
+- **Authenticated encryption:** shared 256-bit pairing key, ephemeral X25519 sessions, AEAD transport encryption and anti-replay controls.
+- **Three routing choices:** automatic Reverse-first, automatic Direct-first, or Manual with a locked Direct / Reverse direction.
+- **Adaptive Reverse polling:** signed FIFO queue-age/depth observations, bounded demand-responsive ICMP opportunities and write-error backoff.
+- **TCP and UDP forwarding:** transparently forward encrypted traffic to a loopback-only service on the overseas VPS, such as Hysteria 2 or Xray.
+- **Unified Rust manager:** setup, route selection, systemd controls, health and security diagnostics, RTT/jitter observations, and logs.
+- **Conservative compatibility:** config schema 3 and Wire v4, installation checks/rollback, experimental segmentation and UDP repair opt-in only.
 
-Pingtunnel is **not a VPN server**. It transports traffic arriving at the Iran VPS over encrypted ICMP to a local application endpoint on the overseas VPS, for example `127.0.0.1:444`. Each tunnel instance forwards either TCP or UDP, as configured.
+Pingtunnel **is not a VPN server**. It transports traffic arriving at the local Iran-side listener over encrypted ICMP to the chosen foreign-side loopback service.
 
-## Route Policy: menu item 15 (v3.3.22)
+## Choose a route policy
 
-The menu offers **three options**:
+Run `sudo pingtunnel` and select **15) Route Policy**:
 
-1. **AUTO Reverse first:** starts Reverse; switches to Direct only on
-   sustained authenticated Reverse failure and restores Reverse on two
-   independent signed return-path proofs.
-2. **AUTO Direct first:** starts Direct (like original PingTunnel); after
-   prolonged Direct failure plus two fresh signed proofs of real Iranian
-   application demand, switches to verified Reverse. Returns to Direct
-   after two signed Direct-path proofs and a matched PTX4/PTB4 handoff.
-3. **MANUAL:** choose Reverse-only or Direct-only in a submenu. Neither
-   direction is switched automatically, regardless of link quality.
+| Menu | Initial direction | Failover behavior |
+| --- | --- | --- |
+| **1. AUTO Reverse-first** | Reverse | Fallback to Direct on sustained verified outage; authenticated return to Reverse |
+| **2. AUTO Direct-first** | Direct | Fallback to Reverse on sustained verified outage; authenticated return to Direct |
+| **3. Manual** | Reverse or Direct, selected in submenu | **No automatic switching** |
 
-CLI: `sudo pingtunnel route auto-reverse|auto-direct|manual-reverse|manual-direct`,
-or `sudo pingtunnel route show`.
+CLI: `sudo pingtunnel route auto-reverse`, `auto-direct`, `manual-reverse`, `manual-direct`, or `show`.
 
-**Select the same route policy on both VPS peers.** Each local change
-restarts that peer. The pairing key, forwarding config, Wire v4 and
-config schema 3 remain unchanged; authenticated successful path handoffs
-keep the live AEAD session. Time-based three-hour route rotation remains
-disabled in all options.
+**Configure the same policy on BOTH VPSs**. Each local change restarts its service; coordinate changes to avoid path mismatch. The pairing secret and forwarding parameters are preserved. There is no scheduled three-hour route rotation.
 
-Reverse PTQ4 backlog-aware polling now keeps a short 25ms maximum
-opportunity interval for up to six seconds while authenticated,
-undelivered queue pressure exists. As DATA is received, the remote
-queue estimate drains and the poller returns to low-rate idle. Stale
-remote metrics and historical p95 send queues are explicitly labeled.
+## Queue-aware latency control
 
-See [Route policies and recovery](docs/ROUTE_MODES_AND_QUEUE_RECOVERY.md).
+In Reverse, Iran signs and conceals real FIFO queue depth and oldest-wait age in short **PTQ4** hints. The foreign peer responds to real backlog pressure with bounded fast ICMP polling and returns to low-rate idle as queues drain. Outstanding, authenticated demand can retain a brief six-second warm opportunity window; stale queue reports are not presented as current pressure. This targets transport queueing delay; **game RTT, jitter and uninterrupted delivery are not guaranteed**.
 
-### Signed queue-aware Reverse pacing (3.3.21)
-
-Iran transmits **PTQ4**, a short authenticated queue hint containing the
-real encrypted FIFO depth, oldest wait and pending bytes. Its metadata
-is masked with a nonce-derived pairing-key pad; it carries no user
-traffic. Foreign rapidly polls for the initial 120ms after a genuine
-packet and then adapts between 8–16ms as demand evolves. Stale hints
-return to idle rates; socket write failures cause a bounded backoff.
-
-Both VPS peers should upgrade together. Wire v4, config schema 3 and
-Reverse-first failover are unchanged. This is a Preview, not a measured
-game latency claim. See `docs/AUTHENTICATED_QUEUE_ADAPTIVE_PACING.md`.
-
-### Reverse-first authenticated AUTO recovery (3.3.20)
-
-AUTO starts **Reverse** and never schedules a timer-driven healthy
-Reverse-to-Direct rotation. Direct is only a fallback after a sustained
-authenticated Reverse outage with live application demand. During Direct,
-Foreign probes Reverse every **10 seconds** and requires **two separate,
-matched HMAC-authenticated return-path proofs** before a signed takeover,
-after at least **60 seconds** of dwell. A pending handoff retries every
-2 seconds for up to 30 seconds; keys and Wire v4 are preserved.
-
-Reverse foreign-origin DATA now receives unique ICMP Echo sequences.
-Only genuine DATA (not periodic PING) may wake high-frequency polling.
-See `docs/ORIGINAL_SEND_COMPARE_REVERSE_FIRST.md`.
-This remains a **Preview**; no real-game latency guarantee is implied.
-
-### Long-running game / QUIC latency fixes (3.3.19)
-
-The previous anti-replay `big.Int` bitmap grew with total authenticated
-packets, increasing per-packet decryption work during sustained sessions.
-It now uses a fixed 1024-bit window. The UDP-only authenticated dispatcher
-is capped at 256 queued packets; on saturation it counts dropped UDP DATA
-rather than blocking the sole ICMP receiver for up to 3 seconds. ICMP
-receive capacity is now 65,535 bytes.
-
-This is a **Preview**, not a demonstrated fix for any particular live VPS.
-Compare two-hour gaming runs before and after upgrading both peers.
-Diagnostics: `Source/long_session_probe.py` and
-`docs/LONG_SESSION_LAG_AUDIT.md`. The upstream Go 1.26 source snapshot
-is vendored under `Upstream/pingtunnel-df16/` for reproducible builds.
-
-### Lower first-packet latency during idle Reverse (3.3.17)
-
-Previously, a quiet Reverse poller might wait up to **one second** to issue another Echo Request after Iran queued new user data. Now Iran sends a root-HMAC-authenticated, replay-protected `PTW4` hint **only after actual encrypted data is queued**. The foreign VPS immediately wakes its single poll timer and briefly uses **8ms** intervals for up to **1.2 seconds**. No application plaintext, encryption keys, or route-switch commands travel in the hint, and it never changes Smart Rotation state.
-
-Iran sends no more than **two** backlog hints per second; Foreign independently rate-limits valid hints. Once the demand pulse expires, normal **1Hz idle** polling resumes. When genuinely active, base polling improves **40ms → 25ms**, warm intervals **16ms → 12ms**, and sustained throughput **10ms → 8ms**. If the wake message cannot traverse the current network path, the normal poller still operates. This is a bounded latency/packet-rate tradeoff, not a bypass or a cure for unknown provider ICMP filtering.
-
-`sudo pingtunnel security` shows verified, sent and rate-limited backlog wakeups. The ordinary host-to-host ping RTT (previously about 86ms) is constrained by the real path; improvement is targeted at **queueing latency**, not the physical network RTT. Real Hysteria 2, streaming, stability and ICMP PPS measurements are required to quantify results.
+Details: [Route policy & recovery](docs/ROUTE_MODES_AND_QUEUE_RECOVERY.md) and [Queue-adaptive pacing](docs/AUTHENTICATED_QUEUE_ADAPTIVE_PACING.md). Version-by-version changes are documented under [GitHub Releases](https://github.com/MSMSofts/MSM-Pingtunnel/releases).
 
 ### Optional, reversible suppression of duplicate kernel Echo Replies
 
@@ -128,17 +67,6 @@ Session and replay checks → decryption → data delivery
 
 **Security boundaries:** Application data in authenticated frames is encrypted, but outer IP/ICMP headers and the presence of ICMP traffic are not hidden. This does not guarantee anonymity, resistance to filtering or an independent security audit. Keep the pairing key private, and inspect authentication/replay counters with `sudo pingtunnel security`.
 
-## Resource usage in a real-world test
-
-During a user-observed test with an **active tunnel, UDP forwarding on port 444 and one VPN connection used for Instagram and YouTube**, the Pingtunnel monitoring dashboard on **v3.3.13** displayed:
-
-| VPS | CPU (10s) | Average CPU (60s) | RAM / RSS | Average RAM (60s) |
-| --- | ---: | ---: | ---: | ---: |
-| Iran | 3.4% | 4.2% | 16.9 MiB | 17.0 MiB |
-| Overseas | 5.6% | 6.4% | 35.4 MiB | 35.4 MiB |
-
-These figures are **one real-world observation**, not a controlled benchmark, a capacity limit or a resource-usage guarantee. CPU percentages follow the dashboard convention (100% represents one vCPU); RAM is the process's **resident set size (RSS)**, not total system memory. Actual usage varies with VPS specifications, traffic volume and concurrent connections.
-
 ## Requirements
 
 - Two Linux VPSs with public IPv4 addresses: one in Iran, one overseas
@@ -147,7 +75,7 @@ These figures are **one real-world observation**, not a controlled benchmark, a 
 
 ## Quick installation
 
-> **Release status:** This is a **preview** addressing one-way ICMP recovery. Passing CI does not prove reliability on a real two-VPS network. Back up operational configurations and upgrade both peers together only after a controlled test.
+> **Stable v3.3.22:** a GitHub stable release with successful AMD64/ARM64 CI validation. A stable label does not guarantee game RTT or availability on every network. Back up and upgrade both peers together in a maintenance window.
 
 ### ⚠️ Important: install and set up the OVERSEAS VPS first
 
@@ -197,6 +125,11 @@ The installer checks matching Manager/Go core assets using SHA-256 and the relea
 | `sudo pingtunnel` | Interactive management menu |
 | `sudo pingtunnel setup` | Configure or adjust the paired tunnel |
 | `sudo pingtunnel status` | systemd service status |
+| `sudo pingtunnel route show` | Display the configured route policy |
+| `sudo pingtunnel route auto-direct` | Set Direct-first AUTO on this VPS |
+| `sudo pingtunnel route auto-reverse` | Set Reverse-first AUTO on this VPS |
+| `sudo pingtunnel route manual-reverse` | Lock manual Reverse with no automatic switching |
+| `sudo pingtunnel route manual-direct` | Lock manual Direct with no automatic switching |
 | `sudo pingtunnel health` | Core heartbeat |
 | `sudo pingtunnel security` | Authentication, session and Reverse diagnostics |
 | `sudo pingtunnel performance` | RTT, jitter and passive performance metrics |
@@ -223,4 +156,4 @@ If traffic fails, check both peers' pairing keys, matching transport, opposite I
 
 The Go core is based on [esrrhs/pingtunnel](https://github.com/esrrhs/pingtunnel); the Rust manager handles setup and service controls. The project provides a two-VPS transport, not a VPN service, high-availability cluster or guarantee against filtering or packet loss.
 
-[Architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [License](LICENSE)
+[Architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Release notes by version](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [License](LICENSE)
