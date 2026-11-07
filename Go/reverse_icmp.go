@@ -449,6 +449,19 @@ func (r *reverseTransport) fallbackDirect(now time.Time, ready bool, lastAuthent
  return true
 }
 
+// Prevent the generic 35s Iran AEAD watchdog from tearing down a
+// Direct-first session *before* two signed PRF4 proofs can authorize a
+// Direct->Reverse fallback. After five minutes of sustained demand with
+// no recovery, permit ordinary rekey. An explicit HMACed PTS4 can still
+// take over Reverse while that new handshake is incomplete.
+func (r *reverseTransport) deferDirectRecoveryRekey(now time.Time) bool {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    return r.preference==ICMPAutoDirect && r.selected==ICMPDirect &&
+        !r.demandSince.IsZero() && !now.Before(r.demandSince) &&
+        now.Sub(r.demandSince)<5*time.Minute
+}
+
 // A recent successful direct exchange wins over speculative reverse polls.
 // Give the fallback a full stabilization window before trying Reverse again.
 func (r *reverseTransport) allowReverseCandidate(now time.Time,ready bool,lastAuthenticated time.Time) bool {
