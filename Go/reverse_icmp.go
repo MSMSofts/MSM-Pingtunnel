@@ -73,6 +73,11 @@ const (
     reverseUnconfirmedGrace = 150 * time.Second
     reverseEstablishedGrace = 150 * time.Second
     reverseMinDwell = 60 * time.Second
+    // Direct-first: unlike Reverse-first, a missing initial handshake
+    // must be recoverable through independent signed reverse proofs.
+    directFirstInitialGrace = 90 * time.Second
+    directFirstDemandGrace = 20 * time.Second
+    directFirstReplySilence = 35 * time.Second
     reverseFrameTTL = 12 * time.Second
     reverseQueueMaxFrames = 256
     reverseQueueMaxBytes = 2 * 1024 * 1024
@@ -645,17 +650,17 @@ func (r *reverseTransport) makeProof(probe []byte,at ...time.Time) []byte {
     if len(at)>1 && activeDemand {
         lastPeer:=at[1]
         if lastPeer.IsZero() {
-            // No authenticated Direct handshake ever completed.
+            // No authenticated Direct handshake ever completed; give it 90s.
             staleDirect=!now.Before(priorStart) &&
-                now.Sub(priorStart)>=reverseEstablishedGrace &&
-                now.Sub(demandAt)>=reverseAbsentGrace
+                now.Sub(priorStart)>=directFirstInitialGrace &&
+                now.Sub(demandAt)>=directFirstDemandGrace
         } else {
             // Direct completed before; recover from one-way stalls after
-            // 35 seconds with real application demand. An idle tunnel is
+            // 35 seconds of missing replies and 20 seconds of demand. An idle tunnel is
             // not interpreted as failure by this check.
             staleDirect=!now.Before(lastPeer) &&
-                now.Sub(lastPeer)>=35*time.Second &&
-                now.Sub(demandAt)>=reverseAbsentGrace
+                now.Sub(lastPeer)>=directFirstReplySilence &&
+                now.Sub(demandAt)>=directFirstDemandGrace
         }
     }
     if staleDirect {return r.makeSwitchAck(probe,reverseFallbackProofMagic)}
