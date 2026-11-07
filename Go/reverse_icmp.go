@@ -1011,9 +1011,7 @@ func (r *reverseTransport) pollPeriod(now time.Time,activeConns int,ready bool) 
     // bounded 3-second respite with 25ms minimum; resume automatically.
     errorsNow:=icmpWriteErrors.Load()
     if errorsNow>r.lastObservedICMPWriteFailures {
-        if r.lastObservedICMPWriteFailures!=0 {
-            r.pollBackoffUntil=now.Add(3*time.Second)
-        }
+        r.pollBackoffUntil=now.Add(3*time.Second)
         r.lastObservedICMPWriteFailures=errorsNow
     }
     if now.Before(r.pollBackoffUntil) && period<25*time.Millisecond {
