@@ -2,7 +2,7 @@
 
 **تونل ICMP رمزنگاری‌شده میان یک VPS ایران و یک VPS خارج** برای انتقال ترافیک TCP یا UDP، با راه‌اندازی و مدیریت ساده از طریق ابزار Rust و هستهٔ Go.
 
-[English](README.en.md) · [نسخهٔ آزمایشی فعلی: v3.3.20](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.20) · [وضعیت تست‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
+[English](README.en.md) · [نسخهٔ آزمایشی فعلی: v3.3.21](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.21) · [وضعیت تست‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
 
 ## امکانات
 
@@ -26,6 +26,21 @@ Pingtunnel **خودش VPN Server نیست**؛ ترافیک کاربر در ای�
 `sudo pingtunnel security` جهت فعال، تعداد چرخش‌ها، علت آخرین جابه‌جایی، دورهٔ سه‌ساعته، تأییدهای معتبر هر مسیر و نرخ ICMP فضای کاربر را نمایش می‌دهد. نرخ Poll مصنوعی Reverse در انتقال فعال حداکثر حدود **۱۲۵ درخواست در ثانیه** (در حالت بیکار حدود **۱ درخواست در ثانیه**) است؛ این سقف، محدودیت مجموع بسته‌های DATA کاربر نیست.
 
 **مهم:** هدف Smart Rotation توزیع زمانی بار بین دو الگوی ICMP و کاهش احتمال برخورد با محدودیتِ مختص یک جهت است. مجموع ترافیک یا خط‌مشی ناشناختهٔ Anti-DDoS را تغییر نمی‌دهد و تضمینی برای جلوگیری از فیلترینگ وجود ندارد. هر دو VPS باید نسخهٔ جدید را با هم اجرا کنند؛ نسخهٔ قدیمی منطق پیام‌های تأیید چرخش را نمی‌شناسد.
+
+### کنترل هوشمند صف و زمان‌بندی خودکار Reverse (3.3.21)
+
+با پیام امضاشدهٔ **PTQ4**، ایران عمق صف، سن قدیمی‌ترین بسته و حجم
+بسته‌های منتظر را به خارج می‌فرستد؛ این اطلاعات با کلید Pairing
+ماسک شده‌اند و هیچ دادهٔ کاربر در پیام قرار نمی‌گیرد. خارج به‌طور خودکار
+پس از دریافت درخواست واقعی، برای مدت کوتاه سریع Poll می‌کند و سپس با
+توجه به فشار صف، داده‌های تحویلی و خطای نوشتن ICMP بین بازه‌های ۸ تا
+۱۶ میلی‌ثانیه تنظیم می‌شود. وقتی صف خالی یا اطلاعات قدیمی شد، به
+حالت کم‌مصرف برمی‌گردد. **۸ms حداقل فاصلهٔ Poll است، نه تضمین RTT.**
+
+هر دو VPS باید هم‌زمان به نسخه جدید به‌روزرسانی شوند. Wire v4،
+کلیدهای Pairing و مسیر Reverse-first تغییر نکرده‌اند.
+جزئیات: `docs/AUTHENTICATED_QUEUE_ADAPTIVE_PACING.md`.
+این نسخه Preview است و تأخیر بازی باید عملی سنجیده شود.
 
 ### مسیر خودکار Reverse-first با بازگشت پایدار (3.3.20)
 
@@ -122,7 +137,7 @@ ICMP Echo Request / Echo Reply (Reverse یا Direct)
 ابتدا از طریق SSH به **سرور خارج** متصل شوید و نصب را اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.20/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.21/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -134,7 +149,7 @@ sudo pingtunnel setup
 **فقط پس از تکمیل مرحلهٔ خارج** به سرور ایران متصل شوید و اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.20/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.21/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
