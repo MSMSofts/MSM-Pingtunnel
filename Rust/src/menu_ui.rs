@@ -18,6 +18,7 @@ pub(crate) struct MenuView<'a> {
     pub region: &'a str,
     pub peer: &'a str,
     pub transport: &'a str,
+    pub route: &'a str,
     pub port: Option<u16>,
     pub service: &'a str,
     pub configured: bool,
@@ -83,9 +84,10 @@ const MAINTENANCE: [(u8, &str, &str); 3] = [
     (11, "Uninstall", "Remove binaries; keep pairing config"),
     (12, "Exit", "Close menu"),
 ];
-const SECURITY: [(u8, &str, &str); 2] = [
+const SECURITY: [(u8, &str, &str); 3] = [
     (13, "Security", "Replay and recovery"),
     (14, "Health", "Core heartbeat"),
+    (15, "Route Policy", "AUTO Reverse / AUTO Direct / Manual"),
 ];
 
 fn options(out: &mut String, section: &str, entries: &[(u8, &str, &str)],
@@ -103,7 +105,7 @@ fn options(out: &mut String, section: &str, entries: &[(u8, &str, &str)],
     }
 }
 
-/// View is deliberately single-column. Menu choices are 1..14 from TOP to
+/// View is deliberately single-column. Menu choices are 1..15 from TOP to
 /// BOTTOM, so visual scanning and terminal keyboard input agree.
 pub(crate) fn render_sized(view: &MenuView<'_>, color: bool, unicode: bool,
                            columns: u16, rows: u16) -> String {
@@ -131,6 +133,14 @@ pub(crate) fn render_sized(view: &MenuView<'_>, color: bool, unicode: bool,
     let _ = writeln!(out,"  {:<12} {}", "Location",location);
     let _ = writeln!(out,"  {:<12} {}", "Peer IPv4",short(if view.configured{view.peer}else{"-"},width.saturating_sub(16)));
     let _ = writeln!(out,"  {:<12} {} / {}", "Transport",transport,port);
+    let route=match view.route {
+        "auto" => "AUTO Reverse-first",
+        "auto_direct" => "AUTO Direct-first",
+        "reverse" => "MANUAL Reverse",
+        "direct" => "MANUAL Direct",
+        _ => "Unknown",
+    };
+    let _ = writeln!(out,"  {:<12} {}", "Route",route);
     let state_color=if view.service=="active"{"1;32"} else if view.service=="failed"{"1;31"}else{"1;33"};
     let _ = writeln!(out,"  {:<12} {}", "Service",paint(view.service,state_color,color));
 
@@ -241,13 +251,13 @@ mod tests {
 
     fn fixture()->MenuView<'static> {
         MenuView{version:"3.2.4",region:"foreign",peer:"203.0.113.10",
-            transport:"udp",port:Some(444),service:"active",
+            transport:"udp",route:"auto",port:Some(444),service:"active",
             configured:true,resources:Resources{cpu_percent:Some(0.3),cpu_average:Some(0.3),
                 ram_mib:Some(13.9),ram_average:Some(13.9),samples:6}}
     }
 
     #[test]
-    fn choices_are_strictly_top_to_bottom_1_to_14() {
+    fn choices_are_strictly_top_to_bottom_1_to_15() {
         for (cols,rows) in [(80,40),(52,30),(47,27)]{
             let s=render_sized(&fixture(),false,false,cols,rows);
             let choices:Vec<u8>=s.lines().filter_map(|line|{
@@ -255,9 +265,9 @@ mod tests {
                 let (prefix,_) = text.split_once(')')?;
                 prefix.trim().parse::<u8>().ok()
             }).collect();
-            assert_eq!(choices,(1..=14).collect::<Vec<u8>>());
+            assert_eq!(choices,(1..=15).collect::<Vec<u8>>());
             assert!(!s.contains("Auto Tune"));
-            assert!(!s.contains("15)"));
+            assert!(s.contains("15) Route Policy"));
             assert!(s.contains("0.3%"));
             assert!(s.contains("13.9 MiB"));
             assert!(!s.contains("\x1b["));
