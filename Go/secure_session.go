@@ -548,6 +548,13 @@ type secureStatus struct{
  ReverseBacklogWakesAccepted uint64 `json:"reverse_backlog_wakes_accepted"`
  ReverseBacklogWakesRateLimited uint64 `json:"reverse_backlog_wakes_rate_limited"`
  ReverseWakeBurstRemainingMs int64 `json:"reverse_wake_burst_remaining_ms"`
+ ReverseRemoteQueueHintDepth int `json:"reverse_remote_queue_hint_depth"`
+ ReverseRemoteQueueHintOldestMs int `json:"reverse_remote_queue_hint_oldest_ms"`
+ ReverseRemoteQueueHintBytes int `json:"reverse_remote_queue_hint_bytes"`
+ ReverseRemoteQueueHintAgeMs int64 `json:"reverse_remote_queue_hint_age_ms"`
+ ReverseQueueHintsReceived uint64 `json:"reverse_queue_hints_received"`
+ ReverseQueueHintsRejected uint64 `json:"reverse_queue_hints_rejected"`
+ ReversePollBackoffRemainingMs int64 `json:"reverse_poll_backoff_remaining_ms"`
  DirectProbeChecks uint64 `json:"direct_probe_checks"`
  DirectPathProofs uint64 `json:"direct_path_proofs"`
  DirectLastProofAgeSeconds int64 `json:"direct_last_proof_age_seconds"`
@@ -641,6 +648,13 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.ReverseBacklogWakesAccepted=diag.BacklogWakeAccepted
  report.ReverseBacklogWakesRateLimited=diag.BacklogWakeRateLimited
  report.ReverseWakeBurstRemainingMs=diag.BacklogWakeActiveMs
+ report.ReverseRemoteQueueHintDepth=diag.QueueHintDepth
+ report.ReverseRemoteQueueHintOldestMs=diag.QueueHintAgeMs
+ report.ReverseRemoteQueueHintBytes=diag.QueueHintBytes
+ report.ReverseRemoteQueueHintAgeMs=diag.QueueHintAgeSinceReceivedMs
+ report.ReverseQueueHintsReceived=diag.QueueHintsReceived
+ report.ReverseQueueHintsRejected=diag.QueueHintsRejected
+ report.ReversePollBackoffRemainingMs=diag.PollBackoffRemainingMs
  report.DirectProbeChecks=diag.DirectProbeChecks
  report.DirectPathProofs=diag.DirectPathProofs
  report.DirectLastProofAgeSeconds=diag.DirectLastProofAgeSeconds
