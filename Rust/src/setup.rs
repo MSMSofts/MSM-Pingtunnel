@@ -112,7 +112,7 @@ pub(crate) fn wizard() -> Result<()> {
         "peer_ip":peer,
         "pair_key":pair_key,
         "transport":transport,
-        "icmp_direction":"auto",
+        "icmp_direction":previous.as_ref().and_then(|v|get_string(v,"icmp_direction")).unwrap_or("auto"),
         "port":port,
         "memory_mb":0,
         "autostart":true
@@ -133,7 +133,7 @@ pub(crate) fn wizard() -> Result<()> {
     println!("  This server: {region} | Peer: {peer}");
     println!("  Forwarding: {}:{} ({transport})", if region=="iran" { "Iran listen" } else { "Foreign loopback target" }, port);
     println!("  Security: mandatory authenticated auto-AEAD; no plaintext fallback.");
-    println!("  ICMP direction: Auto (Reverse preferred; Direct on sustained outage; signed auto-return).");
+    println!("  ICMP route policy: {}.",crate::route_policy_label(get_string(&cfg,"icmp_direction").unwrap_or("auto")));
     println!("  Auto performance: enabled on Iran; BB congestion in Go.");
     // Always save only after all five answers passed validation.
     store_config(&cfg)?;

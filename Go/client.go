@@ -403,6 +403,25 @@ func (p *Client) Run() error {
                     nextPingAt=now
                 }
             }
+            // Direct-first AUTO: after two independent authenticated
+            // PTC4/PDA4 direct-path proofs, ask Foreign to take over via
+            // HMAC-matched PTX4/PTB4. Retry up to 30s without changing
+            // application sockets or X25519/AEAD keys. Manual and
+            // Reverse-first configurations never reach this branch.
+            if p.cryptoConfig!=nil && p.cryptoConfig.reverse!=nil &&
+                p.cryptoConfig.SecureReady() &&
+                p.cryptoConfig.reverse.takeDirectSwitchRequest(now) {
+                if peer:=p.serverIP.Load();peer!=nil {
+                    request,err:=p.cryptoConfig.reverse.makeDirectSwitchProbe(now)
+                    if err==nil {
+                        seq:=p.nextSequence()
+                        p.cryptoConfig.reverse.stageDirectSwitch(p.id,seq,request,now)
+                        if !emitEcho(*p.conn,peer,8,p.id,seq,request) {
+                            p.cryptoConfig.reverse.cancelDirectProbe(p.id,seq)
+                        }
+                    }
+                }
+            }
             if p.cryptoConfig!=nil && p.cryptoConfig.reverse!=nil &&
                 p.cryptoConfig.reverse.shouldProbeDirect(now,p.cryptoConfig.SecureReady()) {
                 // A single signed probe per minute checks Direct while
@@ -451,7 +470,12 @@ func (p *Client) Run() error {
             // silence with real user demand, in Reverse AND Direct modes.
             // In Reverse, the next authenticated poll carries a fresh X25519
             // ClientHello inside its matching Echo Reply. No idle reset.
-            if p.cryptoConfig != nil && p.cryptoConfig.RecoverSecureSession(now,hasDemand) {
+            shouldRekey:=hasDemand
+            if p.cryptoConfig!=nil && p.cryptoConfig.reverse!=nil &&
+                p.cryptoConfig.reverse.deferDirectRecoveryRekey(now) {
+                shouldRekey=false
+            }
+            if p.cryptoConfig != nil && p.cryptoConfig.RecoverSecureSession(now,shouldRekey) {
                 loggo.Info("Smart Recovery: rekeying stale authenticated session after user demand (Reverse/Direct)")
                 nextPingAt=now
             }

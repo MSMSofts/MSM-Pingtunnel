@@ -19,16 +19,17 @@ type ICMPDirection string
 
 const (
     ICMPAuto ICMPDirection = "auto"
+    ICMPAutoDirect ICMPDirection = "auto_direct"
     ICMPDirect ICMPDirection = "direct"
     ICMPReverse ICMPDirection = "reverse"
 )
 
 func ParseICMPDirection(s string) (ICMPDirection, error) {
     switch ICMPDirection(s) {
-    case ICMPAuto, ICMPDirect, ICMPReverse:
+    case ICMPAuto, ICMPAutoDirect, ICMPDirect, ICMPReverse:
         return ICMPDirection(s), nil
     default:
-        return "", errors.New("icmp_direction must be auto, direct or reverse")
+        return "", errors.New("icmp_direction must be auto, auto_direct, direct or reverse")
     }
 }
 
@@ -87,6 +88,7 @@ const (
 var reverseProbeMagic = [4]byte{'P','T','R','4'}
 var reverseWakeMagic = [4]byte{'P','T','W','4'}
 var reverseProofMagic = [4]byte{'P','R','A','4'}
+var reverseFallbackProofMagic = [4]byte{'P','R','F','4'}
 var reverseSwitchMagic = [4]byte{'P','T','S','4'}
 var reverseSwitchAckMagic = [4]byte{'P','T','A','4'}
 var directSwitchMagic = [4]byte{'P','T','X','4'}
@@ -163,6 +165,11 @@ type reverseTransport struct {
     directRotationAttemptAt time.Time
     directRotationSequence uint64
     pendingReverseSwitch bool
+    pendingDirectSwitch bool
+    lastDirectSwitchAttempt time.Time
+    directSwitchAttemptAt time.Time
+    fallbackProofConfirmations int
+    remoteFallbackDemandAt time.Time
     scheduledRotations uint64
     preferredReverseReturns uint64
     rotationRetryCount uint64
@@ -205,6 +212,7 @@ type reverseTransport struct {
     lastOutboundData time.Time
     outboundBurst int
     lastDeliveredQueueDelayMs int64
+    lastDeliveredAt time.Time
     maxDeliveredQueueDelayMs int64
     deliveredFrames uint64
     delayedFrames uint64
@@ -240,7 +248,7 @@ func newReverseTransport(preference ICMPDirection, key []byte, now time.Time) (*
         lastObservedICMPWriteFailures:icmpWriteErrors.Load(),
         pollWakeup:make(chan struct{},1)}
     copy(r.secret[:],key)
-    if preference==ICMPDirect {r.selected=ICMPDirect}
+    if preference==ICMPDirect || preference==ICMPAutoDirect {r.selected=ICMPDirect}
     return r,nil
 }
 
@@ -262,7 +270,7 @@ func (r *reverseTransport) noteDemand(now time.Time,hasTraffic bool) {
 // The local client must have recently requested actual transport service.
 func (r *reverseTransport) acceptReverseOnDemand(now time.Time,lastAuthenticated time.Time) bool {
  r.mu.Lock();defer r.mu.Unlock()
- if r.preference==ICMPDirect{return false}
+ if r.preference==ICMPDirect || r.preference==ICMPAutoDirect{return false}
  if r.selected==ICMPReverse{return true}
  if r.preference==ICMPReverse{return true}
  if r.lastDemand.IsZero()||now.Sub(r.lastDemand)>30*time.Second{return false}
@@ -281,7 +289,7 @@ func (r *reverseTransport) direction() ICMPDirection {
 func (r *reverseTransport) choose(direction ICMPDirection, now time.Time) bool {
     r.mu.Lock();defer r.mu.Unlock()
     if direction!=ICMPDirect && direction!=ICMPReverse{return false}
-    if r.preference!=ICMPAuto && direction!=r.preference{return false}
+    if r.preference!=ICMPAuto && r.preference!=ICMPAutoDirect && direction!=r.preference{return false}
     if r.selected==direction{return false}
     if !r.lastSwitch.IsZero() && now.Sub(r.lastSwitch)<reverseMinDwell{return false}
     r.selected=direction
@@ -303,7 +311,7 @@ func (r *reverseTransport) choose(direction ICMPDirection, now time.Time) bool {
 // incoming challenge before either side uses this method.
 func (r *reverseTransport) rotateKeepingSession(direction ICMPDirection,now time.Time,reason string) bool {
     r.mu.Lock();defer r.mu.Unlock()
-    if r.preference!=ICMPAuto || (direction!=ICMPReverse&&direction!=ICMPDirect) ||
+    if (r.preference!=ICMPAuto && r.preference!=ICMPAutoDirect) || (direction!=ICMPReverse&&direction!=ICMPDirect) ||
         r.selected==direction || (!r.lastSwitch.IsZero() && now.Sub(r.lastSwitch)<reverseMinDwell) {
         return false
     }
@@ -311,7 +319,8 @@ func (r *reverseTransport) rotateKeepingSession(direction ICMPDirection,now time
     r.lastSwitch=now
     r.lastRotationReason=reason
     r.scheduledRotations++
-    if direction==ICMPReverse {r.preferredReverseReturns++}
+    if (r.preference==ICMPAuto && direction==ICMPReverse) ||
+       (r.preference==ICMPAutoDirect && direction==ICMPDirect) {r.preferredReverseReturns++}
     r.proofConfirmations=0
     r.directProofConfirmations=0
     r.lastProofAt=time.Time{}
@@ -320,6 +329,9 @@ func (r *reverseTransport) rotateKeepingSession(direction ICMPDirection,now time
     r.directRotationRequestedAt=time.Time{}
     r.directRotationAttemptAt=time.Time{}
     r.pendingReverseSwitch=false
+    r.pendingDirectSwitch=false
+    r.fallbackProofConfirmations=0
+    r.remoteFallbackDemandAt=time.Time{}
     return true
 }
 // Legacy API is deliberately inert: rotating Reverse->Direct on a timer
@@ -344,8 +356,8 @@ func (r *reverseTransport) acceptDirectSwitchProof(id,seq int,reply []byte,now t
     tag:=r.mac(reply[:20])
     if !hmac.Equal(tag[:16],reply[20:36]){return false}
     r.mu.Lock();defer r.mu.Unlock()
-    if r.preference!=ICMPAuto || r.selected!=ICMPReverse ||
-        r.directRotationRequestedAt.IsZero() || !r.rotationDueLocked(now) {return false}
+    if r.preference!=ICMPAutoDirect || r.selected!=ICMPReverse ||
+        !r.pendingDirectSwitch {return false}
     key:=probeChallengeKey(id,seq)
     challenge,ok:=r.directProbeChallenges[key]
     if !ok || now.Before(challenge.sentAt) || now.Sub(challenge.sentAt)>reverseProofTTL ||
@@ -354,6 +366,7 @@ func (r *reverseTransport) acceptDirectSwitchProof(id,seq int,reply []byte,now t
         return false
     }
     delete(r.directProbeChallenges,key)
+    r.pendingDirectSwitch=false
     return true
 }
 func (r *reverseTransport) makeSwitchAck(probe []byte,magic [4]byte) []byte {
@@ -372,7 +385,7 @@ func (r *reverseTransport) acceptReverseSwitchProof(id,seq int,reply []byte,now 
     tag:=r.mac(reply[:20])
     if !hmac.Equal(tag[:16],reply[20:36]){return false}
     r.mu.Lock();defer r.mu.Unlock()
-    if r.preference!=ICMPAuto || r.selected!=ICMPDirect{return false}
+    if (r.preference!=ICMPAuto && r.preference!=ICMPAutoDirect) || r.selected!=ICMPDirect{return false}
     key:=probeChallengeKey(id,seq)
     challenge,ok:=r.probeChallenges[key]
     if !ok || now.Before(challenge.sentAt)||now.Sub(challenge.sentAt)>reverseProofTTL ||
@@ -436,6 +449,19 @@ func (r *reverseTransport) fallbackDirect(now time.Time, ready bool, lastAuthent
  return true
 }
 
+// Prevent the generic 35s Iran AEAD watchdog from tearing down a
+// Direct-first session *before* two signed PRF4 proofs can authorize a
+// Direct->Reverse fallback. After five minutes of sustained demand with
+// no recovery, permit ordinary rekey. An explicit HMACed PTS4 can still
+// take over Reverse while that new handshake is incomplete.
+func (r *reverseTransport) deferDirectRecoveryRekey(now time.Time) bool {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    return r.preference==ICMPAutoDirect && r.selected==ICMPDirect &&
+        !r.demandSince.IsZero() && !now.Before(r.demandSince) &&
+        now.Sub(r.demandSince)<5*time.Minute
+}
+
 // A recent successful direct exchange wins over speculative reverse polls.
 // Give the fallback a full stabilization window before trying Reverse again.
 func (r *reverseTransport) allowReverseCandidate(now time.Time,ready bool,lastAuthenticated time.Time) bool {
@@ -453,6 +479,7 @@ func (r *reverseTransport) needsProbe(now time.Time, authenticated bool) bool {
     r.mu.Lock();defer r.mu.Unlock()
     if r.preference==ICMPDirect{return false}
     if r.selected==ICMPReverse{return true}
+    if r.preference==ICMPAutoDirect{return true}
     // Always recheck the preferred path on a bounded 10-second schedule,
     // even while authenticated Direct is healthy. A poll itself cannot
     // cause a switch: the paired Go worker must prove the RETURN path.
@@ -593,7 +620,15 @@ func (r *reverseTransport) authenticateProbeWithSwitch(frame []byte,now time.Tim
 
 // Only a matched, one-time, MAC-authenticated userspace Echo Reply proves
 // that the Reverse route has recovered while Direct is still active.
-func (r *reverseTransport) makeProof(probe []byte) []byte {
+func (r *reverseTransport) makeProof(probe []byte,at ...time.Time) []byte {
+    now:=time.Now()
+    if len(at)>0 {now=at[0]}
+    r.mu.Lock()
+    hasDemand:=r.preference==ICMPAutoDirect && r.selected==ICMPDirect &&
+        !r.lastDemand.IsZero() && !now.Before(r.lastDemand) &&
+        now.Sub(r.lastDemand)<5*time.Second
+    r.mu.Unlock()
+    if hasDemand{return r.makeSwitchAck(probe,reverseFallbackProofMagic)}
     return r.makeSwitchAck(probe,reverseProofMagic)
 }
 func (r *reverseTransport) makeDirectProof(probe []byte) []byte {
@@ -603,8 +638,10 @@ func (r *reverseTransport) makeDirectProof(probe []byte) []byte {
 // Direct or resets the preferred Reverse session while healthy.
 func (r *reverseTransport) shouldProbeDirect(now time.Time,ready bool) bool {
     r.mu.Lock();defer r.mu.Unlock()
-    if r.preference!=ICMPAuto || r.selected!=ICMPReverse || !ready{return false}
-    if !r.lastDirectProbe.IsZero() && now.Sub(r.lastDirectProbe)<directBackgroundProbeInterval{return false}
+    if (r.preference!=ICMPAuto && r.preference!=ICMPAutoDirect) || r.selected!=ICMPReverse || !ready{return false}
+    cadence:=directBackgroundProbeInterval
+    if r.preference==ICMPAutoDirect {cadence=reverseDirectProbeInterval}
+    if !r.lastDirectProbe.IsZero() && now.Sub(r.lastDirectProbe)<cadence{return false}
     r.lastDirectProbe=now
     r.directProbeChecks++
     return true
@@ -612,7 +649,7 @@ func (r *reverseTransport) shouldProbeDirect(now time.Time,ready bool) bool {
 func (r *reverseTransport) stageDirectProbe(id,seq int,probe []byte,now time.Time) {
     if len(probe)!=reverseProbeBytes{return}
     r.mu.Lock();defer r.mu.Unlock()
-    if r.preference!=ICMPAuto || r.selected!=ICMPReverse{return}
+    if (r.preference!=ICMPAuto && r.preference!=ICMPAutoDirect) || r.selected!=ICMPReverse{return}
     if r.directProbeChallenges==nil{
         r.directProbeChallenges=make(map[uint32]reverseProbeChallenge)
     }
@@ -634,7 +671,7 @@ func (r *reverseTransport) acceptDirectProof(id,seq int,reply []byte,now time.Ti
     mac:=r.mac(reply[:20])
     if !hmac.Equal(reply[20:],mac[:16]){return false}
     r.mu.Lock();defer r.mu.Unlock()
-    if r.preference!=ICMPAuto || r.selected!=ICMPReverse{return false}
+    if (r.preference!=ICMPAuto && r.preference!=ICMPAutoDirect) || r.selected!=ICMPReverse{return false}
     key:=probeChallengeKey(id,seq)
     challenge,ok:=r.directProbeChallenges[key]
     if !ok || now.Before(challenge.sentAt)||now.Sub(challenge.sentAt)>reverseProofTTL{return false}
@@ -650,7 +687,7 @@ func (r *reverseTransport) acceptDirectProof(id,seq int,reply []byte,now time.Ti
 }
 func (r *reverseTransport) allowDirectPathProof(now time.Time) bool {
     r.mu.Lock();defer r.mu.Unlock()
-    if r.preference!=ICMPAuto || r.selected!=ICMPDirect{return false}
+    if (r.preference!=ICMPAuto && r.preference!=ICMPAutoDirect) || r.selected!=ICMPDirect{return false}
     if !r.lastProofSent.IsZero() && now.Sub(r.lastProofSent)<reverseProofMinInterval{return false}
     r.lastProofSent=now
     return true
@@ -661,7 +698,7 @@ func probeChallengeKey(id,seq int)uint32{
 func (r *reverseTransport) stageProbe(id,seq int,probe []byte,now time.Time) {
     if len(probe)!=reverseProbeBytes{return}
     r.mu.Lock();defer r.mu.Unlock()
-    if r.preference!=ICMPAuto || r.selected!=ICMPDirect{return}
+    if (r.preference!=ICMPAuto && r.preference!=ICMPAutoDirect) || r.selected!=ICMPDirect{return}
     if r.probeChallenges==nil{r.probeChallenges=make(map[uint32]reverseProbeChallenge)}
     for k,c:=range r.probeChallenges{
         if now.Sub(c.sentAt)>reverseProofTTL{delete(r.probeChallenges,k)}
@@ -679,11 +716,13 @@ func (r *reverseTransport) cancelProbe(id,seq int){
     r.mu.Lock();delete(r.probeChallenges,probeChallengeKey(id,seq));r.mu.Unlock()
 }
 func (r *reverseTransport) acceptProof(id,seq int,reply []byte,now time.Time) bool {
-    if len(reply)!=reverseProbeBytes || !bytes.Equal(reply[:4],reverseProofMagic[:]){return false}
+    if len(reply)!=reverseProbeBytes ||
+        (!bytes.Equal(reply[:4],reverseProofMagic[:]) &&
+         !bytes.Equal(reply[:4],reverseFallbackProofMagic[:])){return false}
     mac:=r.mac(reply[:20])
     if !hmac.Equal(reply[20:],mac[:16]){return false}
     r.mu.Lock();defer r.mu.Unlock()
-    if r.preference!=ICMPAuto || r.selected!=ICMPDirect{return false}
+    if (r.preference!=ICMPAuto && r.preference!=ICMPAutoDirect) || r.selected!=ICMPDirect{return false}
     key:=probeChallengeKey(id,seq)
     challenge,ok:=r.probeChallenges[key]
     if !ok || now.Before(challenge.sentAt) || now.Sub(challenge.sentAt)>reverseProofTTL {
@@ -695,6 +734,13 @@ func (r *reverseTransport) acceptProof(id,seq int,reply []byte,now time.Time) bo
         r.proofConfirmations=0
     }
     if !r.lastProofAt.IsZero() && now.Sub(r.lastProofAt)<5*time.Second{return false}
+    if bytes.Equal(reply[:4],reverseFallbackProofMagic[:]) {
+        if r.fallbackProofConfirmations<reverseRequiredProofs {r.fallbackProofConfirmations++}
+        r.remoteFallbackDemandAt=now
+    } else if r.preference==ICMPAutoDirect {
+        r.fallbackProofConfirmations=0
+        r.remoteFallbackDemandAt=time.Time{}
+    }
     if r.proofConfirmations<reverseRequiredProofs{r.proofConfirmations++}
     r.lastProofAt=now
     r.reverseProofs++
@@ -709,7 +755,18 @@ func (r *reverseTransport) acceptProof(id,seq int,reply []byte,now time.Time) bo
 // the matching PTA4 ACK was lost. No half-verified path can force a switch.
 func (r *reverseTransport) takeSwitchRequest(now time.Time,emergency ...bool) bool {
     r.mu.Lock();defer r.mu.Unlock()
-    if r.preference!=ICMPAuto || r.selected!=ICMPDirect{return false}
+    if (r.preference!=ICMPAuto && r.preference!=ICMPAutoDirect) || r.selected!=ICMPDirect{return false}
+    if r.preference==ICMPAutoDirect {
+        verifiedDemand:=r.fallbackProofConfirmations>=reverseRequiredProofs &&
+            !r.remoteFallbackDemandAt.IsZero() &&
+            now.Sub(r.remoteFallbackDemandAt)>=0 &&
+            now.Sub(r.remoteFallbackDemandAt)<=reverseProofTTL
+        degraded:=len(emergency)>0 && emergency[0]
+        if !verifiedDemand || !degraded {
+            r.pendingReverseSwitch=false
+            return false
+        }
+    }
     if !r.lastSwitch.IsZero() && now.Sub(r.lastSwitch)<reverseMinDwell{return false}
     if r.pendingReverseSwitch {
         if now.Sub(r.lastSwitchAttempt)>smartRotationRetryWindow {
@@ -738,6 +795,51 @@ func (r *reverseTransport) takeSwitchRequest(now time.Time,emergency ...bool) bo
     r.pendingReverseSwitch=true
     return true
 }
+// Direct-first recovery is symmetric with the Reverse-first verified return:
+// two independent HMAC-proven PTC4/PDA4 roundtrips trigger a signed PTX4.
+// Only the Iranian peer requests this switch, and it must see a matching
+// PTB4 acknowledgment before leaving Reverse. The foreign side handles
+// lost-ACK retransmissions idempotently.
+func (r *reverseTransport) takeDirectSwitchRequest(now time.Time) bool {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    if r.preference!=ICMPAutoDirect || r.selected!=ICMPReverse {return false}
+    if !r.lastSwitch.IsZero() && now.Sub(r.lastSwitch)<reverseMinDwell{return false}
+    if r.pendingDirectSwitch {
+        if now.Sub(r.lastDirectSwitchAttempt)>smartRotationRetryWindow {
+            r.pendingDirectSwitch=false
+            r.directProofConfirmations=0
+            r.lastDirectSwitchAttempt=now
+            r.rotationRetryCount++
+            return false
+        }
+        if now.Sub(r.directSwitchAttemptAt)<smartRotationRetryInterval{return false}
+        r.directSwitchAttemptAt=now
+        return true
+    }
+    if r.directProofConfirmations<reverseRequiredProofs ||
+        r.lastDirectProof.IsZero() ||
+        now.Sub(r.lastDirectProof)>reverseProofTTL ||
+        (!r.lastDirectSwitchAttempt.IsZero() &&
+          now.Sub(r.lastDirectSwitchAttempt)<reverseSwitchRetryCooldown) {
+        return false
+    }
+    r.pendingDirectSwitch=true
+    r.lastDirectSwitchAttempt=now
+    r.directSwitchAttemptAt=now
+    r.reverseSwitchAttempts++
+    return true
+}
+
+// True only for the selected Direct-first AUTO policy. A paired PTX4
+// cannot switch either fixed/manual direction or Reverse-preferred AUTO.
+func (r *reverseTransport) allowSignedDirectTakeover() (selected ICMPDirection,ok bool) {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    if r.preference!=ICMPAutoDirect{return "",false}
+    return r.selected,true
+}
+
 // During an authenticated PTA4 handoff use bounded 2s retransmission
 // intervals, otherwise a Direct-mode 10s health probe is sufficient.
 func (r *reverseTransport) directMonitorPeriod() time.Duration {
@@ -938,8 +1040,12 @@ func (r *reverseTransport) noteUsefulFrame(now time.Time) {
     // backlog estimate instead of polling for packets already received.
     // Partial fragments do not reach this function.
     if r.queueHintDepth>0 && !r.queueHintAt.IsZero() &&
-        !now.Before(r.queueHintAt) && now.Sub(r.queueHintAt)<reverseWakeBurst {
+        !now.Before(r.queueHintAt) && now.Sub(r.queueHintAt)<6*time.Second {
         r.queueHintDepth--
+        if r.queueHintDepth==0 {
+            r.queueHintBytes=0
+            r.queueHintAgeMs=0
+        }
     }
     if !r.lastUsefulFrame.IsZero() && now.Sub(r.lastUsefulFrame)>=0 &&
         now.Sub(r.lastUsefulFrame)<350*time.Millisecond {
@@ -995,6 +1101,12 @@ func (r *reverseTransport) pollPeriod(now time.Time,activeConns int,ready bool) 
                 if period>20*time.Millisecond {period=20*time.Millisecond}
             }
         }
+        // Keep authenticated, not-yet-drained remote pressure warm for
+        // at most 6s rather than prematurely sleeping at a 1s cadence.
+        // The 25ms floor disappears when all reported DATA arrives.
+        if r.queueHintDepth>0 && !r.queueHintAt.IsZero() &&
+            !now.Before(r.queueHintAt) && now.Sub(r.queueHintAt)<6*time.Second &&
+            period>25*time.Millisecond { period=25*time.Millisecond }
         // Smart queue-aware scheduling: Iranian PTQ4 signals are signed
         // observations of actual encrypted FIFO depth and oldest age, not
         // guesses based on a TCP congestion window or a video buffer.
@@ -1046,6 +1158,7 @@ func (r *reverseTransport) noteDeliveredFrame(created,now time.Time) {
     ms:=int64(delay/time.Millisecond)
     r.mu.Lock();defer r.mu.Unlock()
     r.deliveredFrames++
+    r.lastDeliveredAt=now
     r.lastDeliveredQueueDelayMs=ms
     if ms>r.maxDeliveredQueueDelayMs {r.maxDeliveredQueueDelayMs=ms}
     if delay>=250*time.Millisecond {r.delayedFrames++}
@@ -1123,6 +1236,7 @@ type reverseDiagnostics struct {
     MeanQueueDelayMs int64
     P95QueueDelayMs int64
     DeliveryDelaySampleCount int
+    LastDeliveryAgeSeconds int64
     LastOutboundDataAgeMs int64
 }
 func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
@@ -1153,6 +1267,12 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         directProofAge=int64(now.Sub(r.lastDirectProof).Seconds())
         if directProofAge<0{directProofAge=0}
     }
+    deliveryAge:=int64(-1)
+    if !r.lastDeliveredAt.IsZero() {
+        d:=now.Sub(r.lastDeliveredAt)
+        if d<0 {d=0}
+        deliveryAge=int64(d/time.Second)
+    }
     hintAgeSince:=int64(-1)
     if !r.queueHintAt.IsZero() {
         gap:=now.Sub(r.queueHintAt)
@@ -1171,6 +1291,10 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
     if !r.lastSwitch.IsZero(){
         switchAge=int64(now.Sub(r.lastSwitch).Seconds())
         if switchAge<0{switchAge=0}
+    }
+    reportedDepth,reportedOldest,reportedBytes:=r.queueHintDepth,r.queueHintAgeMs,r.queueHintBytes
+    if r.queueHintAt.IsZero() || now.Sub(r.queueHintAt)>reverseWakeBurst {
+        reportedDepth,reportedOldest,reportedBytes=0,0,0
     }
     return reverseDiagnostics{Pending:len(r.pending),PendingBytes:r.pendingBytes,
         QueuePeak:r.queuePeak,QueueDrops:r.drops,FailedReplies:r.failedReplies,
@@ -1194,8 +1318,8 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         BacklogWakeSent:r.backlogWakeSent,BacklogWakeAccepted:r.backlogWakeAccepted,
         BacklogWakeRateLimited:r.backlogWakeRateLimited,
         BacklogWakeActiveMs:wakeRemaining,
-        QueueHintDepth:r.queueHintDepth,QueueHintAgeMs:r.queueHintAgeMs,
-        QueueHintBytes:r.queueHintBytes,QueueHintAgeSinceReceivedMs:hintAgeSince,
+        QueueHintDepth:reportedDepth,QueueHintAgeMs:reportedOldest,
+        QueueHintBytes:reportedBytes,QueueHintAgeSinceReceivedMs:hintAgeSince,
         QueueHintsReceived:r.queueHintReceived,QueueHintsRejected:r.queueHintRejected,
         PollBackoffRemainingMs:backoffRemaining,
         DirectProbeChecks:r.directProbeChecks,DirectPathProofs:r.directPathProofs,
@@ -1207,7 +1331,7 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         DelayedFrames:r.delayedFrames,VeryDelayedFrames:r.veryDelayedFrames,
         MeanQueueDelayMs:avgDelay,P95QueueDelayMs:p95Delay,
         DeliveryDelaySampleCount:r.deliveryDelaySampleCount,
-        LastOutboundDataAgeMs:outboundAge}
+        LastDeliveryAgeSeconds:deliveryAge,LastOutboundDataAgeMs:outboundAge}
 }
 
 // Observed inbound authenticated reverse probes are separately reported.

@@ -50,8 +50,11 @@ func TestQueueAwarePollingUsesActualAuthenticatedBacklog(t *testing.T){
     if diag.QueueHintsReceived!=2||diag.QueueHintDepth!=25||diag.QueueHintAgeMs!=500 {
         t.Fatalf("queue hint diagnostics wrong: %+v",diag)
     }
-    if p:=foreign.pollPeriod(start.Add(2*time.Second),0,true);p!=time.Second {
-        t.Fatalf("stale hint should return to 1Hz, got %s",p)
+    if p:=foreign.pollPeriod(start.Add(2*time.Second),0,true);p!=25*time.Millisecond {
+        t.Fatalf("still-undelivered authenticated FIFO data should stay briefly warm, got %s",p)
+    }
+    if p:=foreign.pollPeriod(start.Add(7*time.Second),0,true);p!=time.Second {
+        t.Fatalf("six-second bounded queue warmth did not expire, got %s",p)
     }
 }
 

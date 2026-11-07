@@ -106,9 +106,14 @@ func startReverseHandshake(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *C
     // Recovery to preferred Reverse uses a distinct authenticated PTS4
     // request. Do not discard active AEAD keys or queued frames. A
     // matching PTA4 reply lets Foreign switch only after Iran has agreed.
-    if switchRequested && c.SecureReady() {
+    if switchRequested && (c.SecureReady() || c.reverse.preference==ICMPAutoDirect) {
+        // In Direct-first emergency recovery the local 35s watchdog may
+        // already have begun rekeying. A root-key HMACed PTS4 remains
+        // valid for this transport decision, but NEVER authenticates the
+        // application AEAD. Foreign continues the normal candidate
+        // X25519 handshake over the newly restored Reverse path.
         if !useReverse(c) {
-            if !c.reverse.rotateKeepingSession(ICMPReverse,now,"preferred_reverse_recovered"){return}
+            if !c.reverse.rotateKeepingSession(ICMPReverse,now,"verified_reverse_fallback"){return}
         }
         ack:=c.reverse.makeSwitchAck(frameProbe,reverseSwitchAckMagic)
         if len(ack)>0 {_=emitEcho(conn,peer,0,id,seq,ack)}
@@ -144,7 +149,16 @@ func sendForeignPoll(conn icmp.PacketConn,peer *net.IPAddr,id,seq int,c *CryptoC
     // the negotiated path.
     // Never hold the preferred-route return hostage to Direct failure
     // or application activity. Two fresh PRA4 roundtrips are mandatory.
-    switchRequest:=c.reverse.takeSwitchRequest(now)
+    directDegraded:=false
+    if c.reverse.preference==ICMPAutoDirect && c.SecureReady() &&
+        !authenticated {
+        last:=c.sec.lastPeerTraffic()
+        // A long-idle Direct connection is not sufficient evidence;
+        // foreign also requires two fresh signed PRF4 replies showing
+        // the Iranian client's actual application demand.
+        directDegraded=!last.IsZero() && now.Sub(last)>=90*time.Second
+    }
+    switchRequest:=c.reverse.takeSwitchRequest(now,directDegraded)
     var probe []byte
     var err error
     if switchRequest {
