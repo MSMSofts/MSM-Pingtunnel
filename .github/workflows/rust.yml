@@ -131,6 +131,11 @@ jobs:
             -o "../dist/pingtunnel-core-linux-${{ matrix.arch }}" ./cmd
           cd ../dist
           sha256sum "pingtunnel-core-linux-${{ matrix.arch }}" > "pingtunnel-core-linux-${{ matrix.arch }}.sha256"
+      - name: Real direct ICMP manual/AUTO transport smoke
+        if: matrix.arch == 'amd64'
+        run: |
+          python3 -m py_compile Source/direct_mode_smoke.py
+          sudo python3 Source/direct_mode_smoke.py --binary "$PWD/dist/pingtunnel-core-linux-amd64"
       - uses: actions/upload-artifact@v4
         with:
           name: go-core-${{ matrix.arch }}
