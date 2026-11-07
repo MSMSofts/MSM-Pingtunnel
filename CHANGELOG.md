@@ -1,3 +1,12 @@
+## [3.3.22 preview] — Three route policies, authenticated direct-first recovery, queue-lag corrections
+
+- New menu option 15: Route Policy. Three operator options: Reverse-first automatic (legacy default), Direct-first automatic, and Manual locked to Reverse or Direct. CLI: `pingtunnel route show|auto-reverse|auto-direct|manual-reverse|manual-direct`. Store settings atomically, restart service, preserve pairing/forwarding and roll back local config on failure.
+- Machine `icmp_direction`: `auto` (Reverse-first), `auto_direct` (Direct-first), `reverse` (manual Reverse), `direct` (manual Direct). Config schema 3 / Wire 4 unchanged, both peers must use matching routing policy.
+- Direct-first starts in Direct; Foreigner sends signed PTR4 checks every 10s. Client includes actual app-demand status in PRF4 (auth bound to the exact signed PTR4 nonce). After two independent PRF4 proofs and 90s authenticated Direct silence, Foreign can request Reverse failover via signed PTS4/PTA4 while retaining current AEAD and sockets.
+- Direct-first returns to Direct automatically after two signed PTC4/PDA4 return-path proofs, 60s dwell and a matched PTX4/PTB4 exchange. Retried ACK losses bounded; fixed/manual modes never switch.
+- An outstanding authenticated Reverse FIFO hint keeps polling warm at 25ms for up to 6s, automatically dropping back when DATA is delivered; repair stale snapshot depth/byte telemetry and label historical P95 queue samples by last-send age.
+- No scheduled Smart Rotation, no queue floods, no unverified route switch. New race/forgery/replay/manual and end-to-end state machine unit tests. Live FPS gaming ping improvements still require a real two-VPS evaluation.
+
 ## [3.3.21 preview] — Authenticated queue-aware Reverse adaptive pacing
 
 - New 44-byte root-HMAC-authenticated PTQ4 queue hints report true Iran Reverse FIFO depth, oldest age and queued bytes. The metrics are masked with a separate nonce-derived key stream; no application payloads or pairing keys are sent.
