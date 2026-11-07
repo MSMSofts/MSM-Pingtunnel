@@ -82,7 +82,7 @@ fn validate(cfg: &Value) -> Result<()> {
     let transport=get_string(cfg,"transport").ok_or_else(||failure("missing transport"))?;
     if transport!="tcp"&&transport!="udp"{return Err(failure("transport must be tcp or udp"));}
     let direction=cfg.get("icmp_direction").and_then(Value::as_str).unwrap_or("auto");
-    if !matches!(direction,"auto"|"direct"|"reverse"){return Err(failure("icmp_direction must be auto, direct or reverse"));}
+    if !matches!(direction,"auto"|"auto_direct"|"direct"|"reverse"){return Err(failure("icmp_direction must be auto, auto_direct, direct or reverse"));}
     if !(1..=65535).contains(&get_number(cfg,"port",0)?){return Err(failure("invalid local port"));}
     let secret=get_string(cfg,"pair_key").ok_or_else(||failure("missing pairing key"))?;
     let bytes=STANDARD.decode(secret).map_err(|_|failure("pairing key not base64"))?;
@@ -425,6 +425,7 @@ fn help(){
     println!("  pingtunnel key        Show existing pairing key (root only)");
     println!("  pingtunnel validate | performance | security | health | dry-run");
     println!("  pingtunnel start | stop | restart | status | logs [lines]");
+    println!("  pingtunnel route show | auto-reverse | auto-direct | manual-reverse | manual-direct");
     println!("  pingtunnel update | uninstall [--purge]  (permanent purge requires PURGE confirmation)");
 }
 
@@ -457,6 +458,78 @@ fn current_service_state() -> String {
     }
 }
 
+fn route_policy_label(direction:&str)->&'static str {
+    match direction {
+        "auto" => "AUTO Reverse first",
+        "auto_direct" => "AUTO Direct first",
+        "reverse" => "MANUAL Reverse only",
+        "direct" => "MANUAL Direct only",
+        _ => "Unconfigured"
+    }
+}
+
+// Changes are local to this VPS, require root and restart the Go core.
+// Use the same option on BOTH peers in a coordinated maintenance window.
+fn route_policy_set(choice:&str)->Result<()> {
+    root_required()?;
+    let mode=match choice {
+        "auto-reverse" => "auto",
+        "auto-direct" => "auto_direct",
+        "manual-reverse" => "reverse",
+        "manual-direct" => "direct",
+        _=>return Err(failure("Route options: auto-reverse | auto-direct | manual-reverse | manual-direct | show"))
+    };
+    let previous=load_config()?;
+    let old=previous.get("icmp_direction").and_then(Value::as_str).unwrap_or("auto");
+    if old==mode {
+        println!("Unchanged: {}",route_policy_label(mode));
+        return Ok(());
+    }
+    let mut next=previous.clone();
+    next["icmp_direction"]=json!(mode);
+    validate(&next)?;
+    // Store atomically, then apply; restore previous config if the service
+    // restart fails so future daemon restarts don't use a half-applied mode.
+    store_config(&next)?;
+    if let Err(err)=apply_config() {
+        let _=store_config(&previous);
+        let _=apply_config();
+        return Err(failure(format!("Route policy apply failed (prior config restored): {err}")));
+    }
+    println!("Route policy activated: {}",route_policy_label(mode));
+    println!("IMPORTANT: Select the SAME policy on the opposite VPS.");
+    Ok(())
+}
+
+fn route_policy_menu()->Result<()> {
+    root_required()?;
+    let cfg=load_config()?;
+    let current=cfg.get("icmp_direction").and_then(Value::as_str).unwrap_or("auto");
+    println!("\nICMP Route Policy — current: {}",route_policy_label(current));
+    println!("  1) AUTO — Reverse first; Direct if Reverse fails; restore Reverse");
+    println!("  2) AUTO — Direct first; Reverse if Direct fails; restore Direct");
+    println!("  3) MANUAL — locked to a chosen direction, NO automatic switching");
+    println!("  0) Cancel");
+    println!("WARNING: update BOTH VPS peers to matching policies.");
+    let selected=prompt("Select policy","0")?;
+    let choice=match selected.as_str() {
+        "1"=>"auto-reverse",
+        "2"=>"auto-direct",
+        "3"=>{
+            println!("  1) Reverse only     2) Direct only     0) Cancel");
+            match prompt("Manual route","0")?.as_str() {
+                "1"=>"manual-reverse",
+                "2"=>"manual-direct",
+                "0"=>return Ok(()),
+                _=>return Err(failure("Choose 1 or 2 for manual direction.")),
+            }
+        },
+        "0"=>return Ok(()),
+        _=>return Err(failure("Choose 1, 2, 3 or 0.")),
+    };
+    route_policy_set(choice)
+}
+
 fn menu()->Result<()>{
     root_required()?;
     // Samples exist only while this CLI is displaying the dashboard.
@@ -472,6 +545,7 @@ fn menu()->Result<()>{
                 region:cfg.as_ref().and_then(|v|get_string(v,"region")).unwrap_or("unknown"),
                 peer:cfg.as_ref().and_then(|v|get_string(v,"peer_ip")).unwrap_or("-"),
                 transport:cfg.as_ref().and_then(|v|get_string(v,"transport")).unwrap_or("-"),
+                route:cfg.as_ref().and_then(|v|get_string(v,"icmp_direction")).unwrap_or("auto"),
                 port:cfg.as_ref().and_then(|v|v.get("port")).and_then(Value::as_u64)
                     .and_then(|n|u16::try_from(n).ok()),
                 service:&state,
@@ -485,7 +559,7 @@ fn menu()->Result<()>{
             menu_ui::choose(&mut monitor,display,default)?
         }else{
             print!("{}",display(monitor.current(),80,40));
-            prompt("Choose (1-14)",default)?
+            prompt("Choose (1-15)",default)?
         };
         let action=match choice.as_str(){
             "1"=>run_systemctl(&["status","pingtunnel.service","--no-pager"]),
@@ -502,7 +576,8 @@ fn menu()->Result<()>{
             "12"|"q"|"Q"=>return Ok(()),
             "13"=>show_security_status(),
             "14"=>show_health(),
-            _=>{println!("Invalid choice: use 1..14.");continue}
+            "15"=>route_policy_menu(),
+            _=>{println!("Invalid choice: use 1..15.");continue}
         };
         if choice=="11" && action.is_ok() && !Path::new("/usr/local/bin/pingtunnel").exists() {
             return Ok(());
@@ -576,7 +651,14 @@ fn show_security_status() -> Result<()> {
     println!("  Config schema: {} | Wire version: {}",report["config_schema"],report["wire_version"]);
     println!("  Region: {}",report["region"].as_str().unwrap_or("unknown"));
     if let Some(direction)=report["icmp_direction"].as_str(){println!("  ICMP initiation: {direction}");}
-    if report["auto_route_policy"].as_str()==Some("reverse_preferred_direct_on_failure") {
+    if report["auto_route_policy"].as_str()==Some("direct_preferred_reverse_on_failure") {
+        println!("  AUTO policy: Direct preferred, Reverse only on signed demand + confirmed Direct failure");
+        println!("  Verified returns to preferred Direct: {}",report["auto_preferred_reverse_returns"]);
+    } else if report["auto_route_policy"].as_str()==Some("manual_direct") {
+        println!("  MANUAL policy: Direct only (automatic switching disabled)");
+    } else if report["auto_route_policy"].as_str()==Some("manual_reverse") {
+        println!("  MANUAL policy: Reverse only (automatic switching disabled)");
+    } else if report["auto_route_policy"].as_str()==Some("reverse_preferred_direct_on_failure") {
         println!("  AUTO policy: Reverse preferred, Direct only on confirmed failure");
         if report["icmp_direction"].as_str()==Some("direct") {
             println!("  Reverse health check: every 10s; 2 signed return-path proofs required");
@@ -795,6 +877,17 @@ fn main_inner()->Result<()>{
         "menu"=>menu(),
         "setup"=>setup::wizard(),
         "key"=>display_pair_key(),
+        "route"=>{
+            let action=args.get(1).map(String::as_str).unwrap_or("show");
+            if args.len()>2 {return Err(failure("Usage: pingtunnel route [show|auto-reverse|auto-direct|manual-reverse|manual-direct]"));}
+            if action=="show" {
+                let cfg=load_config()?;
+                let policy=get_string(&cfg,"icmp_direction").unwrap_or("auto");
+                println!("Configured route policy: {}",route_policy_label(policy));
+                println!("The policy must match on both Iran and Foreign VPSs.");
+                Ok(())
+            } else {route_policy_set(action)}
+        },
         "performance"=>show_adaptive_status(),
         "security"=>show_security_status(),
         "health"=>show_health(),
@@ -860,6 +953,24 @@ mod tests{
         assert_eq!(remote["icmp_direction"],"auto");
         assert_eq!(remote["peer_ip"],"198.51.100.45");
         assert!(remote.get("tcp_bs").is_none());
+    }
+    #[test]
+    fn route_policy_values_preserve_wire4_and_refuse_unsafe_choices() {
+        for policy in ["auto","auto_direct","direct","reverse"] {
+            let mut c=conf("iran","udp",444);
+            c["icmp_direction"]=json!(policy);
+            assert!(validate(&c).is_ok(),"policy {policy}");
+            assert_eq!(go_core_config(&c).unwrap()["icmp_direction"],policy);
+        }
+        let mut c=conf("foreign","udp",8443);
+        c["icmp_direction"]=json!("manual");
+        assert!(validate(&c).is_err());
+        c["icmp_direction"]=json!("auto_reverse");
+        assert!(validate(&c).is_err());
+        c["icmp_direction"]=json!("auto_direct");
+        assert_eq!(go_core_config(&c).unwrap()["icmp_direction"],"auto_direct");
+        assert_eq!(route_policy_label("direct"),"MANUAL Direct only");
+        assert_eq!(route_policy_label("auto"),"AUTO Reverse first");
     }
     #[test]
     fn no_legacy_or_unencrypted_fallback(){
