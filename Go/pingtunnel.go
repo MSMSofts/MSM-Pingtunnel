@@ -313,17 +313,37 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
                   stdbytes.HasPrefix(payloadData,reverseQueueHintMagic[:]))) {
                 continue
             }
-            // Legacy timed PTx4/PTB4 Reverse->Direct handoffs must not
-            // override the user's preferred Reverse route. Direct is chosen
-            // exclusively by a sustained failure and a fresh authenticated
-            // Direct ClientHello. Still consume these retired control frames
-            // so they are never accidentally handed to the AEAD decoder.
-            if cryptoConfig.reverse!=nil && cryptoConfig.sec!=nil &&
-                ((cryptoConfig.sec.region=="foreign" && int(bytes[0])==8 &&
-                  stdbytes.HasPrefix(payloadData,directSwitchMagic[:])) ||
-                 (cryptoConfig.sec.region=="iran" && int(bytes[0])==0 &&
-                  (stdbytes.HasPrefix(payloadData,directSwitchMagic[:]) ||
-                   stdbytes.HasPrefix(payloadData,directSwitchAckMagic[:])))) {
+            // Only Direct-first AUTO may request a PTX4 Direct takeover.
+            // A fresh root-HMACed, anti-replay verified Iranian request
+            // receives a matched PTB4 Echo Reply. Retrying a lost ACK is
+            // safe after Foreign has already selected Direct.
+            if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="foreign" &&
+                int(bytes[0])==8 && stdbytes.HasPrefix(payloadData,directSwitchMagic[:]) {
+                if cryptoConfig.SecureReady() &&
+                    cryptoConfig.reverse.authenticateDirectSwitchProbe(payloadData,now) {
+                    selected,authorized:=cryptoConfig.reverse.allowSignedDirectTakeover()
+                    if authorized {
+                        ack:=cryptoConfig.reverse.makeSwitchAck(payloadData,directSwitchAckMagic)
+                        if len(ack)>0 && emitEcho(conn,peer,0,echoId,echoSeq,ack) &&
+                            selected==ICMPReverse {
+                            cryptoConfig.reverse.rotateKeepingSession(ICMPDirect,now,"preferred_direct_recovered")
+                        }
+                    }
+                }
+                continue
+            }
+            if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="iran" &&
+                int(bytes[0])==0 && stdbytes.HasPrefix(payloadData,directSwitchAckMagic[:]) {
+                if cryptoConfig.SecureReady() &&
+                    cryptoConfig.reverse.acceptDirectSwitchProof(echoId,echoSeq,payloadData,now) {
+                    cryptoConfig.reverse.rotateKeepingSession(ICMPDirect,now,"preferred_direct_recovered")
+                }
+                continue
+            }
+            // Linux may reflect the locally sent PTX4 Echo Request; it
+            // cannot masquerade as the authenticated PTB4 acknowledgment.
+            if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="iran" &&
+                int(bytes[0])==0 && stdbytes.HasPrefix(payloadData,directSwitchMagic[:]) {
                 continue
             }
             // Foreign switches to Reverse only on a matched HMACed PTA4
@@ -333,7 +353,7 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
                 int(bytes[0])==0 && stdbytes.HasPrefix(payloadData,reverseSwitchAckMagic[:]) {
                 if cryptoConfig.SecureReady() &&
                     cryptoConfig.reverse.acceptReverseSwitchProof(echoId,echoSeq,payloadData,now) &&
-                    cryptoConfig.reverse.rotateKeepingSession(ICMPReverse,now,"preferred_reverse_recovered") {
+                    cryptoConfig.reverse.rotateKeepingSession(ICMPReverse,now,"verified_reverse_available") {
                     // Immediately offer a matching Echo Request so Iran's
                     // reverse FIFO can start draining without a 10s wait.
                     sendForeignPoll(conn,peer,0x42a5,(echoSeq+1)&0xffff,cryptoConfig,now,true)
@@ -365,7 +385,9 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
             // them against the exact paired challenge, Echo ID/sequence and
             // root-key MAC. This does not authenticate or switch a session.
             if cryptoConfig.reverse!=nil && cryptoConfig.sec.region=="foreign" &&
-                int(bytes[0])==0 && stdbytes.HasPrefix(payloadData,reverseProofMagic[:]) {
+                int(bytes[0])==0 &&
+                (stdbytes.HasPrefix(payloadData,reverseProofMagic[:]) ||
+                 stdbytes.HasPrefix(payloadData,reverseFallbackProofMagic[:])) {
                 cryptoConfig.reverse.acceptProof(echoId,echoSeq,payloadData,now)
                 continue
             }
@@ -380,7 +402,7 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
                         // path while the existing Direct AEAD remains live.
                         // One extra reply per 10s maximum, not per poll.
                         if cryptoConfig.reverse.allowDirectPathProof(now) {
-                            proof:=cryptoConfig.reverse.makeProof(payloadData)
+                            proof:=cryptoConfig.reverse.makeProof(payloadData,now)
                             _=emitEcho(conn,peer,0,echoId,echoSeq,proof)
                         }
                     } else {
