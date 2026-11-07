@@ -70,19 +70,24 @@ import socket,sys,time
 s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
 s.settimeout(0.9)
 end=time.monotonic()+25
+sent=set()
 n=0
 while time.monotonic()<end:
     message=f"direct-mode-test-{n}".encode()
+    sent.add(message)
     s.sendto(message,("127.0.0.1",50631))
     try:
         data,_=s.recvfrom(65535)
-        if data==b"echo:"+message:
+        # UDP is unordered: a perfectly valid delayed reply to any earlier
+        # datagram from this socket must count as success.
+        if data.startswith(b"echo:") and data[5:] in sent:
             print("REAL_DIRECT_UDP_ICMP_ROUNDTRIP_PASS",flush=True)
             sys.exit(0)
         print("Unexpected echo payload",data[:120],flush=True)
     except socket.timeout:
         pass
     n+=1
+    time.sleep(0.03)
 print("No authenticated Direct UDP reply in 25 seconds",flush=True)
 sys.exit(1)
 """
