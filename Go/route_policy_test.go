@@ -73,8 +73,10 @@ func TestDirectFirstFallbackRequiresTwoDemandProofsAndStaleAEAD(t *testing.T) {
     start:=time.Unix(1901002000,0)
     iran,foreign:=routeTestPair(t,ICMPAutoDirect,start)
     t1:=start.Add(91*time.Second)
-    keepRouteDemand(iran,start.Add(41*time.Second),t1.Add(10*time.Second))
+    lastDemandAt:=start.Add(40*time.Second)
     for _,now:=range []time.Time{t1,t1.Add(10*time.Second)} {
+        keepRouteDemand(iran,lastDemandAt.Add(time.Second),now)
+        lastDemandAt=now
         probe,err:=foreign.makeProbe(now);if err!=nil{t.Fatal(err)}
         seq:=int(now.Sub(start)/time.Second)+10
         foreign.stageProbe(0x42a5,seq,probe,now)
@@ -124,8 +126,10 @@ func TestDirectFirstRejectsIdleAndForgedFallbackProof(t *testing.T) {
 func TestDirectFirstOneWayReplyLossVsHealthyDirect(t *testing.T) {
     start:=time.Unix(1901011100,0)
     iran,foreign:=routeTestPair(t,ICMPAutoDirect,start)
-    keepRouteDemand(iran,start.Add(10*time.Second),start.Add(61*time.Second))
+    lastDemandAt:=start.Add(9*time.Second)
     for j,at:=range []time.Time{start.Add(51*time.Second),start.Add(61*time.Second)}{
+        keepRouteDemand(iran,lastDemandAt.Add(time.Second),at)
+        lastDemandAt=at
         probe,err:=foreign.makeProbe(at);if err!=nil{t.Fatal(err)}
         foreign.stageProbe(3333,100+j,probe,at)
         valid,_:=iran.authenticateProbeWithSwitch(probe,at)
@@ -162,8 +166,10 @@ func TestDirectFirstStartupFailureRecoversOnlyWithDemandAndDelay(t *testing.T){
     if proof:=iran.makeProof(probe,early,time.Time{});!bytes.Equal(proof[:4],reverseProofMagic[:]){
         t.Fatal("initial Direct handshake was abandoned before 90s")
     }
-    keepRouteDemand(iran,start.Add(61*time.Second),start.Add(105*time.Second))
+    lastDemandAt:=start.Add(60*time.Second)
     for i,at:=range []time.Time{start.Add(95*time.Second),start.Add(105*time.Second)}{
+        keepRouteDemand(iran,lastDemandAt.Add(time.Second),at)
+        lastDemandAt=at
         probe,err:=foreign.makeProbe(at);if err!=nil{t.Fatal(err)}
         foreign.stageProbe(1904,30+i,probe,at)
         if valid,_:=iran.authenticateProbeWithSwitch(probe,at);!valid{t.Fatal("startup PTR4 was not authenticated")}
