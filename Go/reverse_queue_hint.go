@@ -13,7 +13,9 @@ import (
 // A separate 8-byte authenticated queue payload reports remote pressure:
 //   magic[4] | Unix seconds[8] | nonce[8] | depth[2] |
 //   oldestWaitMs[2] | queuedBytes[4] | HMAC-SHA256[0:16].
-// The HMAC uses the existing root-key domain-separated reverse MAC.
+// The 8-byte metrics segment is masked with a separately domain-separated
+// key-derived pad before MAC authentication: observers do not learn queue
+// depth or latency. The HMAC uses the existing root-key reverse MAC.
 // Only the fixed, pinned foreign peer processes the report. It does not
 // authorize a route switch, replay an encrypted frame or carry user data.
 const (
@@ -72,6 +74,14 @@ func (r *reverseTransport) makeQueueHint(now time.Time) ([]byte,error) {
     binary.BigEndian.PutUint16(frame[20:22],saturateToUint16(depth))
     binary.BigEndian.PutUint16(frame[22:24],saturateToUint16(oldestMs))
     binary.BigEndian.PutUint32(frame[24:28],saturateToUint32(bytesQueued))
+    // Conceal queue pressure against passive ICMP observers. The fresh
+    // 64-bit nonce provides a unique pad; the tag authenticates CIPHERTEXT
+    // and all header fields. This never changes application Wire v4.
+    masked:=make([]byte,0,len("PTQ4/metadata-mask/v1")+20)
+    masked=append(masked,[]byte("PTQ4/metadata-mask/v1")...)
+    masked=append(masked,frame[:20]...)
+    mask:=r.mac(masked)
+    for i:=0;i<8;i++ {frame[20+i]^=mask[i]}
     tag:=r.mac(frame[:28])
     copy(frame[28:],tag[:16])
     return frame,nil
@@ -89,9 +99,16 @@ func (r *reverseTransport) authenticateQueueHint(frame []byte,now time.Time) boo
     if drift>int64(reverseProbeWindow/time.Second){return false}
     tag:=r.mac(frame[:28])
     if !hmac.Equal(frame[28:],tag[:16]){return false}
-    depth:=int(binary.BigEndian.Uint16(frame[20:22]))
-    oldestMs:=int(binary.BigEndian.Uint16(frame[22:24]))
-    queuedBytes:=int(binary.BigEndian.Uint32(frame[24:28]))
+    masked:=make([]byte,0,len("PTQ4/metadata-mask/v1")+20)
+    masked=append(masked,[]byte("PTQ4/metadata-mask/v1")...)
+    masked=append(masked,frame[:20]...)
+    mask:=r.mac(masked)
+    var metadata [8]byte
+    copy(metadata[:],frame[20:28])
+    for i:=0;i<8;i++ {metadata[i]^=mask[i]}
+    depth:=int(binary.BigEndian.Uint16(metadata[0:2]))
+    oldestMs:=int(binary.BigEndian.Uint16(metadata[2:4]))
+    queuedBytes:=int(binary.BigEndian.Uint32(metadata[4:8]))
     if depth<=0 || depth>reverseQueueMaxFrames ||
         queuedBytes<=0 || queuedBytes>reverseQueueMaxBytes{return false}
 
