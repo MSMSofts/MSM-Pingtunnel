@@ -930,6 +930,14 @@ func (r *reverseTransport) recordPollInterval(period time.Duration) {
 }
 func (r *reverseTransport) noteUsefulFrame(now time.Time) {
     r.mu.Lock();defer r.mu.Unlock()
+    // A successfully authenticated, reassembled DATA message is an
+    // independent sign of completed Reverse delivery. Reduce the remote
+    // backlog estimate instead of polling for packets already received.
+    // Partial fragments do not reach this function.
+    if r.queueHintDepth>0 && !r.queueHintAt.IsZero() &&
+        !now.Before(r.queueHintAt) && now.Sub(r.queueHintAt)<reverseWakeBurst {
+        r.queueHintDepth--
+    }
     if !r.lastUsefulFrame.IsZero() && now.Sub(r.lastUsefulFrame)>=0 &&
         now.Sub(r.lastUsefulFrame)<350*time.Millisecond {
         if r.usefulBurst<1024{r.usefulBurst++}
