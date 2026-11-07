@@ -2,30 +2,48 @@
 
 **A lightweight, encrypted ICMP tunnel between an Iran VPS and an overseas VPS**, forwarding TCP or UDP traffic through a Go core and a simple Rust manager.
 
-[فارسی](README.md) · [Current preview: v3.3.21](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.21) · [CI status](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0 license](LICENSE)
+[فارسی](README.md) · [Current preview: v3.3.22](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.22) · [CI status](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0 license](LICENSE)
 
 ## Features
 
 - **Authenticated encryption:** 256-bit pairing key, ephemeral secure sessions, peer authentication and replay protection.
-- **Adaptive Smart Rotation:** health-gated three-hour alternation of Reverse/Direct while both are usable, guarded recovery upon actual path failure.
+- **Three routing policies:** automatic Reverse-first, automatic Direct-first, and manual locked direction; no scheduled timed rotation.
 - **TCP or UDP forwarding:** Connect applications such as Hysteria 2 or Xray running on the overseas VPS.
 - **Unified management:** Setup wizard, systemd service controls, logs, health checks, security reports and passive performance metrics.
 - **Conservative defaults:** Experimental ICMP segmentation and UDP parity repair are disabled by default; existing connection settings are preserved.
 
 Pingtunnel is **not a VPN server**. It transports traffic arriving at the Iran VPS over encrypted ICMP to a local application endpoint on the overseas VPS, for example `127.0.0.1:444`. Each tunnel instance forwards either TCP or UDP, as configured.
 
-## Automatic ICMP route management — Smart Rotation
+## Route Policy: menu item 15 (v3.3.22)
 
-For the default `icmp_direction: "auto"`, **the old unconditional Reverse Priority policy is replaced by Smart Rotation**. The tunnel starts in Reverse. If **both directions have independently authenticated two-way health proofs**, it attempts to alternate the active user-data route between Reverse and Direct approximately **every three hours**. The interval is measured from process startup or the last successful path change; a timer by itself never forces a switch.
+The menu offers **three options**:
 
-- **While Reverse is active**, Foreign originates Echo Requests and Iran tests Direct every **60 seconds** using matched HMAC-authenticated `PTC4/PDA4` challenges. After **two fresh independent proofs**, Iran can request a scheduled Direct handoff via signed `PTX4`. Foreign acknowledges with `PTB4`; Iran commits only after matching the one-time challenge ID, sequence and nonce.
-- **While Direct is active**, Iran originates Echo Requests and Foreign checks Reverse every **10 seconds** via authenticated `PTR4/PRA4`. After two distinct matched proofs, three hours and minimum dwell, Foreign requests a Reverse handoff via `PTS4`. Iran responds with a signed `PTA4`, and Foreign commits only after verifying the matching response.
-- **On actual path failure**, emergency health-based recovery overrides the three-hour clock when there is genuine user demand and sustained authenticated failure. A single lost Ping or an idle session is not enough. If the destination route lacks two-way proof, no scheduled rotation occurs.
-- **Connection preservation:** Planned handoffs retain the current Wire-v4 AEAD session, key material, replay sequence and TCP/UDP socket identity. Any encrypted Reverse queue is moved to Direct in FIFO order on a successful scheduled rotation; lost switch ACKs are retried within a bounded window. **This is designed to minimize disruption but cannot guarantee zero packet loss or uninterrupted application sessions during network faults.**
+1. **AUTO Reverse first:** starts Reverse; switches to Direct only on
+   sustained authenticated Reverse failure and restores Reverse on two
+   independent signed return-path proofs.
+2. **AUTO Direct first:** starts Direct (like original PingTunnel); after
+   prolonged Direct failure plus two fresh signed proofs of real Iranian
+   application demand, switches to verified Reverse. Returns to Direct
+   after two signed Direct-path proofs and a matched PTX4/PTB4 handoff.
+3. **MANUAL:** choose Reverse-only or Direct-only in a submenu. Neither
+   direction is switched automatically, regardless of link quality.
 
-`sudo pingtunnel security` reports active direction, last change reason, three-hour schedule, paired path proofs, rotations/retries and userspace-generated ICMP rates. Synthetic Reverse polling peaks at about **125 polls/s** when genuinely busy and remains near **1 poll/s** while idle; DATA traffic has a separate packet rate.
+CLI: `sudo pingtunnel route auto-reverse|auto-direct|manual-reverse|manual-direct`,
+or `sudo pingtunnel route show`.
 
-**Limitations:** Rotation redistributes use between two ICMP exchange patterns; it does not reduce total application bandwidth, override provider anti-DDoS rules or guarantee no future filtering. Both peers must run the same new Go core/manager version because older peers do not recognize the signed handoff ACK frames.
+**Select the same route policy on both VPS peers.** Each local change
+restarts that peer. The pairing key, forwarding config, Wire v4 and
+config schema 3 remain unchanged; authenticated successful path handoffs
+keep the live AEAD session. Time-based three-hour route rotation remains
+disabled in all options.
+
+Reverse PTQ4 backlog-aware polling now keeps a short 25ms maximum
+opportunity interval for up to six seconds while authenticated,
+undelivered queue pressure exists. As DATA is received, the remote
+queue estimate drains and the poller returns to low-rate idle. Stale
+remote metrics and historical p95 send queues are explicitly labeled.
+
+See [Route policies and recovery](docs/ROUTE_MODES_AND_QUEUE_RECOVERY.md).
 
 ### Signed queue-aware Reverse pacing (3.3.21)
 
@@ -142,7 +160,7 @@ These figures are **one real-world observation**, not a controlled benchmark, a 
 Connect to the **overseas VPS** via SSH and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.21/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.22/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -154,7 +172,7 @@ Select **Foreign**, enter the Iran VPS public IPv4 address, choose **TCP or UDP*
 **Only after finishing overseas setup**, connect to the Iran VPS and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.21/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.22/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
