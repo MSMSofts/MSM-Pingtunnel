@@ -64,6 +64,7 @@ func TestDirectFirstFallbackRequiresTwoDemandProofsAndStaleAEAD(t *testing.T) {
     start:=time.Unix(1901002000,0)
     iran,foreign:=routeTestPair(t,ICMPAutoDirect,start)
     t1:=start.Add(91*time.Second)
+    iran.noteDemand(start.Add(41*time.Second),true)
     for _,now:=range []time.Time{t1,t1.Add(10*time.Second)} {
         iran.noteDemand(now,true)
         probe,err:=foreign.makeProbe(now);if err!=nil{t.Fatal(err)}
@@ -71,8 +72,10 @@ func TestDirectFirstFallbackRequiresTwoDemandProofsAndStaleAEAD(t *testing.T) {
         foreign.stageProbe(0x42a5,seq,probe,now)
         if ok,_:=iran.authenticateProbeWithSwitch(probe,now);!ok{t.Fatal("signed PTR4 failed")}
         if !iran.allowDirectPathProof(now){t.Fatal("Iran rejected safe PRF4 reply")}
-        proof:=iran.makeProof(probe,now)
-        if !bytes.Equal(proof[:4],reverseFallbackProofMagic[:]){t.Fatal("actual local demand not reported")}
+        // Iran receives nothing authenticated from Foreign (one-way
+        // reply outage); Foreign may STILL be receiving Iran's Direct DATA.
+        proof:=iran.makeProof(probe,now,start.Add(20*time.Second))
+        if !bytes.Equal(proof[:4],reverseFallbackProofMagic[:]){t.Fatal("authenticated local reply outage not reported")}
         if !foreign.acceptProof(0x42a5,seq,proof,now){t.Fatal("matched PRF4 not accepted")}
     }
     at:=t1.Add(11*time.Second)
@@ -106,6 +109,81 @@ func TestDirectFirstRejectsIdleAndForgedFallbackProof(t *testing.T) {
     if !foreign.acceptProof(0x42a5,1,reply,now){t.Fatal("legitimate idle PRA4 rejected")}
     if foreign.takeSwitchRequest(now.Add(time.Second),true){t.Fatal("idle Direct triggered Reverse fallback")}
     if iran.takeDirectSwitchRequest(now){t.Fatal("Direct mode attempted Direct handoff")}
+}
+
+// Foreign's incoming AEAD may remain fresh during an asymmetric failure;
+// only the paired Iran endpoint knows whether Foreign replies arrive.
+func TestDirectFirstOneWayReplyLossVsHealthyDirect(t *testing.T) {
+    start:=time.Unix(1901011100,0)
+    iran,foreign:=routeTestPair(t,ICMPAutoDirect,start)
+    iran.noteDemand(start.Add(10*time.Second),true)
+    for j,at:=range []time.Time{start.Add(51*time.Second),start.Add(61*time.Second)}{
+        iran.noteDemand(at,true)
+        probe,err:=foreign.makeProbe(at);if err!=nil{t.Fatal(err)}
+        foreign.stageProbe(3333,100+j,probe,at)
+        valid,_:=iran.authenticateProbeWithSwitch(probe,at)
+        if !valid{t.Fatal("PTR4 verification")}
+        if !iran.allowDirectPathProof(at){t.Fatal("unexpected proof rate limit")}
+        // First prove that a healthy Direct return-path must NEVER claim a
+        // failure merely because Iran has active game connections.
+        if j==0 {
+            healthy:=iran.makeProof(probe,at,at.Add(-time.Second))
+            if !bytes.Equal(healthy[:4],reverseProofMagic[:]){
+                t.Fatal("healthy Direct advertised false route failure")
+            }
+        }
+        proof:=iran.makeProof(probe,at,start.Add(time.Second))
+        if !bytes.Equal(proof[:4],reverseFallbackProofMagic[:]){
+            t.Fatal("failed Direct reply path should report signed PRF4")
+        }
+        if !foreign.acceptProof(3333,100+j,proof,at){t.Fatal("foreign rejected signed Iran proof")}
+    }
+    if foreign.fallbackProofConfirmations<reverseRequiredProofs{t.Fatal("no two independently authenticated reports")}
+    // The Foreign server would still see recent inbound Iranian app data,
+    // which incorrectly disabled fallback in v3.3.22.
+    if !foreign.takeSwitchRequest(start.Add(62*time.Second),true){
+        t.Fatal("asymmetric one-way Direct outage was not recoverable")
+    }
+}
+
+func TestDirectFirstStartupFailureRecoversOnlyWithDemandAndDelay(t *testing.T){
+    start:=time.Unix(1901012100,0)
+    iran,foreign:=routeTestPair(t,ICMPAutoDirect,start)
+    early:=start.Add(60*time.Second)
+    iran.noteDemand(start.Add(10*time.Second),true)
+    iran.noteDemand(early,true)
+    probe,err:=foreign.makeProbe(early);if err!=nil{t.Fatal(err)}
+    if proof:=iran.makeProof(probe,early,time.Time{});!bytes.Equal(proof[:4],reverseProofMagic[:]){
+        t.Fatal("initial Direct handshake was abandoned before 90s")
+    }
+    for i,at:=range []time.Time{start.Add(95*time.Second),start.Add(105*time.Second)}{
+        iran.noteDemand(at,true)
+        probe,err:=foreign.makeProbe(at);if err!=nil{t.Fatal(err)}
+        foreign.stageProbe(1904,30+i,probe,at)
+        if valid,_:=iran.authenticateProbeWithSwitch(probe,at);!valid{t.Fatal("startup PTR4 was not authenticated")}
+        if !iran.allowDirectPathProof(at){t.Fatal("startup proof throttled")}
+        proof:=iran.makeProof(probe,at,time.Time{})
+        if !bytes.Equal(proof[:4],reverseFallbackProofMagic[:]){t.Fatal("after initial grace missing Direct startup should request Reverse")}
+        if !foreign.acceptProof(1904,30+i,proof,at){t.Fatal("startup PRF4 rejected")}
+    }
+    when:=start.Add(106*time.Second)
+    if !foreign.takeSwitchRequest(when,true){
+        t.Fatal("never-established Direct cannot enter signed Reverse fallback")
+    }
+    if foreign.direction()!=ICMPDirect{t.Fatal("switched without signed PTS4/PTA4 handoff")}
+}
+
+func TestDirectFirstNoAutoFailoverWhenUserIdleOrManual(t *testing.T){
+    start:=time.Unix(1901013100,0)
+    for _,mode:=range []ICMPDirection{ICMPDirect,ICMPAutoDirect}{
+        iran,foreign:=routeTestPair(t,mode,start)
+        when:=start.Add(220*time.Second)
+        probe,err:=foreign.makeProbe(when);if err!=nil{t.Fatal(err)}
+        if proof:=iran.makeProof(probe,when,time.Time{});!bytes.Equal(proof[:4],reverseProofMagic[:]){
+            t.Fatalf("%s returned PRF4 without demand",mode)
+        }
+        if foreign.takeSwitchRequest(when,true){t.Fatalf("%s switched while idle",mode)}
+    }
 }
 
 func TestDirectFirstReturnUsesMatchedPTX4PTB4(t *testing.T) {
