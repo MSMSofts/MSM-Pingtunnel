@@ -2,7 +2,7 @@
 
 **A lightweight, encrypted ICMP tunnel between an Iran VPS and an overseas VPS**, forwarding TCP or UDP traffic through a Go core and a simple Rust manager.
 
-[فارسی](README.md) · [Current preview: v3.3.20](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.20) · [CI status](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0 license](LICENSE)
+[فارسی](README.md) · [Current preview: v3.3.21](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.21) · [CI status](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0 license](LICENSE)
 
 ## Features
 
@@ -26,6 +26,19 @@ For the default `icmp_direction: "auto"`, **the old unconditional Reverse Priori
 `sudo pingtunnel security` reports active direction, last change reason, three-hour schedule, paired path proofs, rotations/retries and userspace-generated ICMP rates. Synthetic Reverse polling peaks at about **125 polls/s** when genuinely busy and remains near **1 poll/s** while idle; DATA traffic has a separate packet rate.
 
 **Limitations:** Rotation redistributes use between two ICMP exchange patterns; it does not reduce total application bandwidth, override provider anti-DDoS rules or guarantee no future filtering. Both peers must run the same new Go core/manager version because older peers do not recognize the signed handoff ACK frames.
+
+### Signed queue-aware Reverse pacing (3.3.21)
+
+Iran transmits **PTQ4**, a short authenticated queue hint containing the
+real encrypted FIFO depth, oldest wait and pending bytes. Its metadata
+is masked with a nonce-derived pairing-key pad; it carries no user
+traffic. Foreign rapidly polls for the initial 120ms after a genuine
+packet and then adapts between 8–16ms as demand evolves. Stale hints
+return to idle rates; socket write failures cause a bounded backoff.
+
+Both VPS peers should upgrade together. Wire v4, config schema 3 and
+Reverse-first failover are unchanged. This is a Preview, not a measured
+game latency claim. See `docs/AUTHENTICATED_QUEUE_ADAPTIVE_PACING.md`.
 
 ### Reverse-first authenticated AUTO recovery (3.3.20)
 
@@ -129,7 +142,7 @@ These figures are **one real-world observation**, not a controlled benchmark, a 
 Connect to the **overseas VPS** via SSH and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.20/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.21/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -141,7 +154,7 @@ Select **Foreign**, enter the Iran VPS public IPv4 address, choose **TCP or UDP*
 **Only after finishing overseas setup**, connect to the Iran VPS and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.20/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.21/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
