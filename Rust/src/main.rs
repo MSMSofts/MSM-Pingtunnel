@@ -575,7 +575,7 @@ fn menu()->Result<()>{
             "11"=>uninstall(false),
             "12"|"q"|"Q"=>return Ok(()),
             "13"=>show_security_status(),
-            "14"=>show_health(),
+            "14"=>show_health(false),
             "15"=>route_policy_menu(),
             _=>{println!("Invalid choice: use 1..15.");continue}
         };
