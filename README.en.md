@@ -2,7 +2,7 @@
 
 **An authenticated, encrypted ICMP tunnel for forwarding TCP/UDP traffic between two Linux VPSs, with a Go transport core and a Rust control menu.**
 
-[فارسی](README.md) · [Target release: v3.4.0](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.0) · [All release notes](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0](LICENSE)
+[فارسی](README.md) · [Stable release: v3.4.1](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.1) · [All release notes](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0](LICENSE)
 
 ## Features
 
@@ -90,7 +90,7 @@ Session and replay checks → decryption → data delivery
 
 ## Quick installation
 
-> **Target v3.4.0:** mixed TCP/UDP Multi-Port, retaining Wire v4 and the existing queue/performance profile. The Stable release is created only after CI passes and the change is merged.
+> **v3.4.1:** restores per-protocol short UDP and reliable TCP dispatch queues in mixed Multi-Port without altering their capacities or drop policies; new setups enable no ports implicitly and TCP 443 is not a suggestion.
 
 ### ⚠️ Important: install and set up the OVERSEAS VPS first
 
@@ -103,7 +103,7 @@ Session and replay checks → decryption → data delivery
 Connect to the **overseas VPS** via SSH and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.0/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.1/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
