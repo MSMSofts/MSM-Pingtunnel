@@ -77,9 +77,8 @@ func FirstEnabledPortService(services []PortService) (PortService, bool) {
 func (p *Client) SetPortServices(services []PortService) error {
     if err := validatePortServices(services); err != nil { return err }
     p.services = append([]PortService(nil), services...)
-    // Multi-Port is mixed TCP/UDP. Keep the existing TCP-side receive queue
-    // capacity and dispatcher behavior; do not switch global UDP drop policy.
-    p.tcpmode = 1
+    // Do not change p.tcpmode: it continues to select the existing
+    // dispatcher/queue profile chosen by the operator before Multi-Port.
     return nil
 }
 

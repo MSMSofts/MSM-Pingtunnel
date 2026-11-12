@@ -32,10 +32,13 @@ func (s *Server) ApplyFixedForwardPolicy(peerIPv4,target string,tcp int)error{
 // explicitly configured loopback destination on the Foreign VPS. Service
 // aliases are carried in the existing authenticated Target field; Wire v4,
 // ICMP queues, and the secure-session state machine remain unchanged.
-func (s *Server) ApplyMultiForwardPolicy(peerIPv4 string, services []PortService) error {
+func (s *Server) ApplyMultiForwardPolicy(peerIPv4 string, services []PortService, queueProtocol int) error {
     ip := net.ParseIP(peerIPv4)
     if ip == nil || ip.To4() == nil || ip.IsUnspecified() || ip.IsLoopback() {
         return errors.New("peer IPv4 must be the actual Iran VPS address")
+    }
+    if queueProtocol != 0 && queueProtocol != 1 {
+        return errors.New("queue profile protocol must be TCP=1 or UDP=0")
     }
     if s.forwardConfig != nil {
         return errors.New("Multi-Port fixed loopback mode does not allow upstream proxy overrides")
@@ -55,8 +58,8 @@ func (s *Server) ApplyMultiForwardPolicy(peerIPv4 string, services []PortService
     s.allowedPeer = ip.To4()
     s.forwardServices = targets
     s.fixedTarget = ""
-    // Keep the proven TCP dispatch queue profile used by the existing
-    // single-service default. Do not change queue capacities or drop policy.
-    s.forwardProtocol = 1
+    // Retain the exact queue profile selected by the existing transport
+    // setting. Multi-Port does not tune queue capacities or drop policy.
+    s.forwardProtocol = queueProtocol
     return nil
 }

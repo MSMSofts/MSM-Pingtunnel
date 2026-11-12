@@ -428,7 +428,7 @@ func main() {
             os.Exit(1)
         }
         if len(services)>0 {
-            if err:=s.ApplyMultiForwardPolicy(peerIP,services);err!=nil {
+            if err:=s.ApplyMultiForwardPolicy(peerIP,services,forwardProtocol);err!=nil {
                 fmt.Fprintf(os.Stderr,"Refusing unsafe Multi-Port forwarding policy: %v\n",err)
                 os.Exit(1)
             }
@@ -454,7 +454,6 @@ func main() {
 		if len(services)>0 {
 			first,ok:=pingtunnel.FirstEnabledPortService(services)
 			if !ok { fmt.Fprintln(os.Stderr,"Multi-Port has no enabled services"); os.Exit(1) }
-			*tcpmode=1 // preserve the existing TCP dispatcher and queue behavior
 			*listen=fmt.Sprintf(":%d",first.IranPort)
 			*target=pingtunnel.ServiceTarget(first.ID)
 		}
@@ -463,7 +462,7 @@ func main() {
 		loggo.Info("server %s", *server)
 		loggo.Info("target %s", *target)
 
-		if *tcpmode == 0 {
+		if *tcpmode == 0 && len(services) == 0 {
 			*tcpmode_buffersize = 0
 			*tcpmode_maxwin = 0
 			*tcpmode_resend_timems = 0
