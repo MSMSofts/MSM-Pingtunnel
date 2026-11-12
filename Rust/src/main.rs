@@ -593,7 +593,10 @@ fn legacy_service_rows(cfg:&Value)->Vec<Value> {
     else {rows[0]["iran_port"]=json!(port);rows[0]["foreign_port"]=json!(port);rows[0]["enabled"]=json!(true);rows[1]["enabled"]=json!(true);}
     rows
 }
-fn current_service_rows(cfg:&Value)->Vec<Value> {cfg.get("services").and_then(Value::as_array).cloned().unwrap_or_else(||legacy_service_rows(cfg))}
+fn current_service_rows(cfg:&Value)->Vec<Value> {
+    // Do not silently activate a legacy port on a new 'services add'.
+    cfg.get("services").and_then(Value::as_array).cloned().unwrap_or_default()
+}
 fn next_service_id(services:&[Value])->Result<String> {
     for n in 1..=12 {let id=format!("S{n:02}");if !services.iter().any(|s|s.get("id").and_then(Value::as_str)==Some(id.as_str())){return Ok(id);}}
     Err(failure("Multi-Port is limited to 12 service IDs (S01..S12)"))
@@ -627,6 +630,16 @@ fn apply_services_update(previous:Value,services:Vec<Value>)->Result<()> {
 fn services_cli(args:&[String])->Result<()> {
     root_required()?; if args.is_empty(){return services_menu();}
     let action=args[0].as_str();let previous=load_config()?;let mut services=current_service_rows(&previous);
+    if previous.get("services").is_none() {
+        if matches!(action,"list"|"status") {
+            println!("Single-port mode is active: {}, {}.",
+                get_number(&previous,"port",0)?,get_string(&previous,"transport").unwrap_or("?"));
+            println!("Multi-Port not configured: no suggested ports are active.");
+            println!("Use 6) Setup Wizard to explicitly enable chosen TCP and UDP ports.");
+            return Ok(());
+        }
+        return Err(failure("Configure Multi-Port via 6) Setup Wizard first. No port (including 443) is implicitly enabled."));
+    }
     match action {
         "list"|"status"=>{
             if previous.get("services").is_none() {
