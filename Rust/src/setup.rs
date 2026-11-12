@@ -35,9 +35,9 @@ fn existing_v3() -> Result<Option<Value>> {
 
 fn suggested_services()->Vec<Value> {
     let defaults:[(&str,u16);12]=[
-        ("tcp",443),("udp",443),("tcp",2053),("udp",444),
-        ("tcp",2083),("udp",1194),("tcp",2087),("udp",1701),
-        ("tcp",2096),("udp",500),("tcp",8443),("udp",4500),
+        ("tcp",8443),("udp",8444),("tcp",2053),("udp",2054),
+        ("tcp",2083),("udp",2084),("tcp",2087),("udp",2088),
+        ("tcp",2096),("udp",2097),("tcp",10081),("udp",10082),
     ];
     defaults.iter().enumerate().map(|(i,(protocol,port))|
         json!({"id":format!("S{:02}",i+1),"protocol":protocol,
