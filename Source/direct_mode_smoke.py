@@ -99,6 +99,7 @@ import json,socket,sys,time,statistics
 phase=sys.argv[1]
 count=int(sys.argv[2])
 minimum=int(sys.argv[3])
+maximum=int(sys.argv[4])
 timeout=0.7
 sock=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
 sock.settimeout(timeout)
@@ -131,19 +132,21 @@ result={"phase":phase,"sent":count,"received":success,
         "p50_rtt_ms":round(statistics.median(rtts),1) if rtts else None,
         "p95_rtt_ms":p95}
 print(json.dumps(result),flush=True)
-sys.exit(0 if success>=minimum else 1)
+sys.exit(0 if minimum<=success<=maximum else 1)
 """
 
 
-def probe_phase(ns: str, mode: str, phase: str, count: int, minimum: int) -> None:
+def probe_phase(ns: str, mode: str, phase: str, count: int, minimum: int,
+                maximum: int | None = None) -> None:
+    upper=count if maximum is None else maximum
     outcome=run(*namespace_cmd(ns,sys.executable,"-u","-c",IMPAIRMENT_PROBE_SCRIPT,
-                               mode+"-"+phase,str(count),str(minimum)),
+                               mode+"-"+phase,str(count),str(minimum),str(upper)),
                 check=False,capture=True)
     print(outcome.stdout.strip(),flush=True)
     if outcome.returncode:
         raise RuntimeError(
             f"{mode}/{phase}: insufficient authenticated UDP echo replies, "
-            f"required {minimum} of {count}"
+            f"required {minimum}..{upper} of {count}"
         )
 
 
@@ -204,9 +207,8 @@ def perform(mode: str, binary: str, i: str, f: str, temp: Path,
             # The other direction stays impaired but available. 2 seconds
             # is deliberately shorter than the AUTO failover grace.
             replace_netem(i,iran_if,"loss","100%")
-            probe_phase(i,mode,"oneway-blackhole",3,0)
-            # A minimum=0 probe would accept replies, so also verify that
-            # its independently tagged samples did not get through.
+            probe_phase(i,mode,"oneway-blackhole",3,0,0)
+            # No phase-tagged Iran request may pass a 100% egress blackhole.
             # Restoring must not require a worker restart or a new config.
             replace_netem(i,iran_if,"delay","25ms","9ms","loss","4%","reorder","2%","50%")
             probe_phase(i,mode,"restored-link",32,12)
