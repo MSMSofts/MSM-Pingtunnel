@@ -92,8 +92,72 @@ print("No authenticated Direct UDP reply in 25 seconds",flush=True)
 sys.exit(1)
 """
 
+# Each sample has a fresh phase-tagged nonce. Previous UDP echoes must not
+# inflate success under loss/reordering or after a one-way outage.
+IMPAIRMENT_PROBE_SCRIPT = r"""
+import json,socket,sys,time,statistics
+phase=sys.argv[1]
+count=int(sys.argv[2])
+minimum=int(sys.argv[3])
+timeout=0.7
+sock=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+sock.settimeout(timeout)
+success=0
+rtts=[]
+for seq in range(count):
+    token=f"fault-{phase}-{seq}".encode()
+    expected=b"echo:"+token
+    started=time.monotonic()
+    sock.sendto(token,("127.0.0.1",50631))
+    deadline=started+timeout
+    while True:
+        remaining=deadline-time.monotonic()
+        if remaining<=0:
+            break
+        sock.settimeout(remaining)
+        try:
+            payload,_=sock.recvfrom(65535)
+        except socket.timeout:
+            break
+        if payload==expected:
+            success+=1
+            rtts.append((time.monotonic()-started)*1000)
+            break
+    time.sleep(0.02)
+rtts.sort()
+p95=round(rtts[max(0,(len(rtts)*95+99)//100-1)],1) if rtts else None
+result={"phase":phase,"sent":count,"received":success,
+        "application_loss_pct":round(100*(count-success)/count,1),
+        "p50_rtt_ms":round(statistics.median(rtts),1) if rtts else None,
+        "p95_rtt_ms":p95}
+print(json.dumps(result),flush=True)
+sys.exit(0 if success>=minimum else 1)
+"""
 
-def perform(mode: str, binary: str, i: str, f: str, temp: Path) -> None:
+
+def probe_phase(ns: str, mode: str, phase: str, count: int, minimum: int) -> None:
+    outcome=run(*namespace_cmd(ns,sys.executable,"-u","-c",IMPAIRMENT_PROBE_SCRIPT,
+                               mode+"-"+phase,str(count),str(minimum)),
+                check=False,capture=True)
+    print(outcome.stdout.strip(),flush=True)
+    if outcome.returncode:
+        raise RuntimeError(
+            f"{mode}/{phase}: insufficient authenticated UDP echo replies, "
+            f"required {minimum} of {count}"
+        )
+
+
+def replace_netem(ns: str, iface: str, *arguments: str) -> None:
+    run(*namespace_cmd(ns,"tc","qdisc","replace","dev",iface,"root","netem",*arguments))
+
+
+def remove_netem(ns: str, iface: str) -> None:
+    run(*namespace_cmd(ns,"tc","qdisc","del","dev",iface,"root"),check=False,
+        capture=True)
+
+
+def perform(mode: str, binary: str, i: str, f: str, temp: Path,
+            *, impairment: bool = False, iran_if: str = "", foreign_if: str = "") -> None:
     # These bytes are ONLY the self-contained CI test secret; never use on VPSs.
     import base64
     key = base64.b64encode(bytes(range(1, 33))).decode("ascii")
@@ -127,7 +191,32 @@ def perform(mode: str, binary: str, i: str, f: str, temp: Path) -> None:
         if server.poll() is not None or client.poll() is not None:
             raise RuntimeError(f"{mode}: Go worker exited during smoke test")
         print(mode, "RAW_ICMP_AUTHENTICATED_UDP_PASS", flush=True)
+
+        if impairment:
+            # Keep the SAME authenticated Go processes alive throughout
+            # baseline, impaired traffic, asymmetric outage and recovery.
+            probe_phase(i,mode,"baseline",24,12)
+            replace_netem(i,iran_if,"delay","25ms","9ms","loss","4%","reorder","2%","50%")
+            replace_netem(f,foreign_if,"delay","25ms","9ms","loss","4%","reorder","2%","50%")
+            probe_phase(i,mode,"loss-delay-jitter-reorder",32,12)
+
+            # One-way blackhole: only Iran-originated ICMP egress disappears.
+            # The other direction stays impaired but available. 2 seconds
+            # is deliberately shorter than the AUTO failover grace.
+            replace_netem(i,iran_if,"loss","100%")
+            probe_phase(i,mode,"oneway-blackhole",3,0)
+            # A minimum=0 probe would accept replies, so also verify that
+            # its independently tagged samples did not get through.
+            # Restoring must not require a worker restart or a new config.
+            replace_netem(i,iran_if,"delay","25ms","9ms","loss","4%","reorder","2%","50%")
+            probe_phase(i,mode,"restored-link",32,12)
+            if server.poll() is not None or client.poll() is not None:
+                raise RuntimeError(f"{mode}: Go worker exited during fault injection")
+            print(mode,"NETWORK_IMPAIRMENT_AND_RECOVERY_PASS",flush=True)
     finally:
+        if impairment:
+            remove_netem(i,iran_if)
+            remove_netem(f,foreign_if)
         for p in (client, server):
             if p.poll() is None:
                 p.terminate()
@@ -144,11 +233,15 @@ def perform(mode: str, binary: str, i: str, f: str, temp: Path) -> None:
 def main() -> None:
     arg = argparse.ArgumentParser()
     arg.add_argument("--binary", required=True)
+    arg.add_argument("--impairment", action="store_true",
+                     help="run real netem loss/jitter/reorder and one-way outage recovery")
     opt = arg.parse_args()
     if os.geteuid() != 0:
         raise SystemExit("Please run as root on an isolated test runner")
     if not shutil.which("ip"):
         raise SystemExit("Missing iproute2: cannot run network namespace smoke test")
+    if opt.impairment and not shutil.which("tc"):
+        raise SystemExit("Missing tc/netem: cannot run network impairment checks")
     binary = str(Path(opt.binary).resolve())
     if not os.path.exists(binary):
         raise SystemExit(f"Core binary missing: {binary}")
@@ -181,7 +274,8 @@ def main() -> None:
             if echo.poll() is not None:
                 raise RuntimeError("Foreign UDP echo service failed")
             for mode in ("direct", "auto_direct"):
-                perform(mode, binary, iran, foreign, temp)
+                perform(mode, binary, iran, foreign, temp,
+                        impairment=opt.impairment, iran_if=veth_i, foreign_if=veth_f)
     finally:
         if echo is not None and echo.poll() is None:
             echo.terminate()
