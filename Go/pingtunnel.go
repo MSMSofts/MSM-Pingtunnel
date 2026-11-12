@@ -237,7 +237,14 @@ func FlushPendingICMP(conn icmp.PacketConn, crypto *CryptoConfig) {
 // truncation could yield an AEAD failure or drop an otherwise valid packet.
 const icmpReadBufferBytes = 65535
 
+// Preserve the established single-service receive behavior unchanged.
 func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.PacketConn, recv chan<- *Packet, cryptoConfig *CryptoConfig, udpMode ...bool) {
+    recvICMPWithMixedUDP(workResultLock,exit,conn,recv,nil,cryptoConfig,udpMode...)
+}
+
+// In Multi-Port, restore the original short UDP receive queue independently
+// of TCP's reliable queue. Only authenticated UDP DATA goes into udpRecv.
+func recvICMPWithMixedUDP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.PacketConn, recv chan<- *Packet, udpRecv chan<- *Packet, cryptoConfig *CryptoConfig, udpMode ...bool) {
 
 	defer common.CrashLog()
 
@@ -493,7 +500,15 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
         // On UDP, forwarding seconds-old backlogged game/QUIC packets
         // increases latency. Bound the pending queue and drop ONLY UDP DATA
         // immediately on overflow; keep control messages on the safe path.
-        latencySensitiveUDP := len(udpMode) > 0 && udpMode[0]
+        if udpRecv != nil && packet.my.Type == int32(MyMsg_DATA) && packet.my.Tcpmode == 0 {
+            // Keep the exact legacy UDP capacity and overflow/drop behavior.
+            if !enqueueICMPPacket(udpRecv, packet, true) {
+                loggo.Error("Mixed UDP ICMP dispatcher blocked for 3s")
+                return
+            }
+            continue
+        }
+        latencySensitiveUDP := len(udpMode) > 0 && udpMode[0] && udpRecv == nil
         if !enqueueICMPPacket(recv, packet, latencySensitiveUDP) {
             loggo.Error("ICMP dispatcher blocked for 3s; restarting receiver")
             return

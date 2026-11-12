@@ -107,11 +107,20 @@ func (p *Server) Run() error {
     }
 
 	recv := make(chan *Packet, packetQueueCapacity(p.forwardProtocol == 0))
+    var recvUDP chan *Packet
+    if len(p.forwardServices) > 0 {
+        recv = make(chan *Packet, packetQueueCapacity(false))
+        recvUDP = make(chan *Packet, packetQueueCapacity(true))
+    }
 	p.recvcontrol = make(chan int, 1)
 	go func(){
-  defer failOnUnexpectedWorkerExit("ICMP receiver",&p.exit)
-  recvICMP(&p.workResultLock,&p.exit,*p.conn,recv,p.cryptoConfig,p.forwardProtocol == 0)
- }()
+        defer failOnUnexpectedWorkerExit("ICMP receiver",&p.exit)
+        if recvUDP != nil {
+            recvICMPWithMixedUDP(&p.workResultLock,&p.exit,*p.conn,recv,recvUDP,p.cryptoConfig,false)
+        } else {
+            recvICMP(&p.workResultLock,&p.exit,*p.conn,recv,p.cryptoConfig,p.forwardProtocol == 0)
+        }
+    }()
 
 	go func() {
         defer common.CrashLog()
@@ -137,6 +146,17 @@ func (p *Server) Run() error {
 		defer p.workResultLock.Done()
 
 		for !p.exit.Load() {
+            if recvUDP != nil {
+                select {
+                case <-p.recvcontrol:
+                    return
+                case r := <-recv:
+                    p.processPacket(r)
+                case r := <-recvUDP:
+                    p.processPacket(r)
+                }
+                continue
+            }
 			select {
 			case <-p.recvcontrol:
 				return
