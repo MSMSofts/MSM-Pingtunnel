@@ -531,6 +531,7 @@ type secureStatus struct{
  ReverseQueueBytes int `json:"reverse_queue_bytes"`
  ReverseQueuePeak int `json:"reverse_queue_peak"`
  ReverseQueueDrops uint64 `json:"reverse_queue_drops"`
+    ReverseOversizedDrops uint64 `json:"reverse_oversized_drops"`
  ReverseWriteFailures uint64 `json:"reverse_write_failures"`
  ICMPWriteFailures uint64 `json:"icmp_write_failures"`
  ICMPWriteEMSGSIZE uint64 `json:"icmp_write_emsgsize"`
@@ -633,6 +634,7 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.ReverseQueueBytes=diag.PendingBytes
  report.ReverseQueuePeak=diag.QueuePeak
  report.ReverseQueueDrops=diag.QueueDrops
+ report.ReverseOversizedDrops=diag.OversizedDrops
  report.ReverseWriteFailures=diag.FailedReplies
  report.ICMPWriteFailures=icmpWriteErrors.Load()
  report.ICMPWriteEMSGSIZE=icmpMessageTooLong.Load()
