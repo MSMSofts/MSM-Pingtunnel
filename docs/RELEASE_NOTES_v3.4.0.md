@@ -5,9 +5,9 @@
 ## Multi-Port
 
 - Up to 12 mixed TCP/UDP service mappings, each with S01–S12 identity, Iran ingress port, Foreign loopback target and enabled state.
-- Wizard with 12 editable suggestions and a safe opt-in path for existing single-port configurations.
+- Wizard with 12 editable suggestions (only one TCP and one UDP enabled by default) and a safe opt-in path for existing single-port configurations.
 - Main-menu option 16 and `pingtunnel services` commands: list, add, edit, remove, enable, disable, check, export and import.
-- Service-only profile transfer; Pairing Keys are never exported.
+- Service-only profile transfer with matching SHA-256 fingerprints for cross-VPS comparison; Pairing Keys are never exported.
 - Foreign validates authenticated service aliases against its allowlist and forwards only to `127.0.0.1`.
 - Existing single-service configurations remain supported.
 

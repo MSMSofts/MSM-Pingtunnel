@@ -598,6 +598,11 @@ fn next_service_id(services:&[Value])->Result<String> {
     for n in 1..=12 {let id=format!("S{n:02}");if !services.iter().any(|s|s.get("id").and_then(Value::as_str)==Some(id.as_str())){return Ok(id);}}
     Err(failure("Multi-Port is limited to 12 service IDs (S01..S12)"))
 }
+fn service_profile_fingerprint(services:&[Value])->Result<String>{
+    let canonical=serde_json::to_vec(services)?;
+    Ok(format!("{:x}",Sha256::digest(canonical)))
+}
+
 fn print_services(services:&[Value]) {
     println!("{:<5} {:<5} {:>12} {:>14} {:>9}","ID","Proto","Iran Listen","Foreign Target","State");println!("{}", "-".repeat(52));
     for service in services {println!("{:<5} {:<5} {:>12} {:>14} {:>9}",
@@ -614,20 +619,40 @@ fn apply_services_update(previous:Value,services:Vec<Value>)->Result<()> {
     // Queue sizes, TCP tuning, timeouts and adaptive settings are not rewritten.
     validate(&next)?; store_config(&next)?;
     if let Err(err)=apply_config(){let _=store_config(&previous);let _=apply_config();return Err(failure(format!("Multi-Port change failed; previous config restored: {err}")));}
-    println!("Multi-Port configuration applied. Existing queue/performance settings were retained.");Ok(())
+    println!("Multi-Port configuration applied. Existing queue/performance settings were retained.");
+    println!("Service profile SHA-256: {}",service_profile_fingerprint(&services)?);
+    println!("Verify the same fingerprint on the opposite VPS before routing production traffic.");
+    Ok(())
 }
 fn services_cli(args:&[String])->Result<()> {
     root_required()?; if args.is_empty(){return services_menu();}
     let action=args[0].as_str();let previous=load_config()?;let mut services=current_service_rows(&previous);
     match action {
-        "list"|"status"=>{print_services(&services);Ok(())}
+        "list"|"status"=>{
+            if previous.get("services").is_none() {
+                println!("Single-port mode is active. The rows below are a proposed Multi-Port migration profile, NOT active listeners.");
+            }
+            print_services(&services);
+            println!("Service profile SHA-256: {}",service_profile_fingerprint(&services)?);
+            Ok(())
+        }
         "check"=>{let mut candidate=previous.clone();candidate["services"]=json!(services);validate(&candidate)?;
-            println!("Multi-Port profile valid: {} slots, {} enabled.",services.len(),services.iter().filter(|s|s["enabled"].as_bool()==Some(true)).count());Ok(())}
+            println!("Multi-Port profile valid: {} slots, {} enabled.",services.len(),services.iter().filter(|s|s["enabled"].as_bool()==Some(true)).count());
+            if previous.get("services").is_none() {println!("This is a migration preview; existing single-port mode is still active.");}
+            println!("Service profile SHA-256: {}",service_profile_fingerprint(&services)?);
+            Ok(())
+        }
         "export"=>{let path=if let Some(v)=args.get(1){v.clone()}else{prompt("Export path","/root/pingtunnel-services.json")?};
             let mut bytes=serde_json::to_vec_pretty(&json!({"profile_version":1,"services":services}))?;bytes.push(b'\n');
-            atomic_save(Path::new(&path),&bytes,0o600)?;println!("Service-only profile exported to {path}. Pairing keys are not included.");Ok(())}
+            atomic_save(Path::new(&path),&bytes,0o600)?;
+            println!("Service-only profile exported to {path}. Pairing keys are not included.");
+            println!("Service profile SHA-256: {}",service_profile_fingerprint(&services)?);
+            Ok(())}
         "import"=>{let path=if let Some(v)=args.get(1){v.clone()}else{prompt("Profile file","/root/pingtunnel-services.json")?};
             let profile:Value=serde_json::from_slice(&fs::read(&path)?)?;
+            if profile.get("profile_version").and_then(Value::as_u64)!=Some(1) {
+                return Err(failure("Unsupported service profile version: expected 1"));
+            }
             let imported=profile.get("services").and_then(Value::as_array).ok_or_else(||failure("profile must contain a services array"))?.clone();
             apply_services_update(previous,imported)}
         "add"=>{if services.len()>=12{return Err(failure("Multi-Port is limited to 12 service slots"));}
@@ -1290,6 +1315,20 @@ mod tests{
         assert!(validate(&cfg).is_err());
         cfg["services"]=json!((1..=13).map(|i|json!({"id":format!("S{:02}",i.min(12)),"protocol":if i%2==0{"udp"}else{"tcp"},"iran_port":1000+i,"foreign_port":2000+i,"enabled":true})).collect::<Vec<_>>());
         assert!(validate(&cfg).is_err());
+    }
+
+    #[test]
+    fn profile_fingerprint_is_stable_and_sensitive_to_target() {
+        let profile=vec![
+            json!({"id":"S01","protocol":"tcp","iran_port":443,"foreign_port":443,"enabled":true}),
+            json!({"id":"S02","protocol":"udp","iran_port":443,"foreign_port":8443,"enabled":true}),
+        ];
+        let one=service_profile_fingerprint(&profile).unwrap();
+        assert_eq!(one.len(),64);
+        assert_eq!(one,service_profile_fingerprint(&profile).unwrap());
+        let mut modified=profile.clone();
+        modified[1]["foreign_port"]=json!(9443);
+        assert_ne!(one,service_profile_fingerprint(&modified).unwrap());
     }
 
 }

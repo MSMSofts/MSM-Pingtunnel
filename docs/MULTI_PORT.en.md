@@ -30,7 +30,7 @@ A fresh setup offers 12 editable suggestions:
 | S11 | TCP | 8443 | 8443 |
 | S12 | UDP | 4500 | 4500 |
 
-Each row is editable as `protocol,iran_port,foreign_port,on/off`. These are suggestions; check for conflicts. At least one TCP and one UDP row must remain enabled.
+On a fresh setup, only S01 (TCP) and S02 (UDP) start enabled; the other ten are disabled to avoid listener conflicts. Each row is editable as `protocol,iran_port,foreign_port,on/off`. These are suggestions; check for conflicts. At least one TCP and one UDP row must remain enabled.
 
 Existing single-port installs default to keeping their current setup. Explicitly opt into Multi-Port to convert; the existing service is retained and a complementary protocol is suggested.
 

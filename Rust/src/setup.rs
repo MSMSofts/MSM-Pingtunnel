@@ -41,7 +41,7 @@ fn suggested_services()->Vec<Value> {
     ];
     defaults.iter().enumerate().map(|(i,(protocol,port))|
         json!({"id":format!("S{:02}",i+1),"protocol":protocol,
-            "iran_port":port,"foreign_port":port,"enabled":true})
+            "iran_port":port,"foreign_port":port,"enabled":i<2})
     ).collect()
 }
 fn legacy_multi_services(previous:&Value)->Vec<Value> {
@@ -60,6 +60,7 @@ fn configure_services(previous:Option<&Value>)->Result<Option<Vec<Value>>> {
     let default_choice=if existing.is_some(){"y"}else if previous.is_some(){"n"}else{"y"};
     println!("\nMulti-Port profile: up to 12 TCP/UDP service mappings.");
     println!("Each row maps an Iran ingress port to a Foreign 127.0.0.1 target port.");
+    println!("Only S01 (TCP) and S02 (UDP) start enabled; 10 more slots are disabled to avoid port conflicts.");
     println!("Defaults are suggestions. Enter accepts a row; edit it as protocol,iran_port,foreign_port,on/off.");
     let choice=prompt("Enable/configure Multi-Port? (y/n)",default_choice)?.to_ascii_lowercase();
     if !matches!(choice.as_str(),"y"|"yes") {return Ok(existing.map(|rows|rows.clone()));}
@@ -237,7 +238,8 @@ mod tests {
         assert_eq!(rows.len(),12);
         assert_eq!(rows[0]["protocol"],"tcp");
         assert_eq!(rows[1]["protocol"],"udp");
-        assert!(rows.iter().all(|row|row["enabled"].as_bool()==Some(true)));
+        assert_eq!(rows.iter().filter(|row|row["enabled"].as_bool()==Some(true)).count(),2);
+        assert_eq!(rows[2]["enabled"],false);
     }
 
     #[test]
