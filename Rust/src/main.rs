@@ -702,6 +702,9 @@ fn show_security_status() -> Result<()> {
     if let Some(oversize)=report["icmp_write_emsgsize"].as_u64() {
         println!("  ICMP EMSGSIZE / message-too-long errors: {oversize}");
     }
+    if let Some(oversize)=report["reverse_oversized_drops"].as_u64() {
+        println!("  Reverse encrypted frames rejected (>10,240 bytes): {oversize}");
+    }
     if let (Some(req),Some(rep),Some(pps),Some(peak))=(
         report["icmp_userspace_echo_requests"].as_u64(),
         report["icmp_userspace_echo_replies"].as_u64(),
