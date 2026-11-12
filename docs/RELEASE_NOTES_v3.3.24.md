@@ -1,6 +1,6 @@
 # MSM-Pingtunnel v3.3.24 — Hardened authentication and lower-contention transport
 
-**Release status:** intended stable release, subject to the versioned GitHub CI and release artifact checks.
+**Release status: published Stable** on 12 November 2026. Final GitHub Actions run [43178673873](https://github.com/MSMSofts/MSM-Pingtunnel/actions/runs/43178673873) succeeded, with both Linux architectures and all four authenticated ICMP route policies verified in the isolated test network.
 
 v3.3.24 combines the production security hardening in PR #47 with the AEAD concurrency and real Linux netem fault-injection work in PR #48. The authenticated **Wire v4**, persistent **config schema 3**, 256-bit pairing key, Direct/Reverse routing choices, on-wire packet format, and default congestion/polling policy are unchanged.
 
@@ -26,18 +26,26 @@ v3.3.24 combines the production security hardening in PR #47 with the AEAD concu
 
 ### Linux network-path resilience testing
 
-The CI smoke now exercises the actual Linux raw-ICMP Go binary inside **two isolated network namespaces** with an authenticated Wire-v4 UDP echo. It tests both manual Direct and AUTO Direct-first, and adds explicit manual Reverse / AUTO Reverse-first coverage in the v3.3.24 candidate.
+The CI smoke now exercises the actual Linux raw-ICMP Go binary inside **two isolated network namespaces** with an authenticated Wire-v4 UDP echo. It tests **all four policies**: Manual Direct, AUTO Direct-first, Manual Reverse and AUTO Reverse-first, within the published v3.3.24 build.
 
 Fault injection via `tc netem` adds **25ms ±9ms egress delay, 4% packet loss and 2% reordering on each side**, followed by a 100% **Iran-side-only egress blackhole** and restoration of the impaired link. Unique per-phase UDP probes must be rejected during the blackhole and recover after restoration **without restarting the Go workers**.
 
-The already-passed phase-2 isolated CI run (before Reverse was added) recorded:
+### Four modes — CI UDP round-trip / ping comparison
 
-| Policy | Impaired UDP echoes | After restoring one-way outage | Recovered p95 RTT |
-| --- | --- | --- | --- |
-| Manual Direct | 28 / 32 | 28 / 32 | 61.7 ms |
-| AUTO Direct-first | 29 / 32 | 30 / 32 | 63.0 ms |
+Measurements are from the **successful final v3.3.24 build** ([CI evidence](https://github.com/MSMSofts/MSM-Pingtunnel/actions/runs/43178280092)), with actual authenticated application UDP echo packets tunneled through raw ICMP in two Linux network namespaces.
 
-These numbers are **from ephemeral CI network namespaces only**, not real VPS or Internet/game latency. The benchmark on that CI runner was 442.9 ns/op at 512 bytes, 624 B/op, 3 allocs/op; there is **no controlled baseline speedup measurement**.
+| Mode | Start / automatic switch | Baseline p95 RTT | Impaired p95 RTT | Restored-link p95 RTT | Restored UDP echoes |
+| --- | --- | ---: | ---: | ---: | ---: |
+| **Manual Direct** | Direct / no auto switch | **0.5 ms** | **64.7 ms** | **58.5 ms** | 28/32 (12.5% loss) |
+| **AUTO Direct-first** | Direct / verified Reverse fallback | **0.6 ms** | **62.4 ms** | **64.9 ms** | 28/32 (12.5% loss) |
+| **Manual Reverse** | Reverse / no auto switch | **4.9 ms** | **75.5 ms** | **81.4 ms** | 30/32 (6.2% loss) |
+| **AUTO Reverse-first** | Reverse / verified Direct fallback | **5.0 ms** | **69.0 ms** | **72.6 ms** | 30/32 (6.2% loss) |
+
+**Reading the table:** "ping" means **UDP application echo round-trip time**, not a native ICMP `ping` invocation. The p95 is calculated from **replies actually received**, so lost packets are not included in the RTT percentile. Each baseline phase used 24 probes (all 24 replied); impaired and restored phases used 32 probes each. The network impairment applied 25±9ms egress delay, 4% loss and 2% reordering **on both sides**. After a short 100% Iran-side egress outage (0/3 replies for each policy), the path was restored to the **impaired** profile and traffic resumed without restarting either worker.
+
+**Scope of the evidence:** The short outage is *shorter than automatic failover grace*. It validates restored-path recovery, **not** a completed AUTO Direct↔Reverse switch under a long failure. The results do **not** represent real VPS/game latency, nor prove any route policy universally faster. [Detailed p50/p95, loss and methodology](https://github.com/MSMSofts/MSM-Pingtunnel/blob/main/docs/FOUR_ROUTE_RTT_COMPARISON_v3.3.24.md).
+
+The final release-candidate CI parallel 512-byte AEAD benchmark observed **418.5 ns/op**, **624 B/op**, **3 allocs/op** on one runner; this is **not** a controlled before/after performance claim.
 
 ## Supported modes
 
@@ -64,7 +72,7 @@ When a brand-new installation needs pairing, set up the overseas (Foreign) VPS f
 
 ## Verification and limitations
 
-- Automated Go tests, race detector, Rust tests, Linux AMD64/ARM64 builds and namespace-based ICMP smoke run in GitHub Actions. Versioned release assets should include four binaries, SHA256 sidecars and `release-manifest.txt`.
+- Automated Go tests, race detector, Rust tests, Linux AMD64/ARM64 builds and all-four-route ICMP network-impairment smoke **passed** in GitHub Actions. The published release includes four binaries, four SHA256 sidecars and `release-manifest.txt`.
 - Source-level failover tests cover authenticated Reverse→Direct→Reverse and both AUTO policies. **CI is not a substitute for a multi-minute real two-VPS one-way outage test or a two-hour mixed TCP/UDP soak.**
 - A 100% blackhole cannot be defeated while no physical ICMP route is reachable; short recovery checks intentionally exercise restoration without waiting for the 90–150-second AUTO grace.
 - Custom cryptographic transport has **not undergone a published independent security audit**. Outer ICMP traffic remains observable, and networks may drop, shape or block ICMP.
@@ -72,4 +80,4 @@ When a brand-new installation needs pairing, set up the overseas (Foreign) VPS f
 
 ## نسخه فارسی خلاصه
 
-در v3.3.24، اجرای بدون رمزنگاری هسته Go مسدود شده، سرویس عیب‌یابی به Loopback محدود است، بررسی سخت‌گیرانهٔ احراز هویت همتا و شمارندهٔ افت بسته‌ها اضافه شده و رمزنگاری AEAD هم‌زمان برای کاهش انتظار روی قفل بهینه شده است. تست‌های واقعی ICMP با تزریق افت بسته، نوسان، تغییر ترتیب و قطع یک‌طرفه در CI انجام می‌شوند. **نسخه روی سرورهای واقعی شما نصب نشده است**؛ دو طرف را با هماهنگی و داشتن نسخهٔ پشتیبان ارتقا دهید.
+در v3.3.24، اجرای بدون رمزنگاری هسته Go مسدود شده، سرویس عیب‌یابی به Loopback محدود است، بررسی سخت‌گیرانهٔ احراز هویت همتا و شمارندهٔ افت بسته‌ها اضافه شده و رمزنگاری AEAD هم‌زمان برای کاهش انتظار روی قفل بهینه شده است. در تست‌های شبکه ایزوله CI، پینگ P95 بعد از بازیابی برای **Direct دستی ۵۸٫۵، AUTO Direct-first برابر ۶۴٫۹، Reverse دستی ۸۱٫۴ و AUTO Reverse-first برابر ۷۲٫۶ میلی‌ثانیه** ثبت شد. این اعداد پینگ واقعی اینترنت بین دو VPS نیستند. **نسخه روی سرورهای واقعی شما نصب نشده است**؛ دو طرف را با هماهنگی و داشتن نسخهٔ پشتیبان ارتقا دهید.
