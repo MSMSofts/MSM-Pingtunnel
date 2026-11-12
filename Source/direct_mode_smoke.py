@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real Linux network-namespace smoke test for manual and AUTO Direct.
+"""Real Linux namespace smoke for manual and AUTO Direct/Reverse routes.
 
 Uses two isolated IPv4 network stacks connected by a virtual Ethernet pair,
 the production Go ICMP raw sockets, the mandatory four-step Wire-v4 X25519
@@ -81,14 +81,14 @@ while time.monotonic()<end:
         # UDP is unordered: a perfectly valid delayed reply to any earlier
         # datagram from this socket must count as success.
         if data.startswith(b"echo:") and data[5:] in sent:
-            print("REAL_DIRECT_UDP_ICMP_ROUNDTRIP_PASS",flush=True)
+            print("REAL_AUTHENTICATED_UDP_ICMP_ROUNDTRIP_PASS",flush=True)
             sys.exit(0)
         print("Unexpected echo payload",data[:120],flush=True)
     except socket.timeout:
         pass
     n+=1
     time.sleep(0.03)
-print("No authenticated Direct UDP reply in 25 seconds",flush=True)
+print("No authenticated UDP reply in 25 seconds",flush=True)
 sys.exit(1)
 """
 
@@ -184,13 +184,13 @@ def perform(mode: str, binary: str, i: str, f: str, temp: Path,
         outcome = run(*namespace_cmd(i, sys.executable, "-c", CLIENT_SCRIPT),
                       check=False, capture=True)
         if outcome.returncode:
-            print("Direct test failed for policy:", mode, flush=True)
+            print("Route test failed for policy:", mode, flush=True)
             print(outcome.stdout[-2500:], flush=True)
             for name, log in (("foreign", server_log), ("iran", client_log)):
                 log.flush()
                 log.seek(0)
                 print(name, "core logs (last 1500):", log.read()[-1500:], flush=True)
-            raise RuntimeError(f"{mode}: no bidirectional encrypted Direct UDP traffic")
+            raise RuntimeError(f"{mode}: no bidirectional encrypted UDP traffic")
         if server.poll() is not None or client.poll() is not None:
             raise RuntimeError(f"{mode}: Go worker exited during smoke test")
         print(mode, "RAW_ICMP_AUTHENTICATED_UDP_PASS", flush=True)
@@ -237,6 +237,8 @@ def main() -> None:
     arg.add_argument("--binary", required=True)
     arg.add_argument("--impairment", action="store_true",
                      help="run real netem loss/jitter/reorder and one-way outage recovery")
+    arg.add_argument("--include-reverse", action="store_true",
+                     help="also test manual Reverse and AUTO Reverse-first paths")
     opt = arg.parse_args()
     if os.geteuid() != 0:
         raise SystemExit("Please run as root on an isolated test runner")
@@ -275,7 +277,10 @@ def main() -> None:
             time.sleep(0.5)
             if echo.poll() is not None:
                 raise RuntimeError("Foreign UDP echo service failed")
-            for mode in ("direct", "auto_direct"):
+            modes = ["direct", "auto_direct"]
+            if opt.include_reverse:
+                modes += ["reverse", "auto"]
+            for mode in modes:
                 perform(mode, binary, iran, foreign, temp,
                         impairment=opt.impairment, iran_if=veth_i, foreign_if=veth_f)
     finally:
