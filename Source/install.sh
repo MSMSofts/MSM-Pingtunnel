@@ -166,7 +166,9 @@ if (( configured )); then
     echo "New Go core failed runtime heartbeat validation; rolling back." >&2
     false
   fi
-  echo "Updated tunnel restarted successfully; systemd and Go heartbeat are healthy."
+  echo "Updated Go core restarted successfully; systemd and Go worker heartbeat are healthy."
+  echo "NOTICE: this is a PROCESS health check, not an authenticated peer or end-to-end UDP/TCP path test."
+  echo "On an active link, use: pingtunnel health --peer  (recent authenticated peer traffic)."
 else
   # A fresh install must not start an unconfigured service.
   systemctl daemon-reload
