@@ -61,6 +61,10 @@ func TestReverseQueueBoundsAndTTL(t *testing.T){
     n,drops=r.statistics()
     if n!=0 || drops!=300{t.Fatalf("expiration accounting mismatch n=%d dropped=%d",n,drops)}
     if r.enqueue(make([]byte,10241),now){t.Fatal("oversized frame accepted")}
+    d:=r.diagnostics(now)
+    if d.OversizedDrops!=1 || d.QueueDrops!=301 {
+        t.Fatalf("oversized frame was not accounted as packet loss: %+v",d)
+    }
 }
 
 func TestAutoReverseRequiresTrafficAndStaleAuthentication(t *testing.T){
