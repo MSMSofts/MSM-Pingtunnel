@@ -22,8 +22,8 @@ const (
 )
 
 func NewClient(addr string, server string, target string, timeout int, key int, icmpAddr string,
-	tcpmode int, tcpmode_buffersize int, tcpmode_maxwin int, tcpmode_resend_timems int, tcpmode_compress int,
-	tcpmode_stat int, open_sock5 int, maxconn int, cryptoConfig *CryptoConfig,
+	tcpmode int, tcpp.tcpmode_buffersize int, tcpp.tcpmode_maxwin int, tcpp.tcpmode_resend_timems int, tcpp.tcpmode_compress int,
+	tcpp.tcpmode_stat int, open_sock5 int, maxconn int, cryptoConfig *CryptoConfig,
 	sock5_user string, sock5_pass string, congestion string) (*Client, error) {
 
 	var ipaddr *net.UDPAddr
@@ -59,11 +59,11 @@ func NewClient(addr string, server string, target string, timeout int, key int, 
 		timeout:               timeout,
 		key:                   key,
 		tcpmode:               tcpmode,
-		tcpmode_buffersize:    tcpmode_buffersize,
-		tcpmode_maxwin:        tcpmode_maxwin,
-		tcpmode_resend_timems: tcpmode_resend_timems,
-		tcpmode_compress:      tcpmode_compress,
-		tcpmode_stat:          tcpmode_stat,
+		tcpp.tcpmode_buffersize:    tcpp.tcpmode_buffersize,
+		tcpp.tcpmode_maxwin:        tcpp.tcpmode_maxwin,
+		tcpp.tcpmode_resend_timems: tcpp.tcpmode_resend_timems,
+		tcpp.tcpmode_compress:      tcpp.tcpmode_compress,
+		tcpp.tcpmode_stat:          tcpp.tcpmode_stat,
 		open_sock5:            open_sock5,
 		maxconn:               maxconn,
 		sock5_user:            sock5_user,
@@ -95,11 +95,11 @@ type Client struct {
 	key                   int
 	tcpmode               int
 	udpSocketBuffer       int
-	tcpmode_buffersize    int
-	tcpmode_maxwin        int
-	tcpmode_resend_timems int
-	tcpmode_compress      int
-	tcpmode_stat          int
+	tcpp.tcpmode_buffersize    int
+	tcpp.tcpmode_maxwin        int
+	tcpp.tcpmode_resend_timems int
+	tcpp.tcpmode_compress      int
+	tcpp.tcpmode_stat          int
 
 	open_sock5   int
 	sock5_user   string
@@ -495,7 +495,7 @@ func (p *Client) Run() error {
                 nextPingAt=now
             }
             if lastAdaptiveStatus.IsZero() || now.Sub(lastAdaptiveStatus) >= 10*time.Second {
-                p.adaptive.WriteStatus("/run/pingtunnel-performance.json", p.tcpmode_buffersize, p.tcpmode_maxwin, p.tcpmode_resend_timems)
+                p.adaptive.WriteStatus("/run/pingtunnel-performance.json", p.tcpp.tcpmode_buffersize, p.tcpp.tcpmode_maxwin, p.tcpp.tcpmode_resend_timems)
                 lastAdaptiveStatus = now
             }
 			if !now.Before(nextPingAt) {
@@ -625,8 +625,8 @@ func (p *Client) acceptTcpConn(conn *net.TCPConn, targetAddr string, mode int, s
 
     // One-time snapshot at accept: never mutate the live reliable frame
     // manager, because changing window sizes mid-stream risks corruption.
-    perf := p.adaptive.Parameters(mode_buffersize, mode_maxwin, mode_resend_timems)
-	fm := network.NewFrameMgr(FRAME_MAX_SIZE, FRAME_MAX_ID, perf.BufferBytes, perf.Window, perf.ResendMs, mode_compress, mode_stat)
+    perf := p.adaptive.Parameters(p.tcpmode_buffersize, p.tcpmode_maxwin, p.tcpmode_resend_timems)
+	fm := network.NewFrameMgr(FRAME_MAX_SIZE, FRAME_MAX_ID, perf.BufferBytes, perf.Window, perf.ResendMs, p.tcpmode_compress, p.tcpmode_stat)
 	if p.congestion == "bb" {
 		fm.SetCongestion(newBBControl())
 	}
@@ -656,7 +656,7 @@ func (p *Client) acceptTcpConn(conn *net.TCPConn, targetAddr string, mode int, s
 			
 			sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), targetAddr, clientConn.id, (uint32)(MyMsg_DATA), mb,
 				SEND_PROTO, RECV_PROTO, p.key,
-				mode, perf.BufferBytes, perf.Window, perf.ResendMs, mode_compress, mode_stat,
+				mode, perf.BufferBytes, perf.Window, perf.ResendMs, p.tcpmode_compress, p.tcpmode_stat,
 				p.timeout, p.cryptoConfig)
 			p.sendPacket.Add(1)
 			p.sendPacketSize.Add(uint64(len(mb)))
