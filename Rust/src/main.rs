@@ -631,7 +631,8 @@ fn services_cli(args:&[String])->Result<()> {
             let imported=profile.get("services").and_then(Value::as_array).ok_or_else(||failure("profile must contain a services array"))?.clone();
             apply_services_update(previous,imported)}
         "add"=>{if services.len()>=12{return Err(failure("Multi-Port is limited to 12 service slots"));}
-            let protocol=if let Some(v)=args.get(1){v.clone()}else{prompt("Protocol (tcp/udp)","tcp")?}.to_ascii_lowercase();
+            let protocol_raw=if let Some(v)=args.get(1){v.clone()}else{prompt("Protocol (tcp/udp)","tcp")?};
+            let protocol=protocol_raw.to_ascii_lowercase();
             let iran=if let Some(v)=args.get(2){v.clone()}else{prompt("Iran ingress port","443")?};
             let foreign=if let Some(v)=args.get(3){v.clone()}else{prompt("Foreign loopback target port","443")?};
             let iran_port:u16=iran.parse().map_err(|_|failure("Iran port must be 1..65535"))?;

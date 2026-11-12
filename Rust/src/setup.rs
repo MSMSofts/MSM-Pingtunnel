@@ -1,7 +1,7 @@
 //! One setup for each VPS; region is identity, not an encryption key owner.
 //! The root pairing key is independent of client/server roles and survives
 //! re-running setup or a future reversal of the ICMP initiation direction.
-use crate::{apply_config, config_path, failure, get_string, prompt, root_required, store_config, validate, Result};
+use crate::{apply_config, config_path, failure, get_number, get_string, prompt, root_required, store_config, validate, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::{json, Value};
 use std::{fs, io::Read, net::Ipv4Addr};
