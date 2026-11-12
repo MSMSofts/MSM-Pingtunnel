@@ -19,15 +19,30 @@ Pingtunnel **is not a VPN server**. It transports traffic arriving at the local 
 
 Run `sudo pingtunnel` and select **15) Route Policy**:
 
-| Menu | Initial direction | Failover behavior |
-| --- | --- | --- |
-| **1. AUTO Reverse-first** | Reverse | Fallback to Direct on sustained verified outage; authenticated return to Reverse |
-| **2. AUTO Direct-first** | Direct | Fallback to Reverse on sustained verified outage; authenticated return to Direct |
-| **3. Manual** | Reverse or Direct, selected in submenu | **No automatic switching** |
+| Menu choice | Effective policy | Initial direction | Switching behavior |
+| --- | --- | --- | --- |
+| **1. AUTO Reverse-first** | Prefer Reverse | Reverse | Confirmed failure → Direct; authenticated return to Reverse |
+| **2. AUTO Direct-first** | Prefer Direct | Direct | Confirmed failure → Reverse; authenticated return to Direct |
+| **3. Manual → Reverse** | Locked Reverse | Reverse | **None** |
+| **3. Manual → Direct** | Locked Direct | Direct | **None** |
 
 CLI: `sudo pingtunnel route auto-reverse`, `auto-direct`, `manual-reverse`, `manual-direct`, or `show`.
 
 **Configure the same policy on BOTH VPSs**. Each local change restarts its service; coordinate changes to avoid path mismatch. The pairing secret and forwarding parameters are preserved. There is no scheduled three-hour route rotation.
+
+### Four-mode UDP RTT comparison — v3.3.24 CI
+
+| Policy | Baseline p95 RTT | Impaired p95 RTT | After restoration p95 RTT | UDP echoes after restoration |
+| --- | ---: | ---: | ---: | ---: |
+| **Manual Direct** | **0.5 ms** | **64.7 ms** | **58.5 ms** | 28/32 |
+| **AUTO Direct-first** | **0.6 ms** | **62.4 ms** | **64.9 ms** | 28/32 |
+| **Manual Reverse** | **4.9 ms** | **75.5 ms** | **81.4 ms** | 30/32 |
+| **AUTO Reverse-first** | **5.0 ms** | **69.0 ms** | **72.6 ms** | 30/32 |
+
+**Source and interpretation:** [Successful 12 Nov 2026 CI run](https://github.com/MSMSofts/MSM-Pingtunnel/actions/runs/43178280092). These are **authenticated application UDP echo round-trip times in disposable Linux namespaces**, **not public-Internet/game RTT**. The impaired test configured 25±9ms egress delay, 4% loss and 2% reordering on **each side**. After a brief one-way 100% Iran egress blackhole, links returned to the **impaired profile**, not to the clean baseline. p95 excludes lost packets, reported separately; the short outage did **not** exercise full automatic route-failover grace.
+
+[Full p50/p95, packet-loss results and testing methodology](docs/FOUR_ROUTE_RTT_COMPARISON_v3.3.24.md). Choose the best route using comparable measurements on your own two VPSs.
+
 
 ## Queue-aware latency control
 
