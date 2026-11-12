@@ -1,0 +1,34 @@
+name: Sync published v3.3.24 release notes
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/RELEASE_NOTES_v3.3.24.md'
+      - '.github/workflows/release-notes-sync.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: release-notes-v3.3.24-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  sync:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and update existing stable release description
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes='docs/RELEASE_NOTES_v3.3.24.md'
+          test -s "$notes"
+          grep -Fq '### Four modes — CI UDP round-trip / ping comparison' "$notes"
+          gh release view v3.3.24 --repo "$GITHUB_REPOSITORY" >/dev/null
+          # Update only the description of the already-published release.
+          # Do NOT recreate a tag, replace the uploaded binaries or change
+          # the stable/prerelease flags.
+          gh release edit v3.3.24 --repo "$GITHUB_REPOSITORY" --notes-file "$notes"
+          gh release view v3.3.24 --repo "$GITHUB_REPOSITORY" --json body --jq '.body' | grep -Fq 'AUTO Reverse-first'
+          echo 'RELEASE_NOTES_SYNC_VERIFIED'
