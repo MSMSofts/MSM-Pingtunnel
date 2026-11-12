@@ -122,6 +122,20 @@ jobs:
             echo "Go core returned success for a missing/invalid pairing" >&2
             exit 1
           fi
+          # Explicitly reject plaintext and legacy client CLI modes even
+          # when the operator bypasses the secure Rust manager.
+          for mode in none aes128 aes256 chacha20; do
+            if output=$(/tmp/pingtunnel-security-verify -type client -l 127.0.0.1:50441 -s 198.51.100.22 -t 127.0.0.1:1 -encrypt "$mode" -encrypt-key invalid 2>&1); then
+              echo "Insecure client mode unexpectedly accepted: $mode" >&2
+              exit 1
+            fi
+            printf '%s\n' "$output" | grep -F 'Secure Wire v4 requires -encrypt auto'
+          done
+          if output=$(/tmp/pingtunnel-security-verify -type client -l 127.0.0.1:50441 -s 198.51.100.22 -t 127.0.0.1:1 2>&1); then
+            echo "Missing encryption setting unexpectedly accepted" >&2
+            exit 1
+          fi
+          printf '%s\n' "$output" | grep -F 'Secure Wire v4 requires -encrypt auto'
       - name: Build static modified Go core
         run: |
           mkdir -p dist
