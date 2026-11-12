@@ -31,3 +31,41 @@ func TestFirstEnabledPortService(t *testing.T) {
     service, ok := FirstEnabledPortService(services)
     if !ok || service.ID != "S02" { t.Fatalf("wrong first enabled service: %+v %v", service, ok) }
 }
+
+func TestMultiForwardTargetCachedAndPinned(t *testing.T) {
+    service := PortService{ID:"S02", Protocol:"udp", IranPort:53042, ForeignPort:54042, Enabled:true}
+    got := newMultiForwardTarget(service)
+    if got.id != "S02" || got.tcpMode != 0 || got.loopback != "127.0.0.1:54042" {
+        t.Fatalf("unexpected cached UDP forwarding: %+v", got)
+    }
+    service.Protocol = "tcp"
+    service.ForeignPort = 54443
+    got = newMultiForwardTarget(service)
+    if got.tcpMode != 1 || got.loopback != "127.0.0.1:54443" {
+        t.Fatalf("unexpected cached TCP forwarding: %+v", got)
+    }
+}
+
+func TestApplyMultiForwardPolicyRejectsUnauthorizedProfiles(t *testing.T) {
+    profile := []PortService{
+        {ID:"S01",Protocol:"tcp",IranPort:53041,ForeignPort:54041,Enabled:true},
+        {ID:"S02",Protocol:"udp",IranPort:53041,ForeignPort:54041,Enabled:true},
+    }
+    for _, invalid := range []string{"", "127.0.0.1", "0.0.0.0", "invalid-host"} {
+        s := &Server{}
+        if err := s.ApplyMultiForwardPolicy(invalid,profile,1); err == nil {
+            t.Fatalf("accepted invalid peer %q",invalid)
+        }
+    }
+    s := &Server{}
+    if err := s.ApplyMultiForwardPolicy("198.51.100.7",profile,1); err != nil {t.Fatal(err)}
+    if len(s.forwardServices) != 2 {t.Fatalf("expected 2 aliases, got %d",len(s.forwardServices))}
+    if _, ok := s.forwardServices["msm-service:S13"]; ok {t.Fatal("unknown alias accepted")}
+    if _, ok := s.forwardServices["127.0.0.1:54041"]; ok {t.Fatal("raw destination accepted")}
+    if got := s.forwardServices["msm-service:S02"]; got.tcpMode != 0 || got.loopback != "127.0.0.1:54041" {
+        t.Fatalf("wrong UDP target: %+v",got)
+    }
+    if err := (&Server{}).ApplyMultiForwardPolicy("198.51.100.7",profile,2); err == nil {
+        t.Fatal("accepted invalid existing queue profile")
+    }
+}

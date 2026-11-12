@@ -6,7 +6,6 @@ import (
 	"github.com/esrrhs/gohome/network"
 	"github.com/esrrhs/gohome/thread"
 	"golang.org/x/net/icmp"
-	"fmt"
 	"google.golang.org/protobuf/proto"
 	"net"
 	"sync"
@@ -49,7 +48,7 @@ type Server struct {
 	forwardConfig    *ForwardConfig
 	congestion       string
 	fixedTarget      string
-	forwardServices  map[string]PortService
+	forwardServices  map[string]multiForwardTarget
 	allowedPeer      net.IP
 	forwardProtocol  int
 
@@ -167,12 +166,10 @@ func (p *Server) processPacket(packet *Packet) {
         if packet.my.Type == int32(MyMsg_DATA) {
             alias := packet.my.Target
             service, ok := p.forwardServices[alias]
-            if !ok { return }
-            expectedMode := 0
-            if service.Protocol == "tcp" { expectedMode = 1 }
-            if int(packet.my.Tcpmode) != expectedMode { return }
-            packet.serviceID = service.ID
-            packet.my.Target = fmt.Sprintf("127.0.0.1:%d", service.ForeignPort)
+            if !ok || service.tcpMode != int(packet.my.Tcpmode) { return }
+            packet.serviceID = service.id
+            // Cached on config load: zero address formatting on hot DATA path.
+            packet.my.Target = service.loopback
         }
     } else if p.fixedTarget != "" {
         if packet.src == nil || !packet.src.IP.Equal(p.allowedPeer) { return }

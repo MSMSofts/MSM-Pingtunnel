@@ -540,6 +540,10 @@ func (p *Client) Run() error {
 
 func (p *Client) Stop() {
 	p.exit.Store(true)
+    // Multi-Port listeners exit immediately instead of blocking the shutdown
+    // WaitGroup until their accept/read deadlines expire.
+    for _, listener := range p.multiTCPListeners { _ = listener.Close() }
+    for _, listener := range p.multiUDPListeners { _ = listener.Close() }
 	p.recvcontrol <- 1
 	p.workResultLock.Wait()
 	p.conn.Close()
@@ -549,8 +553,6 @@ func (p *Client) Stop() {
 	if p.listenConn != nil {
 		p.listenConn.Close()
 	}
-	for _, listener := range p.multiTCPListeners { _ = listener.Close() }
-	for _, listener := range p.multiUDPListeners { _ = listener.Close() }
 }
 
 func (p *Client) AcceptTcp() error {

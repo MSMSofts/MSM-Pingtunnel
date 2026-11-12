@@ -46,10 +46,10 @@ func (s *Server) ApplyMultiForwardPolicy(peerIPv4 string, services []PortService
     if err := validatePortServices(services); err != nil {
         return err
     }
-    targets := make(map[string]PortService, len(services))
+    targets := make(map[string]multiForwardTarget, len(services))
     for _, service := range services {
         if service.Enabled {
-            targets[ServiceTarget(service.ID)] = service
+            targets[ServiceTarget(service.ID)] = newMultiForwardTarget(service)
         }
     }
     if len(targets) == 0 {

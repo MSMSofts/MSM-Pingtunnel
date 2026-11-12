@@ -22,6 +22,23 @@ type PortService struct {
     Enabled     bool   `json:"enabled"`
 }
 
+// multiForwardTarget stores the allowlisted target once at configuration load.
+// High-throughput UDP receive paths must not format loopback addresses per packet.
+type multiForwardTarget struct {
+    id       string
+    tcpMode  int
+    loopback string
+}
+
+func newMultiForwardTarget(service PortService) multiForwardTarget {
+    mode := 0
+    if service.Protocol == "tcp" { mode = 1 }
+    return multiForwardTarget{
+        id: service.ID, tcpMode: mode,
+        loopback: net.JoinHostPort("127.0.0.1", strconv.Itoa(service.ForeignPort)),
+    }
+}
+
 // ServiceTarget returns the opaque target alias carried inside the existing
 // authenticated Wire v4 MyMsg.Target field. It is never a dialable address.
 func ServiceTarget(id string) string { return "msm-service:" + id }
@@ -108,6 +125,9 @@ func (p *Client) startMultiPortListeners() error {
     }
     for _, service := range p.services {
         if !service.Enabled { continue }
+        // Register workers before launching them, so Stop/Wait never races
+        // an Add on a newly scheduled listener goroutine.
+        p.workResultLock.Add(1)
         if service.Protocol == "tcp" {
             go p.acceptMultiTCP(service, p.multiTCPListeners[service.ID])
         } else {
@@ -121,7 +141,6 @@ func (p *Client) startMultiPortListeners() error {
 func (p *Client) acceptMultiTCP(service PortService, listener *net.TCPListener) {
     defer common.CrashLog()
     defer failOnUnexpectedWorkerExit("Multi-Port TCP listener "+service.ID, &p.exit)
-    p.workResultLock.Add(1)
     defer p.workResultLock.Done()
     for !p.exit.Load() {
         _ = listener.SetDeadline(time.Now().Add(time.Second))
@@ -139,7 +158,6 @@ func (p *Client) acceptMultiTCP(service PortService, listener *net.TCPListener) 
 func (p *Client) acceptMultiUDP(service PortService, listener *net.UDPConn) {
     defer common.CrashLog()
     defer failOnUnexpectedWorkerExit("Multi-Port UDP listener "+service.ID, &p.exit)
-    p.workResultLock.Add(1)
     defer p.workResultLock.Done()
     bytes := make([]byte, udpMaxDatagramBytes)
     for !p.exit.Load() {
