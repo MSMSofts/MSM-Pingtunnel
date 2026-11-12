@@ -366,11 +366,20 @@ func (p *Client) Run() error {
 	}
 
 	recv := make(chan *Packet, packetQueueCapacity(p.tcpmode == 0))
+    var recvUDP chan *Packet
+    if len(p.services) > 0 {
+        recv = make(chan *Packet, packetQueueCapacity(false))
+        recvUDP = make(chan *Packet, packetQueueCapacity(true))
+    }
 	p.recvcontrol = make(chan int, 1)
 	go func(){
-  defer failOnUnexpectedWorkerExit("ICMP receiver",&p.exit)
-  recvICMP(&p.workResultLock,&p.exit,*p.conn,recv,p.cryptoConfig,p.tcpmode == 0)
- }()
+        defer failOnUnexpectedWorkerExit("ICMP receiver",&p.exit)
+        if recvUDP != nil {
+            recvICMPWithMixedUDP(&p.workResultLock,&p.exit,*p.conn,recv,recvUDP,p.cryptoConfig,false)
+        } else {
+            recvICMP(&p.workResultLock,&p.exit,*p.conn,recv,p.cryptoConfig,p.tcpmode == 0)
+        }
+    }()
 
 	go func() {
         defer common.CrashLog()
@@ -526,6 +535,19 @@ func (p *Client) Run() error {
 		defer p.workResultLock.Done()
 
 		for !p.exit.Load() {
+            if recvUDP != nil {
+                // Go selects fairly among ready queues; no UDP packet can
+                // accumulate behind the TCP backlog inside one shared FIFO.
+                select {
+                case <-p.recvcontrol:
+                    return
+                case r := <-recv:
+                    p.processPacket(r)
+                case r := <-recvUDP:
+                    p.processPacket(r)
+                }
+                continue
+            }
 			select {
 			case <-p.recvcontrol:
 				return

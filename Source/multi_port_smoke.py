@@ -22,6 +22,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import threading
+import statistics
 from pathlib import Path
 
 
@@ -178,6 +180,72 @@ def shared_udp_source_test():
     if expected: raise RuntimeError(f"UDP shared-source service isolation failed: {expected}")
     print("MULTI_PORT_SAME_UDP_SOURCE_ISOLATION_PASS",flush=True)
 
+
+def continuous_direct_udp_test():
+    """Sustained video-like UDP + concurrent TCP in manual Direct mode.
+
+    Loopback namespace checks latency/loss under local CPU contention; not an
+    estimate for a real Iran/Foreign Internet path. Keep production defaults.
+    """
+    udp_rows=[SERVICES[1],SERVICES[3]]
+    sent_count=90
+    packet_bytes=850
+    reports=[]
+    def flow(service):
+        sent={}
+        received={}
+        stop=threading.Event()
+        port=service["iran_port"]
+        foreign_port=service["foreign_port"]
+        prefix=f"udp-{foreign_port}:".encode()
+        with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as sock:
+            sock.settimeout(0.15)
+            def receiver():
+                while not stop.is_set():
+                    try:
+                        payload,source=sock.recvfrom(4096)
+                    except socket.timeout:
+                        continue
+                    if source[1]!=port or not payload.startswith(prefix):
+                        continue
+                    raw=payload[len(prefix):]
+                    if len(raw)<4:continue
+                    seq=struct.unpack("!I",raw[:4])[0]
+                    if seq in sent:
+                        received[seq]=time.monotonic()-sent[seq]
+            reader=threading.Thread(target=receiver,daemon=True)
+            reader.start()
+            try:
+                for seq in range(sent_count):
+                    payload=struct.pack("!I",seq)+os.urandom(packet_bytes)
+                    sent[seq]=time.monotonic()
+                    sock.sendto(payload,("127.0.0.1",port))
+                    time.sleep(0.015)
+                time.sleep(1.8)
+            finally:
+                stop.set()
+                reader.join(timeout=1)
+        if len(received)<round(sent_count*0.75):
+            raise RuntimeError(f"UDP continuous delivery low on {service['id']}: {len(received)}/{sent_count}")
+        rtts=sorted(n*1000 for n in received.values())
+        p95=rtts[min(len(rtts)-1,int(len(rtts)*0.95))]
+        if p95>800:
+            raise RuntimeError(f"UDP continuous p95 latency excessive on {service['id']}: {p95:.1f} ms")
+        return {"service":service["id"],"sent":sent_count,"received":len(received),
+                "rtt_p50_ms":round(statistics.median(rtts),1),"rtt_p95_ms":round(p95,1)}
+    def tcp_load():
+        for n in range(8):
+            svc=SERVICES[0]
+            try_tcp(svc["iran_port"],os.urandom(6000),svc["foreign_port"],timeout=6)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+        futures=[pool.submit(flow,svc) for svc in udp_rows]
+        load=pool.submit(tcp_load)
+        for f in futures: reports.append(f.result())
+        load.result()
+    for report in reports:
+        print("MANUAL_DIRECT_UDP_CONTINUOUS "+json.dumps(report,sort_keys=True),flush=True)
+    print("MANUAL_DIRECT_TCP_UDP_CONCURRENT_STREAM_PASS",flush=True)
+
 def probe_all(mode):
     # Run a UDP warmup so the authenticated handshake is exercised before
     # the heavier TCP fan-out. Worker configuration remains unmodified.
@@ -196,6 +264,8 @@ def probe_all(mode):
         for future in concurrent.futures.as_completed(futures):
             print(json.dumps(future.result(),sort_keys=True),flush=True)
     shared_udp_source_test()
+    if mode=="direct":
+        continuous_direct_udp_test()
     print(f"{mode}: TWELVE_MIXED_TCP_UDP_SERVICES_PASS",flush=True)
 
 def perform(mode,binary,iran,foreign,tmp,echo,queue_profile):

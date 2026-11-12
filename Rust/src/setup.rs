@@ -35,13 +35,13 @@ fn existing_v3() -> Result<Option<Value>> {
 
 fn suggested_services()->Vec<Value> {
     let defaults:[(&str,u16);12]=[
-        ("tcp",443),("udp",443),("tcp",2053),("udp",444),
-        ("tcp",2083),("udp",1194),("tcp",2087),("udp",1701),
-        ("tcp",2096),("udp",500),("tcp",8443),("udp",4500),
+        ("tcp",8443),("udp",8444),("tcp",2053),("udp",2054),
+        ("tcp",2083),("udp",2084),("tcp",2087),("udp",2088),
+        ("tcp",2096),("udp",2097),("tcp",10081),("udp",10082),
     ];
     defaults.iter().enumerate().map(|(i,(protocol,port))|
         json!({"id":format!("S{:02}",i+1),"protocol":protocol,
-            "iran_port":port,"foreign_port":port,"enabled":i<2})
+            "iran_port":port,"foreign_port":port,"enabled":false})
     ).collect()
 }
 fn legacy_multi_services(previous:&Value)->Vec<Value> {
@@ -51,8 +51,9 @@ fn legacy_multi_services(previous:&Value)->Vec<Value> {
     let port=get_number(previous,"port",443).unwrap_or(443);
     let index=if protocol=="udp"{1}else{0};
     rows[index]["iran_port"]=json!(port); rows[index]["foreign_port"]=json!(port);
-    rows[index]["enabled"]=json!(true);
-    let other=if index==0{1}else{0}; rows[other]["enabled"]=json!(true);
+    // No implicit binding of old ports, especially the common TCP 443.
+    // Every enabled service must be explicitly chosen by the operator.
+    rows[index]["enabled"]=json!(false);
     rows
 }
 fn configure_services(previous:Option<&Value>)->Result<Option<Vec<Value>>> {
@@ -60,7 +61,7 @@ fn configure_services(previous:Option<&Value>)->Result<Option<Vec<Value>>> {
     let default_choice=if existing.is_some(){"y"}else if previous.is_some(){"n"}else{"y"};
     println!("\nMulti-Port profile: up to 12 TCP/UDP service mappings.");
     println!("Each row maps an Iran ingress port to a Foreign 127.0.0.1 target port.");
-    println!("Only S01 (TCP) and S02 (UDP) start enabled; 10 more slots are disabled to avoid port conflicts.");
+    println!("All ports start DISABLED. Explicitly enable an intended TCP and UDP service; TCP 443 is never auto-bound.");
     println!("Defaults are suggestions. Enter accepts a row; edit it as protocol,iran_port,foreign_port,on/off.");
     let choice=prompt("Enable/configure Multi-Port? (y/n)",default_choice)?.to_ascii_lowercase();
     if !matches!(choice.as_str(),"y"|"yes") {return Ok(existing.map(|rows|rows.clone()));}
@@ -238,7 +239,9 @@ mod tests {
         assert_eq!(rows.len(),12);
         assert_eq!(rows[0]["protocol"],"tcp");
         assert_eq!(rows[1]["protocol"],"udp");
-        assert_eq!(rows.iter().filter(|row|row["enabled"].as_bool()==Some(true)).count(),2);
+        assert_eq!(rows.iter().filter(|row|row["enabled"].as_bool()==Some(true)).count(),0);
+        assert_eq!(rows[0]["enabled"],false);
+        assert_eq!(rows[1]["enabled"],false);
         assert_eq!(rows[2]["enabled"],false);
     }
 
@@ -251,8 +254,8 @@ mod tests {
         assert_eq!(rows[1]["foreign_port"],51820);
         assert_eq!(rows[1]["protocol"],"udp");
         assert_eq!(rows[0]["protocol"],"tcp");
-        assert_eq!(rows[0]["enabled"],true);
-        assert_eq!(rows.iter().filter(|row|row["enabled"].as_bool()==Some(true)).count(),2);
+        assert_eq!(rows[0]["enabled"],false);
+        assert_eq!(rows.iter().filter(|row|row["enabled"].as_bool()==Some(true)).count(),0);
     }
 
 }

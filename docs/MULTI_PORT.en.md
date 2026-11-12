@@ -17,22 +17,22 @@ A fresh setup offers 12 editable suggestions:
 
 | ID | Protocol | Iran ingress | Foreign loopback target |
 |---|---|---:|---:|
-| S01 | TCP | 443 | 443 |
-| S02 | UDP | 443 | 443 |
+| S01 | TCP | 8443 | 8443 |
+| S02 | UDP | 8444 | 8444 |
 | S03 | TCP | 2053 | 2053 |
-| S04 | UDP | 444 | 444 |
+| S04 | UDP | 2054 | 2054 |
 | S05 | TCP | 2083 | 2083 |
-| S06 | UDP | 1194 | 1194 |
+| S06 | UDP | 2084 | 2084 |
 | S07 | TCP | 2087 | 2087 |
-| S08 | UDP | 1701 | 1701 |
+| S08 | UDP | 2088 | 2088 |
 | S09 | TCP | 2096 | 2096 |
-| S10 | UDP | 500 | 500 |
-| S11 | TCP | 8443 | 8443 |
-| S12 | UDP | 4500 | 4500 |
+| S10 | UDP | 2097 | 2097 |
+| S11 | TCP | 10081 | 10081 |
+| S12 | UDP | 10082 | 10082 |
 
-On a fresh setup, only S01 (TCP) and S02 (UDP) start enabled; the other ten are disabled to avoid listener conflicts. Each row is editable as `protocol,iran_port,foreign_port,on/off`. These are suggestions; check for conflicts. At least one TCP and one UDP row must remain enabled.
+On a fresh setup **all twelve port suggestions are disabled** until explicitly enabled. TCP 443 is not in the default suggestions and is never auto-bound. Each row is editable as `protocol,iran_port,foreign_port,on/off`. These are suggestions; check for conflicts. At least one TCP and one UDP row must remain enabled.
 
-Existing single-port installs default to keeping their current setup. Explicitly opt into Multi-Port to convert; the existing service is retained and a complementary protocol is suggested.
+Existing single-port installs keep their previous setup unless Multi-Port is explicitly selected in the Wizard. The first `services add` no longer silently creates active S01/TCP443. Existing Multi-Port entries are not rewritten on upgrade; keep S01 disabled if another tunnel owns 443.
 
 ## Pair setup and profile transfer
 
@@ -92,9 +92,9 @@ Service changes are saved atomically and applied with a controlled restart; this
 
 ## Preserving existing queues and performance
 
-This change extends only the listener and destination-dispatch layers. ICMP/UDP queue capacities and policies, enqueue/overflow/drop algorithms, Reverse FIFO, Queue Hint, Backlog Wake, Smart Rotation, Adaptive Performance, TCP framing, congestion control, timeouts, recovery, FEC and ICMP segmentation remain unchanged.
+v3.4.1 isolates UDP DATA in its existing **256-packet bounded short dispatch queue** with nonblocking UDP-only overflow drops; reliable TCP and control use the existing **10,000-packet queue**. This prevents UDP video/game packets from sitting behind TCP backlog while preserving both queue sizes and policies. This change extends only the listener and destination-dispatch layers. ICMP/UDP queue capacities and policies, enqueue/overflow/drop algorithms, Reverse FIFO, Queue Hint, Backlog Wake, Smart Rotation, Adaptive Performance, TCP framing, congestion control, timeouts, recovery, FEC and ICMP segmentation remain unchanged.
 
-The existing `transport` value remains the dispatcher/queue profile; fresh setups default to TCP. Each service still uses its own TCP or UDP protocol, while the queue and scheduler remain shared under the existing policy.
+The existing `transport` value remains the dispatcher/queue profile; fresh setups default to TCP. Each service still uses its own TCP or UDP protocol, while the Multi-Port receive queues are separated by protocol. All original capacities, drop policies, route scheduling, FEC and recovery behavior are preserved.
 
 ## Limitations
 
