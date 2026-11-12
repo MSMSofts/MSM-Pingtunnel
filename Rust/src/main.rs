@@ -68,6 +68,35 @@ fn get_number(cfg: &Value, field: &str, default: u64) -> Result<u64> {
     }
 }
 
+fn validate_services_value(value:&Value)->Result<()> {
+    let services=value.as_array().ok_or_else(||failure("services must be an array"))?;
+    if services.is_empty() || services.len()>12 { return Err(failure("Multi-Port requires 1..12 service entries")); }
+    let mut ids:Vec<String>=Vec::new(); let mut iran_ports:Vec<String>=Vec::new(); let mut foreign_ports:Vec<String>=Vec::new();
+    let mut enabled=0usize; let mut tcp_enabled=false; let mut udp_enabled=false;
+    for service in services {
+        let id=service.get("id").and_then(Value::as_str).ok_or_else(||failure("service id is required"))?;
+        let number=id.strip_prefix('S').and_then(|s|s.parse::<u8>().ok());
+        if id.len()!=3 || number.is_none() || !(1..=12).contains(&number.unwrap()) || format!("S{:02}",number.unwrap())!=id {
+            return Err(failure(format!("invalid service ID {id}; use S01..S12")));
+        }
+        if ids.iter().any(|old|old==id) {return Err(failure(format!("duplicate service ID {id}")));} ids.push(id.to_owned());
+        let protocol=service.get("protocol").and_then(Value::as_str).ok_or_else(||failure(format!("{id}: protocol is required")))?;
+        if protocol!="tcp" && protocol!="udp" {return Err(failure(format!("{id}: protocol must be tcp or udp")));}
+        let iran=get_number(service,"iran_port",0)?; let foreign=get_number(service,"foreign_port",0)?;
+        if !(1..=65535).contains(&iran) || !(1..=65535).contains(&foreign) {return Err(failure(format!("{id}: ports must be in 1..65535")));}
+        let active=service.get("enabled").and_then(Value::as_bool).ok_or_else(||failure(format!("{id}: enabled must be boolean")))?;
+        if !active {continue;} enabled+=1;
+        if protocol=="tcp" {tcp_enabled=true;} else {udp_enabled=true;}
+        let ik=format!("{protocol}:{iran}"); let fk=format!("{protocol}:{foreign}");
+        if iran_ports.contains(&ik) {return Err(failure(format!("duplicate enabled Iran {protocol} port {iran}")));}
+        if foreign_ports.contains(&fk) {return Err(failure(format!("duplicate enabled Foreign {protocol} port {foreign}")));}
+        iran_ports.push(ik); foreign_ports.push(fk);
+    }
+    if enabled==0 {return Err(failure("at least one Multi-Port service must be enabled"));}
+    if !tcp_enabled || !udp_enabled {return Err(failure("combined Multi-Port requires at least one enabled TCP and one enabled UDP service"));}
+    Ok(())
+}
+
 fn validate(cfg: &Value) -> Result<()> {
     if !cfg.is_object()||cfg.get("schema_version").and_then(Value::as_u64)!=Some(setup::SCHEMA) {
         return Err(failure("Configuration v3 is required. Legacy settings are unsupported; back up/remove old JSON and run setup."));
@@ -84,6 +113,7 @@ fn validate(cfg: &Value) -> Result<()> {
     let direction=cfg.get("icmp_direction").and_then(Value::as_str).unwrap_or("auto");
     if !matches!(direction,"auto"|"auto_direct"|"direct"|"reverse"){return Err(failure("icmp_direction must be auto, auto_direct, direct or reverse"));}
     if !(1..=65535).contains(&get_number(cfg,"port",0)?){return Err(failure("invalid local port"));}
+    if let Some(services)=cfg.get("services") { validate_services_value(services)?; }
     let secret=get_string(cfg,"pair_key").ok_or_else(||failure("missing pairing key"))?;
     let bytes=STANDARD.decode(secret).map_err(|_|failure("pairing key not base64"))?;
     if bytes.len()!=32||STANDARD.encode(&bytes)!=secret{return Err(failure("pairing key must be 32 random bytes in canonical base64"));}
@@ -170,6 +200,8 @@ fn numeric_auth_code(pair_key:&str)->Result<u32>{
     Ok((u32::from_be_bytes([hash[0],hash[1],hash[2],hash[3]]) & 0x7fff_ffff).max(1))
 }
 
+fn service_alias(id:&str)->String { format!("msm-service:{id}") }
+
 fn go_core_config(cfg:&Value)->Result<Value>{
     validate(cfg)?;
     let region=get_string(cfg,"region").unwrap();
@@ -189,6 +221,28 @@ fn go_core_config(cfg:&Value)->Result<Value>{
     // the protected fragment extension even if the main wire version is 4.
     config["icmp_segment"]=json!(cfg.get("icmp_segment").and_then(Value::as_bool).unwrap_or(false));
     config["udp_fec"]=json!(cfg.get("udp_fec").and_then(Value::as_bool).unwrap_or(false));
+    if let Some(services)=cfg.get("services").and_then(Value::as_array) {
+        let first=services.iter().find(|service|service.get("enabled").and_then(Value::as_bool)==Some(true))
+            .ok_or_else(||failure("Multi-Port has no enabled services"))?;
+        let id=get_string(first,"id").ok_or_else(||failure("Multi-Port service ID missing"))?;
+        let iran_port=get_number(first,"iran_port",0)?; let foreign_port=get_number(first,"foreign_port",0)?;
+        config["services"]=json!(services);
+        if region=="iran" {
+            config["timeout"]=json!(get_number(cfg,"timeout",60)?);
+            config["tcp_bs"]=json!(get_number(cfg,"tcp_bs",1_048_576)?);
+            config["tcp_mw"]=json!(get_number(cfg,"tcp_mw",20_000)?);
+            config["tcp_rst"]=json!(get_number(cfg,"tcp_rst",400)?);
+            let buf=get_number(cfg,"udp_buf",0)?; if buf>0 {config["udp_buf"]=json!(buf);}
+            config["listen"]=json!(format!(":{iran_port}"));
+            config["server"]=json!(peer);
+            config["target"]=json!(service_alias(id));
+        } else {
+            config["peer_ip"]=json!(peer);
+            config["fixed_target"]=json!(format!("127.0.0.1:{foreign_port}"));
+            config["forward_protocol"]=json!(protocol);
+        }
+        return Ok(config);
+    }
     if region=="iran"{
         config["timeout"]=json!(get_number(cfg,"timeout",60)?);
         // The client owns TCP framing; the foreign service gets these values
@@ -426,6 +480,7 @@ fn help(){
     println!("  pingtunnel validate | performance | security | health [--peer] | dry-run");
     println!("  pingtunnel start | stop | restart | status | logs [lines]");
     println!("  pingtunnel route show | auto-reverse | auto-direct | manual-reverse | manual-direct");
+    println!("  pingtunnel services list|add|edit|remove|enable|disable|check|export|import");
     println!("  pingtunnel update | uninstall [--purge]  (permanent purge requires PURGE confirmation)");
 }
 
@@ -530,6 +585,90 @@ fn route_policy_menu()->Result<()> {
     route_policy_set(choice)
 }
 
+fn legacy_service_rows(cfg:&Value)->Vec<Value> {
+    let protocol=get_string(cfg,"transport").unwrap_or("tcp"); let port=get_number(cfg,"port",443).unwrap_or(443);
+    let mut rows=vec![json!({"id":"S01","protocol":"tcp","iran_port":443,"foreign_port":443,"enabled":false}),
+        json!({"id":"S02","protocol":"udp","iran_port":444,"foreign_port":444,"enabled":false})];
+    if protocol=="udp" {rows[1]["iran_port"]=json!(port);rows[1]["foreign_port"]=json!(port);rows[1]["enabled"]=json!(true);rows[0]["enabled"]=json!(true);}
+    else {rows[0]["iran_port"]=json!(port);rows[0]["foreign_port"]=json!(port);rows[0]["enabled"]=json!(true);rows[1]["enabled"]=json!(true);}
+    rows
+}
+fn current_service_rows(cfg:&Value)->Vec<Value> {cfg.get("services").and_then(Value::as_array).cloned().unwrap_or_else(||legacy_service_rows(cfg))}
+fn next_service_id(services:&[Value])->Result<String> {
+    for n in 1..=12 {let id=format!("S{n:02}");if !services.iter().any(|s|s.get("id").and_then(Value::as_str)==Some(id.as_str())){return Ok(id);}}
+    Err(failure("Multi-Port is limited to 12 service IDs (S01..S12)"))
+}
+fn print_services(services:&[Value]) {
+    println!("{:<5} {:<5} {:>12} {:>14} {:>9}","ID","Proto","Iran Listen","Foreign Target","State");println!("{}", "-".repeat(52));
+    for service in services {println!("{:<5} {:<5} {:>12} {:>14} {:>9}",
+        service["id"].as_str().unwrap_or("?"),service["protocol"].as_str().unwrap_or("?").to_uppercase(),
+        service["iran_port"].as_u64().unwrap_or(0),service["foreign_port"].as_u64().unwrap_or(0),
+        if service["enabled"].as_bool()==Some(true){"enabled"}else{"disabled"});}
+}
+fn apply_services_update(previous:Value,services:Vec<Value>)->Result<()> {
+    let mut next=previous.clone(); next["services"]=json!(services);
+    let first=services.iter().find(|s|s.get("enabled").and_then(Value::as_bool)==Some(true)).ok_or_else(||failure("at least one service must remain enabled"))?;
+    let local_port=if get_string(&next,"region")==Some("iran"){get_number(first,"iran_port",0)?}else{get_number(first,"foreign_port",0)?};
+    next["port"]=json!(local_port);
+    // Keep the pre-existing transport selector as the queue-policy profile.
+    // Queue sizes, TCP tuning, timeouts and adaptive settings are not rewritten.
+    validate(&next)?; store_config(&next)?;
+    if let Err(err)=apply_config(){let _=store_config(&previous);let _=apply_config();return Err(failure(format!("Multi-Port change failed; previous config restored: {err}")));}
+    println!("Multi-Port configuration applied. Existing queue/performance settings were retained.");Ok(())
+}
+fn services_cli(args:&[String])->Result<()> {
+    root_required()?; if args.is_empty(){return services_menu();}
+    let action=args[0].as_str();let previous=load_config()?;let mut services=current_service_rows(&previous);
+    match action {
+        "list"|"status"=>{print_services(&services);Ok(())}
+        "check"=>{let mut candidate=previous.clone();candidate["services"]=json!(services);validate(&candidate)?;
+            println!("Multi-Port profile valid: {} slots, {} enabled.",services.len(),services.iter().filter(|s|s["enabled"].as_bool()==Some(true)).count());Ok(())}
+        "export"=>{let path=if let Some(v)=args.get(1){v.clone()}else{prompt("Export path","/root/pingtunnel-services.json")?};
+            let mut bytes=serde_json::to_vec_pretty(&json!({"profile_version":1,"services":services}))?;bytes.push(b'\n');
+            atomic_save(Path::new(&path),&bytes,0o600)?;println!("Service-only profile exported to {path}. Pairing keys are not included.");Ok(())}
+        "import"=>{let path=if let Some(v)=args.get(1){v.clone()}else{prompt("Profile file","/root/pingtunnel-services.json")?};
+            let profile:Value=serde_json::from_slice(&fs::read(&path)?)?;
+            let imported=profile.get("services").and_then(Value::as_array).ok_or_else(||failure("profile must contain a services array"))?.clone();
+            apply_services_update(previous,imported)}
+        "add"=>{if services.len()>=12{return Err(failure("Multi-Port is limited to 12 service slots"));}
+            let protocol=if let Some(v)=args.get(1){v.clone()}else{prompt("Protocol (tcp/udp)","tcp")?}.to_ascii_lowercase();
+            let iran=if let Some(v)=args.get(2){v.clone()}else{prompt("Iran ingress port","443")?};
+            let foreign=if let Some(v)=args.get(3){v.clone()}else{prompt("Foreign loopback target port","443")?};
+            let iran_port:u16=iran.parse().map_err(|_|failure("Iran port must be 1..65535"))?;
+            let foreign_port:u16=foreign.parse().map_err(|_|failure("Foreign port must be 1..65535"))?;
+            let id=next_service_id(&services)?;services.push(json!({"id":id,"protocol":protocol,"iran_port":iran_port,"foreign_port":foreign_port,"enabled":true}));
+            apply_services_update(previous,services)}
+        "edit"=>{let id=if let Some(v)=args.get(1){v.clone()}else{prompt("Service ID","S01")?};
+            let index=services.iter().position(|s|s["id"].as_str()==Some(id.as_str())).ok_or_else(||failure(format!("service {id} not found")))?;
+            let protocol=prompt("Protocol (tcp/udp)",services[index]["protocol"].as_str().unwrap_or("tcp"))?.to_ascii_lowercase();
+            let iran=prompt("Iran ingress port",&services[index]["iran_port"].as_u64().unwrap_or(443).to_string())?;
+            let foreign=prompt("Foreign loopback target port",&services[index]["foreign_port"].as_u64().unwrap_or(443).to_string())?;
+            let iran_port:u16=iran.parse().map_err(|_|failure("Iran port must be 1..65535"))?;let foreign_port:u16=foreign.parse().map_err(|_|failure("Foreign port must be 1..65535"))?;
+            services[index]["protocol"]=json!(protocol);services[index]["iran_port"]=json!(iran_port);services[index]["foreign_port"]=json!(foreign_port);
+            apply_services_update(previous,services)}
+        "remove"=>{let id=if let Some(v)=args.get(1){v.clone()}else{prompt("Service ID","S12")?};let before=services.len();services.retain(|s|s["id"].as_str()!=Some(id.as_str()));
+            if services.len()==before{return Err(failure(format!("service {id} not found")));}apply_services_update(previous,services)}
+        "enable"|"disable"=>{let id=if let Some(v)=args.get(1){v.clone()}else{prompt("Service ID","S01")?};
+            let service=services.iter_mut().find(|s|s["id"].as_str()==Some(id.as_str())).ok_or_else(||failure(format!("service {id} not found")))?;
+            service["enabled"]=json!(action=="enable");apply_services_update(previous,services)}
+        _=>Err(failure("Usage: pingtunnel services [list|add|edit ID|remove ID|enable ID|disable ID|check|export [PATH]|import PATH]"))
+    }
+}
+fn services_menu()->Result<()> {
+    root_required()?;
+    loop {println!("\nMulti-Port Services — TCP + UDP (maximum 12)");
+        println!("  1) View services");println!("  2) Add service");println!("  3) Edit service");println!("  4) Remove service");
+        println!("  5) Enable service");println!("  6) Disable service");println!("  7) Export service profile");println!("  8) Import service profile");
+        println!("  9) Validate profile");println!("  0) Back");
+        match prompt("Select","0")?.as_str() {
+            "1"=>services_cli(&["list".into()])?,"2"=>services_cli(&["add".into()])?,"3"=>services_cli(&["edit".into()])?,
+            "4"=>services_cli(&["remove".into()])?,"5"=>services_cli(&["enable".into()])?,"6"=>services_cli(&["disable".into()])?,
+            "7"=>services_cli(&["export".into()])?,"8"=>services_cli(&["import".into()])?,"9"=>services_cli(&["check".into()])?,
+            "0"=>return Ok(()),_=>println!("Choose 0..9."),
+        }
+    }
+}
+
 fn menu()->Result<()>{
     root_required()?;
     // Samples exist only while this CLI is displaying the dashboard.
@@ -544,9 +683,9 @@ fn menu()->Result<()>{
                 version:env!("CARGO_PKG_VERSION"),
                 region:cfg.as_ref().and_then(|v|get_string(v,"region")).unwrap_or("unknown"),
                 peer:cfg.as_ref().and_then(|v|get_string(v,"peer_ip")).unwrap_or("-"),
-                transport:cfg.as_ref().and_then(|v|get_string(v,"transport")).unwrap_or("-"),
+                transport:cfg.as_ref().map(|v|if v.get("services").and_then(Value::as_array).is_some(){"TCP+UDP"}else{get_string(v,"transport").unwrap_or("-")}).unwrap_or("-"),
                 route:cfg.as_ref().and_then(|v|get_string(v,"icmp_direction")).unwrap_or("auto"),
-                port:cfg.as_ref().and_then(|v|v.get("port")).and_then(Value::as_u64)
+                port:cfg.as_ref().and_then(|v|if let Some(services)=v.get("services").and_then(Value::as_array){Some(services.len() as u64)}else{v.get("port").and_then(Value::as_u64)})
                     .and_then(|n|u16::try_from(n).ok()),
                 service:&state,
                 configured:cfg.is_some(),
@@ -559,7 +698,7 @@ fn menu()->Result<()>{
             menu_ui::choose(&mut monitor,display,default)?
         }else{
             print!("{}",display(monitor.current(),80,40));
-            prompt("Choose (1-15)",default)?
+            prompt("Choose (1-16)",default)?
         };
         let action=match choice.as_str(){
             "1"=>run_systemctl(&["status","pingtunnel.service","--no-pager"]),
@@ -577,7 +716,8 @@ fn menu()->Result<()>{
             "13"=>show_security_status(),
             "14"=>show_health(false),
             "15"=>route_policy_menu(),
-            _=>{println!("Invalid choice: use 1..15.");continue}
+            "16"=>services_menu(),
+            _=>{println!("Invalid choice: use 1..16.");continue}
         };
         if choice=="11" && action.is_ok() && !Path::new("/usr/local/bin/pingtunnel").exists() {
             return Ok(());
@@ -925,6 +1065,7 @@ fn main_inner()->Result<()>{
                 Ok(())
             } else {route_policy_set(action)}
         },
+        "services"=>services_cli(&args[1..]),
         "performance"=>show_adaptive_status(),
         "security"=>show_security_status(),
         "health"=>{
