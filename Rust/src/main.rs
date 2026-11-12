@@ -1240,4 +1240,55 @@ mod tests{
         c["port"]=json!(0);
         assert!(validate(&c).is_err());
     }
+    #[test]
+    fn mixed_multi_port_maps_both_protocols_and_preserves_queue_profile() {
+        let services=json!([
+            {"id":"S01","protocol":"tcp","iran_port":443,"foreign_port":9443,"enabled":true},
+            {"id":"S02","protocol":"udp","iran_port":443,"foreign_port":8443,"enabled":true}
+        ]);
+        let mut iran=conf("iran","udp",444);
+        iran["services"]=services.clone();
+        iran["tcp_bs"]=json!(524288);
+        iran["tcp_mw"]=json!(4096);
+        iran["tcp_rst"]=json!(850);
+        iran["udp_buf"]=json!(524288);
+        assert!(validate(&iran).is_ok());
+        let local=go_core_config(&iran).unwrap();
+        assert_eq!(local["tcp"],0);
+        assert_eq!(local["listen"],":443");
+        assert_eq!(local["target"],"msm-service:S01");
+        assert_eq!(local["tcp_bs"],524288);
+        assert_eq!(local["tcp_mw"],4096);
+        assert_eq!(local["tcp_rst"],850);
+        assert_eq!(local["udp_buf"],524288);
+
+        let mut foreign=conf("foreign","udp",444);
+        foreign["services"]=services;
+        let remote=go_core_config(&foreign).unwrap();
+        assert_eq!(remote["forward_protocol"],0);
+        assert_eq!(remote["fixed_target"],"127.0.0.1:9443");
+        assert_eq!(remote["services"][1]["protocol"],"udp");
+        assert_eq!(remote["peer_ip"],"198.51.100.45");
+    }
+
+    #[test]
+    fn multi_port_rejects_bad_ids_duplicates_and_missing_protocol() {
+        let mut cfg=conf("iran","tcp",443);
+        cfg["services"]=json!([
+            {"id":"S01","protocol":"tcp","iran_port":443,"foreign_port":443,"enabled":true},
+            {"id":"S02","protocol":"udp","iran_port":444,"foreign_port":444,"enabled":true}
+        ]);
+        assert!(validate(&cfg).is_ok());
+        cfg["services"][1]["id"]=json!("S01");
+        assert!(validate(&cfg).is_err());
+        cfg["services"][1]["id"]=json!("S02");
+        cfg["services"][1]["protocol"]=json!("tcp");
+        assert!(validate(&cfg).is_err());
+        cfg["services"][1]["protocol"]=json!("udp");
+        cfg["services"][1]["iran_port"]=json!(0);
+        assert!(validate(&cfg).is_err());
+        cfg["services"]=json!((1..=13).map(|i|json!({"id":format!("S{:02}",i.min(12)),"protocol":if i%2==0{"udp"}else{"tcp"},"iran_port":1000+i,"foreign_port":2000+i,"enabled":true})).collect::<Vec<_>>());
+        assert!(validate(&cfg).is_err());
+    }
+
 }

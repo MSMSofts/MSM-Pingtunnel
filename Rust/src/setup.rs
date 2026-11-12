@@ -231,4 +231,26 @@ mod tests {
         assert!(!valid_pair_key("password"));
         assert!(!valid_pair_key("123456"));
     }
+    #[test]
+    fn suggested_multi_port_profile_has_twelve_mixed_rows() {
+        let rows=suggested_services();
+        assert_eq!(rows.len(),12);
+        assert_eq!(rows[0]["protocol"],"tcp");
+        assert_eq!(rows[1]["protocol"],"udp");
+        assert!(rows.iter().all(|row|row["enabled"].as_bool()==Some(true)));
+    }
+
+    #[test]
+    fn legacy_conversion_preserves_current_port_and_adds_complementary_protocol() {
+        let mut old=json!({"transport":"udp","port":51820});
+        let rows=legacy_multi_services(&old);
+        assert_eq!(rows.len(),12);
+        assert_eq!(rows[1]["iran_port"],51820);
+        assert_eq!(rows[1]["foreign_port"],51820);
+        assert_eq!(rows[1]["protocol"],"udp");
+        assert_eq!(rows[0]["protocol"],"tcp");
+        assert_eq!(rows[0]["enabled"],true);
+        assert_eq!(rows.iter().filter(|row|row["enabled"].as_bool()==Some(true)).count(),2);
+    }
+
 }
