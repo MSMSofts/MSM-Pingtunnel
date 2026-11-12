@@ -161,7 +161,10 @@ jobs:
         timeout-minutes: 8
         run: |
           python3 -m py_compile Source/multi_port_smoke.py
-          sudo python3 Source/multi_port_smoke.py --binary "$PWD/dist/pingtunnel-core-linux-amd64" --modes direct auto_direct reverse auto
+          sudo python3 Source/multi_port_smoke.py --binary "$PWD/dist/pingtunnel-core-linux-amd64" --modes direct auto_direct reverse auto --queue-profile tcp
+          # Also exercise legacy UDP queue policy with mixed TCP+UDP listeners.
+          # Existing sizes, drop policy and scheduling remain untouched.
+          sudo python3 Source/multi_port_smoke.py --binary "$PWD/dist/pingtunnel-core-linux-amd64" --modes direct reverse --queue-profile udp
       - uses: actions/upload-artifact@v4
         with:
           name: go-core-${{ matrix.arch }}

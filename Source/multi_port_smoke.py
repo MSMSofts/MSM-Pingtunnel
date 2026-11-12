@@ -94,19 +94,19 @@ def recv_exact(s,n):
         result.extend(chunk)
     return bytes(result)
 
-def config(region,mode,key):
+def config(region,mode,key,queue_profile):
     payload=dict(
         type="client" if region=="iran" else "server",
         region=region,encrypt="auto",encrypt_key=key,key=88124,
         icmp_direction=mode,icmp_listen="0.0.0.0",nolog=1,noprint=0,
-        loglevel="error",tcp=1,services=SERVICES)
+        loglevel="error",tcp=1 if queue_profile=="tcp" else 0,services=SERVICES)
     if region=="iran":
         payload.update(server=FOREIGN,listen=":53041",
                        target="msm-service:S01",timeout=60,
                        tcp_bs=1048576,tcp_mw=20000,tcp_rst=400)
     else:
         payload.update(peer_ip=IRAN,fixed_target="127.0.0.1:54041",
-                       forward_protocol=1)
+                       forward_protocol=1 if queue_profile=="tcp" else 0)
     return payload
 
 def try_udp(port,payload,foreign_port,timeout=1.2):
@@ -198,13 +198,13 @@ def probe_all(mode):
     shared_udp_source_test()
     print(f"{mode}: TWELVE_MIXED_TCP_UDP_SERVICES_PASS",flush=True)
 
-def perform(mode,binary,iran,foreign,tmp,echo):
+def perform(mode,binary,iran,foreign,tmp,echo,queue_profile):
     key=base64.b64encode(bytes(range(1,33))).decode()
-    iran_conf=tmp/f"iran-{mode}.json";foreign_conf=tmp/f"foreign-{mode}.json"
-    iran_conf.write_text(json.dumps(config("iran",mode,key)))
-    foreign_conf.write_text(json.dumps(config("foreign",mode,key)))
-    log_i=(tmp/f"iran-{mode}.log").open("w+")
-    log_f=(tmp/f"foreign-{mode}.log").open("w+")
+    iran_conf=tmp/f"iran-{queue_profile}-{mode}.json";foreign_conf=tmp/f"foreign-{queue_profile}-{mode}.json"
+    iran_conf.write_text(json.dumps(config("iran",mode,key,queue_profile)))
+    foreign_conf.write_text(json.dumps(config("foreign",mode,key,queue_profile)))
+    log_i=(tmp/f"iran-{queue_profile}-{mode}.log").open("w+")
+    log_f=(tmp/f"foreign-{queue_profile}-{mode}.log").open("w+")
     foreign_core=subprocess.Popen(in_ns(foreign,binary,"-c",str(foreign_conf)),
                                   stdout=log_f,stderr=subprocess.STDOUT)
     iran_core=subprocess.Popen(in_ns(iran,binary,"-c",str(iran_conf)),
@@ -238,6 +238,8 @@ def main():
     parser.add_argument("--binary",required=True)
     parser.add_argument("--modes",nargs="+",choices=["direct","auto_direct","reverse","auto"],
                         default=["direct","auto"])
+    parser.add_argument("--queue-profile",choices=["tcp","udp"],default="tcp",
+                        help="select the existing global queue/dispatcher profile without tuning it")
     args=parser.parse_args()
     if os.geteuid()!=0: raise SystemExit("Requires root, CAP_NET_RAW and CAP_NET_ADMIN")
     binary=str(Path(args.binary).resolve())
@@ -267,7 +269,7 @@ def main():
                     echo_log.seek(0)
                     raise RuntimeError("Foreign echo services exited: "+echo_log.read())
                 for mode in args.modes:
-                    perform(mode,binary,iran,foreign,temp,echo)
+                    perform(mode,binary,iran,foreign,temp,echo,args.queue_profile)
             finally:
                 if echo.poll() is None:
                     echo.terminate()
@@ -278,7 +280,7 @@ def main():
         for ns in (iran,foreign):
             subprocess.run(["ip","netns","del",ns],stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL,check=False)
-    print("MULTI_PORT_ALL_SELECTED_ROUTE_POLICIES_PASS",flush=True)
+    print(f"MULTI_PORT_ALL_SELECTED_ROUTE_POLICIES_PASS queue_profile={args.queue_profile}",flush=True)
 
 if __name__=="__main__":
     main()
