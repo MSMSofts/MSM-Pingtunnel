@@ -2,22 +2,22 @@
 
 **An authenticated, encrypted ICMP tunnel for forwarding TCP/UDP traffic between two Linux VPSs, with a Go transport core and a Rust control menu.**
 
-[فارسی](README.md) · [Latest stable: v3.3.24](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.24) · [All release notes](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0](LICENSE)
+[فارسی](README.md) · [Target release: v3.4.0](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.0) · [All release notes](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0](LICENSE)
 
 ## Features
 
 - **Authenticated encryption:** shared 256-bit pairing key, ephemeral X25519 sessions, AEAD transport encryption and anti-replay controls.
 - **Three routing choices:** automatic Reverse-first, automatic Direct-first, or Manual with a locked Direct / Reverse direction.
 - **Adaptive Reverse polling:** signed FIFO queue-age/depth observations, bounded demand-responsive ICMP opportunities and write-error backoff.
-- **TCP and UDP forwarding:** transparently forward encrypted traffic to a loopback-only service on the overseas VPS, such as Hysteria 2 or Xray.
+- **Mixed Multi-Port:** up to 12 TCP and UDP services over one authenticated ICMP session, each mapped from an Iran ingress port to an overseas loopback target.
 - **Unified Rust manager:** setup, route selection, systemd controls, health and security diagnostics, RTT/jitter observations, and logs.
 - **Conservative compatibility:** config schema 3 and Wire v4, installation checks/rollback, experimental segmentation and UDP repair opt-in only.
 
-Pingtunnel **is not a VPN server**. It transports traffic arriving at the local Iran-side listener over encrypted ICMP to the chosen foreign-side loopback service.
+Pingtunnel **is not a VPN server**. It forwards traffic from multiple Iran-side TCP/UDP listeners over one encrypted ICMP tunnel to Foreign VPS loopback services. See the [Multi-Port setup guide](docs/MULTI_PORT.en.md) for port mapping, firewall and profile import/export.
 
 ## Choose a route policy
 
-Run `sudo pingtunnel` and select **15) Route Policy**:
+Run `sudo pingtunnel` and select **15) Route Policy**. Choose **16) Multi-Port** to manage the service mappings.
 
 | Menu choice | Effective policy | Initial direction | Switching behavior |
 | --- | --- | --- | --- |
@@ -90,7 +90,7 @@ Session and replay checks → decryption → data delivery
 
 ## Quick installation
 
-> **Stable v3.3.24:** a GitHub stable release with successful AMD64/ARM64 CI validation. A stable label does not guarantee game RTT or availability on every network. Back up and upgrade both peers together in a maintenance window.
+> **Target v3.4.0:** mixed TCP/UDP Multi-Port, retaining Wire v4 and the existing queue/performance profile. The Stable release is created only after CI passes and the change is merged.
 
 ### ⚠️ Important: install and set up the OVERSEAS VPS first
 
@@ -103,7 +103,7 @@ Session and replay checks → decryption → data delivery
 Connect to the **overseas VPS** via SSH and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.24/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.0/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~

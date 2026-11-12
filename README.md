@@ -2,22 +2,22 @@
 
 **تونل ICMP رمزنگاری‌شده برای انتقال ترافیک TCP/UDP بین یک VPS ایران و یک VPS خارج، با هستهٔ Go و مدیر Rust.**
 
-[English](README.en.md) · [آخرین نسخه پایدار: v3.3.24](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.24) · [توضیحات همه نسخه‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
+[English](README.en.md) · [نسخه هدف: v3.4.0](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.0) · [توضیحات همه نسخه‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
 
 ## ویژگی‌ها
 
 - **انتقال امن:** کلید جفت‌سازی ۲۵۶ بیتی، نشست‌های موقت X25519، رمزنگاری AEAD، احراز هویت همتا و محافظت در برابر Replay.
 - **سه حالت مدیریت مسیر:** Reverse-first خودکار، Direct-first خودکار، یا حالت دستی با انتخاب قطعی Reverse / Direct.
 - **تنظیم خودکار Polling در Reverse:** کنترل نرخ ICMP با توجه به صف معتبر و واقعی، عمر بسته‌های منتظر، ارسال موفق و محدودیت خطا.
-- **پشتیبانی از TCP/UDP:** انتقال ترافیک به سرویس محلی سرور خارج؛ برای نمونه، Hysteria 2 یا Xray.
+- **Multi-Port ترکیبی:** حداکثر ۱۲ سرویس TCP و UDP در یک نشست ICMP رمزنگاری‌شده؛ هر سرویس نگاشت مستقل ایران به مقصد Loopback خارج دارد.
 - **مدیریت ساده:** نصب، جفت‌سازی، گزینه‌های مسیر، شروع و توقف systemd، وضعیت سلامت، امنیت، RTT، Jitter و لاگ‌ها.
 - **قابل بازیابی:** پشتیبان‌گیری و اعتبارسنجی تنظیمات هنگام ارتقا؛ ویژگی‌های آزمایشی قطعه‌بندی و ترمیم UDP به‌طور پیش‌فرض غیرفعال‌اند.
 
-Pingtunnel **خودش سرور VPN نیست**؛ داده از ورودی ایران با ICMP رمزنگاری‌شده به سرویس محلی خارج فرستاده می‌شود. برای هر نمونه، نوع ترافیک TCP یا UDP انتخاب می‌شود.
+Pingtunnel **خودش سرور VPN نیست**؛ داده از Listenerهای TCP/UDP ایران با یک تونل ICMP رمزنگاری‌شده به سرویس‌های Loopback خارج منتقل می‌شود. برای راهنمای تنظیم ۱۲ سرویس و فایروال، [راهنمای Multi-Port](docs/MULTI_PORT.md) را ببینید.
 
 ## سیاست‌های مسیر
 
-در منوی `sudo pingtunnel` گزینهٔ **15) Route Policy** را انتخاب کنید:
+در منوی `sudo pingtunnel` گزینهٔ **15) Route Policy** را انتخاب کنید. برای مدیریت پورت‌ها گزینهٔ **16) Multi-Port** را باز کنید.
 
 | انتخاب در منو | حالت واقعی | جهت اولیه | تغییر مسیر |
 | --- | --- | --- | --- |
@@ -90,7 +90,7 @@ ICMP Echo Request / Echo Reply (Reverse یا Direct)
 
 ## نصب سریع
 
-> **انتشار پایدار 3.3.24:** انتشار پایدار GitHub با تست‌های موفق CI در AMD64/ARM64. این برچسب، تضمین تأخیر بازی یا پایداری در تمام شبکه‌ها نیست؛ قبل از ارتقا از تنظیمات نسخهٔ فعلی پشتیبان بگیرید و هر دو VPS را هماهنگ به‌روزرسانی کنید.
+> **نسخه هدف 3.4.0:** قابلیت Multi-Port ترکیبی TCP/UDP با حفظ Wire v4 و تنظیمات فعلی صف و عملکرد. انتشار Stable پس از عبور CI و ادغام تغییرات انجام می‌شود.
 
 ### ⚠️ بسیار مهم: حتماً ابتدا نصب و راه‌اندازی را روی سرور خارج انجام دهید
 
@@ -103,7 +103,7 @@ ICMP Echo Request / Echo Reply (Reverse یا Direct)
 ابتدا از طریق SSH به **سرور خارج** متصل شوید و نصب را اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.24/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.0/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
