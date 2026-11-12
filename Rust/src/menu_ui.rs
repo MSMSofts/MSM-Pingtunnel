@@ -89,6 +89,9 @@ const SECURITY: [(u8, &str, &str); 3] = [
     (14, "Health", "Core heartbeat"),
     (15, "Route Policy", "AUTO Reverse / AUTO Direct / Manual"),
 ];
+const MULTIPORT: [(u8, &str, &str); 1] = [
+    (16, "Multi-Port", "Manage up to 12 TCP/UDP services"),
+];
 
 fn options(out: &mut String, section: &str, entries: &[(u8, &str, &str)],
            width: usize, unicode: bool, color: bool, compact: bool) {
@@ -105,7 +108,7 @@ fn options(out: &mut String, section: &str, entries: &[(u8, &str, &str)],
     }
 }
 
-/// View is deliberately single-column. Menu choices are 1..15 from TOP to
+/// View is deliberately single-column. Menu choices are 1..16 from TOP to
 /// BOTTOM, so visual scanning and terminal keyboard input agree.
 pub(crate) fn render_sized(view: &MenuView<'_>, color: bool, unicode: bool,
                            columns: u16, rows: u16) -> String {
@@ -166,6 +169,7 @@ pub(crate) fn render_sized(view: &MenuView<'_>, color: bool, unicode: bool,
     options(&mut out,"DIAGNOSTICS",&DIAGNOSTIC,width,unicode,color,compact);
     options(&mut out,"MAINTENANCE",&MAINTENANCE,width,unicode,color,compact);
     options(&mut out,"SECURITY & HEALTH",&SECURITY,width,unicode,color,compact);
+    options(&mut out,"PORT MANAGEMENT",&MULTIPORT,width,unicode,color,compact);
     out
 }
 
@@ -257,7 +261,7 @@ mod tests {
     }
 
     #[test]
-    fn choices_are_strictly_top_to_bottom_1_to_15() {
+    fn choices_are_strictly_top_to_bottom_1_to_16() {
         for (cols,rows) in [(80,40),(52,30),(47,27)]{
             let s=render_sized(&fixture(),false,false,cols,rows);
             let choices:Vec<u8>=s.lines().filter_map(|line|{
@@ -265,9 +269,10 @@ mod tests {
                 let (prefix,_) = text.split_once(')')?;
                 prefix.trim().parse::<u8>().ok()
             }).collect();
-            assert_eq!(choices,(1..=15).collect::<Vec<u8>>());
+            assert_eq!(choices,(1..=16).collect::<Vec<u8>>());
             assert!(!s.contains("Auto Tune"));
             assert!(s.contains("15) Route Policy"));
+            assert!(s.contains("16) Multi-Port"));
             assert!(s.contains("0.3%"));
             assert!(s.contains("13.9 MiB"));
             assert!(!s.contains("\x1b["));

@@ -122,6 +122,9 @@ type Client struct {
 	conn          *icmp.PacketConn
 	listenConn    *net.UDPConn
 	tcplistenConn *net.TCPListener
+	services      []PortService
+	multiTCPListeners map[string]*net.TCPListener
+	multiUDPListeners map[string]*net.UDPConn
 
 	localAddrToConnMap sync.Map
 	localIdToConnMap   sync.Map
@@ -154,6 +157,8 @@ type ClientConn struct {
 	close atomic.Bool
 	udpRelayConn   *net.UDPConn
 	udpTargetAddr  string
+	udpListenConn  *net.UDPConn
+	serviceID      string
 	activity       chan struct{}
 
 	fm *network.FrameMgr
@@ -169,8 +174,11 @@ func (p *Client) SetUDPBufferSize(bytes int) error {
     if bytes != 0 && (bytes < 64*1024 || bytes > 2*1024*1024) {
         return fmt.Errorf("udp_buf must be 0 or 65536..2097152 bytes")
     }
-    if bytes != 0 && p.tcpmode != 0 {
-        return fmt.Errorf("udp_buf cannot be used in TCP mode")
+    if bytes != 0 && p.tcpmode != 0 && len(p.services) == 0 {
+        return fmt.Errorf("udp_buf cannot be used in TCP-only mode")
+    }
+    if bytes != 0 && len(p.services) > 0 && !hasEnabledUDPService(p.services) {
+        return fmt.Errorf("udp_buf requires at least one enabled UDP service")
     }
     p.udpSocketBuffer = bytes
     return nil
@@ -311,7 +319,12 @@ func (p *Client) Run() error {
 	}
 	p.conn = conn
 
-	if p.tcpmode > 0 {
+	if len(p.services) > 0 {
+		if err := p.startMultiPortListeners(); err != nil {
+			_ = p.conn.Close()
+			return err
+		}
+	} else if p.tcpmode > 0 {
 		tcplistenConn, err := net.ListenTCP("tcp", p.tcpaddr)
 		if err != nil {
 			loggo.Error("Error listening for tcp packets: %s", err.Error())
@@ -338,17 +351,19 @@ func (p *Client) Run() error {
 		p.listenConn = listener
 	}
 
-	if p.tcpmode > 0 {
-        go func(){
-          defer failOnUnexpectedWorkerExit("TCP listener",&p.exit)
-          if err:=p.AcceptTcp();err!=nil{loggo.Error("TCP listener error: %s",err)}
-        }()
-    } else {
-        go func(){
-          defer failOnUnexpectedWorkerExit("UDP listener",&p.exit)
-          if err:=p.Accept();err!=nil{loggo.Error("UDP listener error: %s",err)}
-        }()
-    }
+	if len(p.services) == 0 {
+		if p.tcpmode > 0 {
+			go func(){
+				defer failOnUnexpectedWorkerExit("TCP listener",&p.exit)
+				if err:=p.AcceptTcp();err!=nil{loggo.Error("TCP listener error: %s",err)}
+			}()
+		} else {
+			go func(){
+				defer failOnUnexpectedWorkerExit("UDP listener",&p.exit)
+				if err:=p.Accept();err!=nil{loggo.Error("UDP listener error: %s",err)}
+			}()
+		}
+	}
 
 	recv := make(chan *Packet, packetQueueCapacity(p.tcpmode == 0))
 	p.recvcontrol = make(chan int, 1)
@@ -525,6 +540,10 @@ func (p *Client) Run() error {
 
 func (p *Client) Stop() {
 	p.exit.Store(true)
+    // Multi-Port listeners exit immediately instead of blocking the shutdown
+    // WaitGroup until their accept/read deadlines expire.
+    for _, listener := range p.multiTCPListeners { _ = listener.Close() }
+    for _, listener := range p.multiUDPListeners { _ = listener.Close() }
 	p.recvcontrol <- 1
 	p.workResultLock.Wait()
 	p.conn.Close()
@@ -569,7 +588,10 @@ func (p *Client) AcceptTcp() error {
 }
 
 func (p *Client) AcceptTcpConn(conn *net.TCPConn, targetAddr string) {
+	p.acceptTcpConn(conn, targetAddr, p.tcpmode, "")
+}
 
+func (p *Client) acceptTcpConn(conn *net.TCPConn, targetAddr string, mode int, serviceID string) {
 	defer common.CrashLog()
 
 	p.workResultLock.Add(1)
@@ -611,9 +633,11 @@ func (p *Client) AcceptTcpConn(conn *net.TCPConn, targetAddr string) {
 		fm.SetCongestion(newBBControl())
 	}
 
-	clientConn := &ClientConn{tcpaddr: tcpsrcaddr, id: uuid, tcpmode: p.tcpmode, activity: make(chan struct{}, 1),
+	addrKey := tcpsrcaddr.String()
+	if serviceID != "" { addrKey = serviceID + "|" + addrKey }
+	clientConn := &ClientConn{tcpaddr: tcpsrcaddr, id: uuid, tcpmode: mode, serviceID: serviceID, activity: make(chan struct{}, 1),
 		fm:       fm}
-	p.addClientConn(uuid, tcpsrcaddr.String(), clientConn)
+	p.addClientConn(uuid, addrKey, clientConn)
 	loggo.Info("client accept new local tcp %s %s", uuid, tcpsrcaddr.String())
 	p.touchActivity()
 
@@ -634,7 +658,7 @@ func (p *Client) AcceptTcpConn(conn *net.TCPConn, targetAddr string) {
 			
 			sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), targetAddr, clientConn.id, (uint32)(MyMsg_DATA), mb,
 				SEND_PROTO, RECV_PROTO, p.key,
-				p.tcpmode, perf.BufferBytes, perf.Window, perf.ResendMs, p.tcpmode_compress, p.tcpmode_stat,
+				mode, perf.BufferBytes, perf.Window, perf.ResendMs, p.tcpmode_compress, p.tcpmode_stat,
 				p.timeout, p.cryptoConfig)
 			p.sendPacket.Add(1)
 			p.sendPacketSize.Add(uint64(len(mb)))
@@ -737,7 +761,7 @@ mainLoop:
 				
 				sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), targetAddr, clientConn.id, (uint32)(MyMsg_DATA), mb,
 					SEND_PROTO, RECV_PROTO, p.key,
-					p.tcpmode, 0, 0, 0, 0, 0,
+					mode, 0, 0, 0, 0, 0,
 					0, p.cryptoConfig)
 				p.sendPacket.Add(1)
 				p.sendPacketSize.Add(uint64(len(mb)))
@@ -826,7 +850,7 @@ mainLoop:
 			
 			sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), targetAddr, clientConn.id, (uint32)(MyMsg_DATA), mb,
 				SEND_PROTO, RECV_PROTO, p.key,
-				p.tcpmode, 0, 0, 0, 0, 0,
+				mode, 0, 0, 0, 0, 0,
 				0, p.cryptoConfig)
 			p.sendPacket.Add(1)
 			p.sendPacketSize.Add(uint64(len(mb)))
@@ -998,7 +1022,10 @@ func (p *Client) processPacket(packet *Packet) {
 			}
 			_, err = clientConn.udpRelayConn.WriteToUDP(udpPacket, addr)
 		} else {
-			_, err = p.listenConn.WriteToUDP(packet.my.Data, addr)
+			listener := clientConn.udpListenConn
+			if listener == nil { listener = p.listenConn }
+			if listener == nil { return }
+			_, err = listener.WriteToUDP(packet.my.Data, addr)
 		}
 		if err != nil {
 			loggo.Info("WriteToUDP Error read udp %s", err)

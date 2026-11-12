@@ -502,10 +502,11 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
 }
 
 type Packet struct {
-	my      *MyMsg
-	src     *net.IPAddr
-	echoId  int
-	echoSeq int
+	my        *MyMsg
+	src       *net.IPAddr
+	echoId    int
+	echoSeq   int
+	serviceID string // authenticated Multi-Port service identity, derived from Target alias
 }
 
 const (

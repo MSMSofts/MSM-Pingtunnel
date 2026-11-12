@@ -48,6 +48,7 @@ type Server struct {
 	forwardConfig    *ForwardConfig
 	congestion       string
 	fixedTarget      string
+	forwardServices  map[string]multiForwardTarget
 	allowedPeer      net.IP
 	forwardProtocol  int
 
@@ -80,6 +81,7 @@ type ServerConn struct {
 	tcpaddrTarget  *net.TCPAddr
 	tcpconn        net.Conn // Changed from *net.TCPConn to support proxy connections
 	id             string
+	serviceID      string
 	activeRecvUnixNano atomic.Int64
 	activeSendUnixNano atomic.Int64
 	close atomic.Bool
@@ -159,13 +161,19 @@ func (p *Server) processPacket(packet *Packet) {
     // Strict v3 policy: authenticated packets from the configured opposite
     // VPS only; server owns its fixed loopback destination. This applies
     // before dispatch to the worker pool, including every UDP datagram.
-    if p.fixedTarget != "" {
-        if packet.src == nil || !packet.src.IP.Equal(p.allowedPeer) {
-            return
+    if len(p.forwardServices) > 0 {
+        if packet.src == nil || !packet.src.IP.Equal(p.allowedPeer) { return }
+        if packet.my.Type == int32(MyMsg_DATA) {
+            alias := packet.my.Target
+            service, ok := p.forwardServices[alias]
+            if !ok || service.tcpMode != int(packet.my.Tcpmode) { return }
+            packet.serviceID = service.id
+            // Cached on config load: zero address formatting on hot DATA path.
+            packet.my.Target = service.loopback
         }
-        if packet.my.Type == (int32)(MyMsg_DATA) && int(packet.my.Tcpmode) != p.forwardProtocol {
-            return
-        }
+    } else if p.fixedTarget != "" {
+        if packet.src == nil || !packet.src.IP.Equal(p.allowedPeer) { return }
+        if packet.my.Type == int32(MyMsg_DATA) && int(packet.my.Tcpmode) != p.forwardProtocol { return }
         packet.my.Target = p.fixedTarget
     }
 
@@ -268,7 +276,7 @@ func (p *Server) processDataPacketNewConn(id string, packet *Packet) *ServerConn
 			fm.SetCongestion(newBBControl())
 		}
 
-		localConn := &ServerConn{timeout: (int)(packet.my.Timeout), tcpconn: c, tcpaddrTarget: ipaddrTarget, id: id, rproto: (int)(packet.my.Rproto), fm: fm, tcpmode: (int)(packet.my.Tcpmode), activity: make(chan struct{}, 1)}
+		localConn := &ServerConn{timeout: (int)(packet.my.Timeout), tcpconn: c, tcpaddrTarget: ipaddrTarget, id: id, serviceID: packet.serviceID, rproto: (int)(packet.my.Rproto), fm: fm, tcpmode: (int)(packet.my.Tcpmode), activity: make(chan struct{}, 1)}
 
 		p.addServerConn(id, localConn)
 
@@ -302,6 +310,7 @@ func (p *Server) processDataPacketNewConn(id string, packet *Packet) *ServerConn
 				udpViaProxy:    true,
 				tcpconn:        association.ControlConn,
 				id:             id,
+				serviceID:      packet.serviceID,
 				rproto:         (int)(packet.my.Rproto),
 				tcpmode:        (int)(packet.my.Tcpmode),
 			}
@@ -325,7 +334,7 @@ func (p *Server) processDataPacketNewConn(id string, packet *Packet) *ServerConn
             udpSocketPreferenceFromPacket(packet.my.Tcpmode,packet.my.TcpmodeBuffersize))
 		ipaddrTarget := targetConn.RemoteAddr().(*net.UDPAddr)
 
-		localConn := &ServerConn{timeout: (int)(packet.my.Timeout), conn: targetConn, ipaddrTarget: ipaddrTarget, id: id, rproto: (int)(packet.my.Rproto), tcpmode: (int)(packet.my.Tcpmode), udpTargetAddr: addr}
+		localConn := &ServerConn{timeout: (int)(packet.my.Timeout), conn: targetConn, ipaddrTarget: ipaddrTarget, id: id, serviceID: packet.serviceID, rproto: (int)(packet.my.Rproto), tcpmode: (int)(packet.my.Tcpmode), udpTargetAddr: addr}
 
 		p.addServerConn(id, localConn)
 
@@ -345,10 +354,9 @@ func (p *Server) processDataPacket(packet *Packet) {
 	localConn := p.getServerConnById(id)
 	if localConn == nil {
 		localConn = p.processDataPacketNewConn(id, packet)
-		if localConn == nil {
-			return
-		}
+		if localConn == nil { return }
 	}
+	if len(p.forwardServices) > 0 && localConn.serviceID != packet.serviceID { return }
 
 	localConn.activeRecvUnixNano.Store(now.UnixNano())
 	localConn.echoId.Store(int64(packet.echoId))

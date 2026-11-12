@@ -44,6 +44,7 @@ type Config struct {
 	Profile          int    `json:"profile,omitempty"`
 	ConnectTimeout   int    `json:"conntt,omitempty"`
 	Forward          string `json:"forward,omitempty"`
+	Services         []PortService `json:"services,omitempty"`
 }
 
 // LoadConfig reads and unmarshals a Config JSON file.

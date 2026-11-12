@@ -175,6 +175,7 @@ func main() {
 	peerIP := ""
 	fixedTarget := ""
 	forwardProtocol := 0
+	var services []pingtunnel.PortService
 	configFile := flag.String("c", "", "path to json config file")
 	showVersion := flag.Bool("v", false, "show version and build info")
 	showVersionLong := flag.Bool("version", false, "show version and build info")
@@ -186,7 +187,7 @@ func main() {
 	flag.Parse()
 
     if *protocolInfo {
-        fmt.Println("pingtunnel-go-core=3.3.24 config-schema=3 wire=4")
+        fmt.Println("pingtunnel-go-core=3.4.0 config-schema=3 wire=4")
         return
     }
 	if *showVersion || *showVersionLong {
@@ -213,6 +214,7 @@ func main() {
 		peerIP = cfg.PeerIP
 		fixedTarget = cfg.FixedTarget
 		forwardProtocol = cfg.ForwardProtocol
+		services = cfg.Services
 		if !setFlags["type"] && cfg.Type != "" {
 			*t = cfg.Type
 		}
@@ -421,13 +423,24 @@ func main() {
             fmt.Fprintln(os.Stderr, "Pingtunnel configuration failed:", err)
 			os.Exit(1)
 		}
-        if fixedTarget=="" || peerIP=="" || cryptoConfig==nil || encryptionMode!=pingtunnel.AUTO {
-            fmt.Fprintln(os.Stderr,"v3 foreign server requires fixed_target, peer_ip and auto AEAD encryption")
+        if peerIP=="" || cryptoConfig==nil || encryptionMode!=pingtunnel.AUTO {
+            fmt.Fprintln(os.Stderr,"v3 foreign server requires peer_ip and auto AEAD encryption")
             os.Exit(1)
         }
-        if err:=s.ApplyFixedForwardPolicy(peerIP,fixedTarget,forwardProtocol);err!=nil {
-            fmt.Fprintf(os.Stderr,"Refusing unsafe fixed forwarding policy: %v\n",err)
-            os.Exit(1)
+        if len(services)>0 {
+            if err:=s.ApplyMultiForwardPolicy(peerIP,services,forwardProtocol);err!=nil {
+                fmt.Fprintf(os.Stderr,"Refusing unsafe Multi-Port forwarding policy: %v\n",err)
+                os.Exit(1)
+            }
+        } else {
+            if fixedTarget=="" {
+                fmt.Fprintln(os.Stderr,"v3 foreign server requires fixed_target or Multi-Port services")
+                os.Exit(1)
+            }
+            if err:=s.ApplyFixedForwardPolicy(peerIP,fixedTarget,forwardProtocol);err!=nil {
+                fmt.Fprintf(os.Stderr,"Refusing unsafe fixed forwarding policy: %v\n",err)
+                os.Exit(1)
+            }
         }
 		loggo.Info("Server start")
 		err = s.Run()
@@ -438,12 +451,18 @@ func main() {
 		}
 	} else if *t == "client" {
 
+		if len(services)>0 {
+			first,ok:=pingtunnel.FirstEnabledPortService(services)
+			if !ok { fmt.Fprintln(os.Stderr,"Multi-Port has no enabled services"); os.Exit(1) }
+			*listen=fmt.Sprintf(":%d",first.IranPort)
+			*target=pingtunnel.ServiceTarget(first.ID)
+		}
 		loggo.Info("type %s", *t)
 		loggo.Info("listen %s", *listen)
 		loggo.Info("server %s", *server)
 		loggo.Info("target %s", *target)
 
-		if *tcpmode == 0 {
+		if *tcpmode == 0 && len(services) == 0 {
 			*tcpmode_buffersize = 0
 			*tcpmode_maxwin = 0
 			*tcpmode_resend_timems = 0
@@ -458,6 +477,12 @@ func main() {
 			loggo.Error("ERROR: %s", err.Error())
 			os.Exit(1)
 		}
+        if len(services)>0 {
+            if err:=c.SetPortServices(services);err!=nil {
+                fmt.Fprintf(os.Stderr,"Invalid Multi-Port services: %v\n",err)
+                os.Exit(1)
+            }
+        }
         if err := c.SetUDPBufferSize(*udpBuffer); err != nil {
             fmt.Fprintf(os.Stderr, "Invalid UDP socket buffer: %v\n", err)
             os.Exit(1)
