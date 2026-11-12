@@ -401,44 +401,86 @@ func (s *secureSession) handle(frame []byte,now time.Time)([]byte,error){
  }
  return nil,errors.New("unknown control type")
 }
+// Allocate a unique sequence number while locked, but do not hold the
+// session mutex during AES-GCM / XChaCha20-Poly1305 sealing. Concurrent
+// UDP/QUIC senders may otherwise serialize behind an expensive AEAD call.
+// sessionKeys and AEADs are immutable after publication; a rekey swaps the
+// pointer rather than mutating an in-flight sender's cipher.
 func (s *secureSession) encrypt(plain []byte)([]byte,error){
- s.mu.Lock();defer s.mu.Unlock()
- if s.state!=4||s.keys==nil{return nil,ErrSecureNegotiation}
- k:=s.keys;k.seq++
- if k.seq==0{return nil,errors.New("sequence overflow, rekey required")}
+ s.mu.Lock()
+ if s.state!=4||s.keys==nil {
+  s.mu.Unlock()
+  return nil,ErrSecureNegotiation
+ }
+ k:=s.keys
+ if k.seq==^uint64(0) {
+  s.mu.Unlock()
+  return nil,errors.New("sequence overflow, rekey required")
+ }
+ k.seq++
+ seq:=k.seq
  alg:=s.preferred
  var a cipher.AEAD
  var nonce []byte
  switch alg{
  case autoAES:a=k.txAES;nonce=make([]byte,12);copy(nonce,k.txAESPrefix[:])
  case autoXChaCha:a=k.txX;nonce=make([]byte,24);copy(nonce,k.txXPrefix[:])
- default:return nil,errors.New("invalid selected cipher")
+ default:
+  s.mu.Unlock()
+  return nil,errors.New("invalid selected cipher")
  }
- binary.BigEndian.PutUint64(nonce[len(nonce)-8:],k.seq)
+ binary.BigEndian.PutUint64(nonce[len(nonce)-8:],seq)
  head:=make([]byte,secureHeaderSize)
  copy(head[:4],secureDataMagic[:]);head[4]=alg
- copy(head[5:21],k.id[:]);binary.BigEndian.PutUint64(head[21:29],k.seq)
+ copy(head[5:21],k.id[:]);binary.BigEndian.PutUint64(head[21:29],seq)
+ s.mu.Unlock()
  return a.Seal(head,nonce,plain,head),nil
 }
+
+// Authenticate outside the session mutex. When Open completes, verify the
+// same session is still active BEFORE admitting sequence numbers into the
+// replay window. An in-flight old-session packet after a rekey must not be
+// accepted or update freshness of the replacement session.
 func (s *secureSession) decrypt(frame []byte)([]byte,error){
- s.mu.Lock();defer s.mu.Unlock()
- if s.state!=4||s.keys==nil{return nil,ErrSecureNegotiation}
+ s.mu.Lock()
+ if s.state!=4||s.keys==nil {
+  s.mu.Unlock()
+  return nil,ErrSecureNegotiation
+ }
  if len(frame)<secureHeaderSize+16||!bytes.Equal(frame[:4],secureDataMagic[:]){
-  s.errors++;return nil,errors.New("v4 authenticated frame required")
+  s.errors++
+  s.mu.Unlock()
+  return nil,errors.New("v4 authenticated frame required")
  }
  k:=s.keys
- if !hmac.Equal(frame[5:21],k.id[:]){s.errors++;return nil,errors.New("wrong session")}
+ if !hmac.Equal(frame[5:21],k.id[:]){
+  s.errors++
+  s.mu.Unlock()
+  return nil,errors.New("wrong session")
+ }
  seq:=binary.BigEndian.Uint64(frame[21:29])
- if seq==0{return nil,errors.New("invalid sequence")}
+ if seq==0 {
+  s.mu.Unlock()
+  return nil,errors.New("invalid sequence")
+ }
  var a cipher.AEAD
  var nonce []byte
  switch frame[4]{
  case autoAES:a=k.rxAES;nonce=make([]byte,12);copy(nonce,k.rxAESPrefix[:])
  case autoXChaCha:a=k.rxX;nonce=make([]byte,24);copy(nonce,k.rxXPrefix[:])
- default:return nil,errors.New("invalid cipher ID")
+ default:
+  s.mu.Unlock()
+  return nil,errors.New("invalid cipher ID")
  }
  binary.BigEndian.PutUint64(nonce[len(nonce)-8:],seq)
+ s.mu.Unlock()
+
  plaintext,err:=a.Open(nil,nonce,frame[secureHeaderSize:],frame[:secureHeaderSize])
+ s.mu.Lock()
+ defer s.mu.Unlock()
+ if s.state!=4||s.keys!=k {
+  return nil,ErrSecureNegotiation
+ }
  if err!=nil{s.errors++;return nil,err}
  if !k.replay.accept(seq){s.replays++;return nil,errors.New("replay or out-of-window sequence")}
  s.lastValid=time.Now()
@@ -531,6 +573,7 @@ type secureStatus struct{
  ReverseQueueBytes int `json:"reverse_queue_bytes"`
  ReverseQueuePeak int `json:"reverse_queue_peak"`
  ReverseQueueDrops uint64 `json:"reverse_queue_drops"`
+    ReverseOversizedDrops uint64 `json:"reverse_oversized_drops"`
  ReverseWriteFailures uint64 `json:"reverse_write_failures"`
  ICMPWriteFailures uint64 `json:"icmp_write_failures"`
  ICMPWriteEMSGSIZE uint64 `json:"icmp_write_emsgsize"`
@@ -633,6 +676,7 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.ReverseQueueBytes=diag.PendingBytes
  report.ReverseQueuePeak=diag.QueuePeak
  report.ReverseQueueDrops=diag.QueueDrops
+ report.ReverseOversizedDrops=diag.OversizedDrops
  report.ReverseWriteFailures=diag.FailedReplies
  report.ICMPWriteFailures=icmpWriteErrors.Load()
  report.ICMPWriteEMSGSIZE=icmpMessageTooLong.Load()

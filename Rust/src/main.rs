@@ -423,7 +423,7 @@ fn help(){
     println!("  pingtunnel            Unified menu");
     println!("  pingtunnel setup      Five questions on each VPS");
     println!("  pingtunnel key        Show existing pairing key (root only)");
-    println!("  pingtunnel validate | performance | security | health | dry-run");
+    println!("  pingtunnel validate | performance | security | health [--peer] | dry-run");
     println!("  pingtunnel start | stop | restart | status | logs [lines]");
     println!("  pingtunnel route show | auto-reverse | auto-direct | manual-reverse | manual-direct");
     println!("  pingtunnel update | uninstall [--purge]  (permanent purge requires PURGE confirmation)");
@@ -575,7 +575,7 @@ fn menu()->Result<()>{
             "11"=>uninstall(false),
             "12"|"q"|"Q"=>return Ok(()),
             "13"=>show_security_status(),
-            "14"=>show_health(),
+            "14"=>show_health(false),
             "15"=>route_policy_menu(),
             _=>{println!("Invalid choice: use 1..15.");continue}
         };
@@ -595,7 +595,16 @@ fn menu()->Result<()>{
     }
 }
 
-fn show_health() -> Result<()> {
+// Do not equate a running service with an authenticated usable peer.
+// The optional strict mode only proves recent authenticated peer traffic;
+// it does NOT replace an application-level UDP/TCP round-trip test.
+fn recent_authenticated_peer(status: &Value, max_age_seconds: i64) -> bool {
+    status["state"].as_str() == Some("authenticated")
+        && status["last_valid_age_seconds"].as_i64()
+            .is_some_and(|age| age >= 0 && age <= max_age_seconds)
+}
+
+fn show_health(require_peer: bool) -> Result<()> {
     // Verify process liveness separately from ICMP path quality.
     let service = Command::new("systemctl").args(["is-active","--quiet","pingtunnel.service"]).status()?;
     if !service.success() {
@@ -612,6 +621,7 @@ fn show_health() -> Result<()> {
         return Err(failure("Go runtime status is incompatible with config schema 3 / wire 4"));
     }
     println!("Service active and Go workers reporting (heartbeat {}s ago).",age);
+    println!("Process health is not proof of end-to-end application connectivity.");
     println!("Security session state: {}",status["state"].as_str().unwrap_or("unknown"));
     if let Some(direction)=status["icmp_direction"].as_str(){println!("ICMP initiation: {direction}");}
     if let Some(reason)=status["auto_direct_fallback_reason"].as_str(){
@@ -628,6 +638,9 @@ fn show_health() -> Result<()> {
         } else if age<0 || age>35 {
             println!("WARNING: no recent authenticated ICMP response; service active does NOT mean tunnel online.");
         }
+    }
+    if require_peer && !recent_authenticated_peer(&status, 35) {
+        return Err(failure("No authenticated peer traffic in the past 35 seconds; process may be alive but peer reachability is unverified."));
     }
     Ok(())
 }
@@ -688,6 +701,18 @@ fn show_security_status() -> Result<()> {
     }
     if let Some(oversize)=report["icmp_write_emsgsize"].as_u64() {
         println!("  ICMP EMSGSIZE / message-too-long errors: {oversize}");
+    }
+    if let Some(oversize)=report["reverse_oversized_drops"].as_u64() {
+        println!("  Reverse encrypted frames rejected (>10,240 bytes): {oversize}");
+    }
+    if let Some(drops)=report["udp_dispatch_overflow_drops"].as_u64() {
+        println!("  UDP/QUIC ingress dispatch queue drops (cumulative): {drops}");
+        if drops>0 {
+            println!("  NOTE: UDP dispatcher intentionally drops under saturation to avoid blocking the ICMP reader.");
+        }
+    }
+    if let Some(truncated)=report["udp_truncated_datagrams"].as_u64() {
+        println!("  UDP receive-buffer truncation events (cumulative): {truncated}");
     }
     if let (Some(req),Some(rep),Some(pps),Some(peak))=(
         report["icmp_userspace_echo_requests"].as_u64(),
@@ -902,7 +927,12 @@ fn main_inner()->Result<()>{
         },
         "performance"=>show_adaptive_status(),
         "security"=>show_security_status(),
-        "health"=>show_health(),
+        "health"=>{
+            if args.len()>2 || args.get(1).is_some_and(|s|s!="--peer") {
+                return Err(failure("Usage: pingtunnel health [--peer]"));
+            }
+            show_health(args.get(1).map(String::as_str)==Some("--peer"))
+        },
         "service-install"=>service_install(),
         "validate"=>{load_config()?;println!("Version-3 configuration valid");Ok(())},
         "dry-run"=>run_core(true),
@@ -983,6 +1013,21 @@ mod tests{
         assert_eq!(go_core_config(&c).unwrap()["icmp_direction"],"auto_direct");
         assert_eq!(route_policy_label("direct"),"MANUAL Direct only");
         assert_eq!(route_policy_label("auto"),"AUTO Reverse first");
+    }
+    #[test]
+    fn authenticated_peer_health_gate_is_explicit() {
+        let mut report=json!({"state":"handshaking","last_valid_age_seconds":0});
+        assert!(!recent_authenticated_peer(&report,35));
+        report["state"]=json!("authenticated");
+        assert!(recent_authenticated_peer(&report,35));
+        report["last_valid_age_seconds"]=json!(35);
+        assert!(recent_authenticated_peer(&report,35));
+        report["last_valid_age_seconds"]=json!(36);
+        assert!(!recent_authenticated_peer(&report,35));
+        report["last_valid_age_seconds"]=json!(-1);
+        assert!(!recent_authenticated_peer(&report,35));
+        report.as_object_mut().unwrap().remove("last_valid_age_seconds");
+        assert!(!recent_authenticated_peer(&report,35));
     }
     #[test]
     fn no_legacy_or_unencrypted_fallback(){

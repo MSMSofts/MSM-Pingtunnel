@@ -186,7 +186,7 @@ func main() {
 	flag.Parse()
 
     if *protocolInfo {
-        fmt.Println("pingtunnel-go-core=3.3.23 config-schema=3 wire=4")
+        fmt.Println("pingtunnel-go-core=3.3.24 config-schema=3 wire=4")
         return
     }
 	if *showVersion || *showVersionLong {
@@ -338,6 +338,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The production Go CLI must never silently start a plaintext or legacy
+	// client. Both roles use the same authenticated Wire v4 protocol; the
+	// library retains legacy ciphers only for compatibility test coverage.
+	if encryptionMode != pingtunnel.AUTO {
+		fmt.Fprintln(os.Stderr, "Secure Wire v4 requires -encrypt auto; plaintext and legacy ciphers are disabled in production")
+		os.Exit(1)
+	}
+
 	// Create crypto configuration
 	var cryptoConfig *pingtunnel.CryptoConfig
 	if encryptionMode != pingtunnel.NoEncryption {
@@ -466,7 +474,13 @@ func main() {
 	}
 
 	if *profile > 0 {
-		go http.ListenAndServe("0.0.0.0:"+strconv.Itoa(*profile), nil)
+		// pprof exposes process internals. Never publish it on the public
+		// interface of either VPS, even when profiling is requested.
+		go func() {
+			if err := http.ListenAndServe("127.0.0.1:"+strconv.Itoa(*profile), nil); err != nil {
+				loggo.Error("Loopback profiler failed: %s", err)
+			}
+		}()
 	}
 
 	for {

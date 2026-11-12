@@ -157,6 +157,7 @@ type reverseTransport struct {
     pending []reverseQueuedFrame
     pendingBytes int
     drops uint64
+    oversizedDrops uint64
     recent map[[8]byte]time.Time
     lastPrune time.Time
     replayCapacityRejects uint64
@@ -902,8 +903,16 @@ func (r *reverseTransport) recentOutboundData(now time.Time) bool {
 
 
 func (r *reverseTransport) enqueue(frame []byte,now time.Time) bool {
-    if len(frame)==0 || len(frame)>10240{return false}
+    if len(frame)==0{return false}
     r.mu.Lock();defer r.mu.Unlock()
+    // Without negotiated fragmentation, oversize encrypted frames cannot
+    // enter the bounded Reverse FIFO. Count this loss explicitly so a
+    // healthy heartbeat does not conceal missing large UDP datagrams.
+    if len(frame)>10240 {
+        r.drops++
+        r.oversizedDrops++
+        return false
+    }
     for len(r.pending)>0 && (len(r.pending)>=reverseQueueMaxFrames || r.pendingBytes+len(frame)>reverseQueueMaxBytes){
         r.pendingBytes-=len(r.pending[0].data)
         r.pending[0]=reverseQueuedFrame{}
@@ -1221,6 +1230,7 @@ type reverseDiagnostics struct {
     PendingBytes int
     QueuePeak int
     QueueDrops uint64
+    OversizedDrops uint64
     FailedReplies uint64
     ReflectedPolls uint64
     ReflectedDataEchoes uint64
@@ -1332,7 +1342,7 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         reportedDepth,reportedOldest,reportedBytes=0,0,0
     }
     return reverseDiagnostics{Pending:len(r.pending),PendingBytes:r.pendingBytes,
-        QueuePeak:r.queuePeak,QueueDrops:r.drops,FailedReplies:r.failedReplies,
+        QueuePeak:r.queuePeak,QueueDrops:r.drops,OversizedDrops:r.oversizedDrops,FailedReplies:r.failedReplies,
         ReflectedPolls:r.reflectedPolls,
         ReflectedDataEchoes:r.reflectedDataEchoes,
         ReflectedPingEchoes:r.reflectedPingEchoes,
