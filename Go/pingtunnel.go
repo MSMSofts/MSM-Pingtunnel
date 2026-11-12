@@ -500,16 +500,8 @@ func recvICMPWithMixedUDP(workResultLock *sync.WaitGroup, exit *atomic.Bool, con
         // On UDP, forwarding seconds-old backlogged game/QUIC packets
         // increases latency. Bound the pending queue and drop ONLY UDP DATA
         // immediately on overflow; keep control messages on the safe path.
-        if udpRecv != nil && packet.my.Type == int32(MyMsg_DATA) && packet.my.Tcpmode == 0 {
-            // Keep the exact legacy UDP capacity and overflow/drop behavior.
-            if !enqueueICMPPacket(udpRecv, packet, true) {
-                loggo.Error("Mixed UDP ICMP dispatcher blocked for 3s")
-                return
-            }
-            continue
-        }
-        latencySensitiveUDP := len(udpMode) > 0 && udpMode[0] && udpRecv == nil
-        if !enqueueICMPPacket(recv, packet, latencySensitiveUDP) {
+        latencySensitiveUDP := len(udpMode) > 0 && udpMode[0]
+        if !enqueueAuthenticatedPacketByTransport(recv,udpRecv,packet,latencySensitiveUDP) {
             loggo.Error("ICMP dispatcher blocked for 3s; restarting receiver")
             return
         }
