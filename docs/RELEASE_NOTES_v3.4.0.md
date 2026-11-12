@@ -25,4 +25,4 @@ Configure Foreign first; run target applications on `127.0.0.1:<foreign_port>`. 
 
 ## Validation scope
 
-CI covers Rust tests, Go unit/race tests, AMD64/ARM64 builds and existing Direct/Reverse fault-injection checks. CI does not replace a real 12-port soak test across two production VPSs. Stage the change with a small number of TCP and UDP services before enabling all 12.
+The PR CI passed on 2026-11-12: Rust tests, Go unit/race tests, AMD64/ARM64 builds and existing Direct/Reverse fault-injection checks all succeeded ([workflow run](https://github.com/MSMSofts/MSM-Pingtunnel/actions/runs/43215426916)). This does not replace a real 12-port soak test across two production VPSs. Stage the change with a small number of TCP and UDP services before enabling all 12.
