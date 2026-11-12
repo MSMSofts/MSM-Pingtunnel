@@ -156,6 +156,12 @@ jobs:
         run: |
           python3 -m py_compile Source/direct_mode_smoke.py
           sudo python3 Source/direct_mode_smoke.py --binary "$PWD/dist/pingtunnel-core-linux-amd64" --impairment --include-reverse
+      - name: Twelve mixed TCP/UDP services over real encrypted ICMP
+        if: matrix.arch == 'amd64'
+        timeout-minutes: 8
+        run: |
+          python3 -m py_compile Source/multi_port_smoke.py
+          sudo python3 Source/multi_port_smoke.py --binary "$PWD/dist/pingtunnel-core-linux-amd64" --modes direct auto_direct reverse auto
       - uses: actions/upload-artifact@v4
         with:
           name: go-core-${{ matrix.arch }}
