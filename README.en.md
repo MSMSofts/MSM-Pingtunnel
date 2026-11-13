@@ -15,6 +15,17 @@
 
 Pingtunnel **is not a VPN server**. It forwards traffic from multiple Iran-side TCP/UDP listeners over one encrypted ICMP tunnel to Foreign VPS loopback services. See the [Multi-Port setup guide](docs/MULTI_PORT.en.md) for port mapping, firewall and profile import/export.
 
+## What's new in v3.4.2 — latency and stability
+
+- **Protect UDP under TCP overload:** In mixed Multi-Port, a full TCP queue cannot hold the shared ICMP receiver for the old 3-second timeout. TCP DATA admission has a bounded 2ms grace; excess frames are counted and dropped for the existing reliable TCP layer to recover. Queue capacities remain unchanged.
+- **Verified, guarded recovery:** AUTO Reverse-first can fail over at 60 seconds **only** after sustained real application traffic, missing authenticated feedback and two independent authenticated Direct path proofs. Idle TCP connections, unsigned pings and transient jitter cannot trigger this path.
+- **Pinned stable updates:** The Rust manager resolves the latest published stable release tag to its exact commit before fetching the installer. It no longer executes a mutable `main` installer as root.
+- **Reproducible builds and live ICMP CI:** Rust Cargo.lock, Go unit/race tests, namespace ICMP tests and 12 mixed services are included. The [60-second regression](https://github.com/MSMSofts/MSM-Pingtunnel/actions/runs/43441487148) completed 1,180 operations with no application errors; optional synthetic two-hour soak is available.
+
+**What CI does not prove:** These are isolated Linux namespace tests, not real Iran/Overseas VPS game RTT or two-hour field reliability. Inspect `sudo pingtunnel security` and `Source/long_session_probe.py` on both VPSs. `tcp_dispatch_overflow_drops` and `udp_dispatch_overflow_drops` should remain near zero under ordinary demand.
+
+[Complete v3.4.2 release notes](docs/RELEASE_NOTES_v3.4.2.md) · [Build and test checks](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
+
 ## Choose a route policy
 
 Run `sudo pingtunnel` and select **15) Route Policy**. Choose **16) Multi-Port** to manage the service mappings.
