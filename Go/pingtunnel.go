@@ -239,12 +239,12 @@ const icmpReadBufferBytes = 65535
 
 // Preserve the established single-service receive behavior unchanged.
 func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.PacketConn, recv chan<- *Packet, cryptoConfig *CryptoConfig, udpMode ...bool) {
-    recvICMPWithMixedUDP(workResultLock,exit,conn,recv,nil,cryptoConfig,udpMode...)
+    recvICMPWithMixedUDP(workResultLock,exit,conn,recv,nil,nil,cryptoConfig,udpMode...)
 }
 
-// In Multi-Port, restore the original short UDP receive queue independently
-// of TCP's reliable queue. Only authenticated UDP DATA goes into udpRecv.
-func recvICMPWithMixedUDP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.PacketConn, recv chan<- *Packet, udpRecv chan<- *Packet, cryptoConfig *CryptoConfig, udpMode ...bool) {
+// Multi-Port retains the original short UDP DATA queue independently of TCP
+// and dedicates a bounded third lane to authenticated control traffic.
+func recvICMPWithMixedUDP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.PacketConn, recv chan<- *Packet, udpRecv chan *Packet, controlRecv chan<- *Packet, cryptoConfig *CryptoConfig, udpMode ...bool) {
 
 	defer common.CrashLog()
 
@@ -501,7 +501,7 @@ func recvICMPWithMixedUDP(workResultLock *sync.WaitGroup, exit *atomic.Bool, con
         // increases latency. Bound the pending queue and drop ONLY UDP DATA
         // immediately on overflow; keep control messages on the safe path.
         latencySensitiveUDP := len(udpMode) > 0 && udpMode[0]
-        if !enqueueAuthenticatedPacketByTransport(recv,udpRecv,packet,latencySensitiveUDP) {
+        if !enqueueAuthenticatedPacketByTransport(recv,udpRecv,packet,latencySensitiveUDP,controlRecv) {
             loggo.Error("ICMP dispatcher blocked for 3s; restarting receiver")
             return
         }
