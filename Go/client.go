@@ -400,6 +400,9 @@ func (p *Client) Run() error {
 
 			now := time.Now()
             p.adaptive.OnTick(now)
+            lastLocalActivity:=p.lastActivity()
+            freshLocalDemand:=p.hasLocalDemand.Load() && !lastLocalActivity.IsZero() &&
+                !now.Before(lastLocalActivity) && now.Sub(lastLocalActivity)<=5*time.Second
             // Count only real local application demand. A new/idle process
             // must not tear down a healthy, quiet encrypted session.
             hasDemand := p.activeConnCount()>0 ||
@@ -421,7 +424,7 @@ func (p *Client) Run() error {
                         }
                     }
                 }
-                if r.fallbackDirect(now,p.cryptoConfig.SecureReady(),p.cryptoConfig.sec.lastPeerTraffic()) {
+                if r.fallbackDirect(now,p.cryptoConfig.SecureReady(),p.cryptoConfig.sec.lastPeerTraffic(),freshLocalDemand) {
                     loggo.Info("Reverse failover: sustained user demand without authenticated two-way ICMP; attempting Direct")
                     p.cryptoConfig.sec.resetForTransportChange()
                     nextPingAt=now
@@ -447,7 +450,11 @@ func (p *Client) Run() error {
                 }
             }
             if p.cryptoConfig!=nil && p.cryptoConfig.reverse!=nil &&
-                p.cryptoConfig.reverse.shouldProbeDirect(now,p.cryptoConfig.SecureReady()) {
+                p.cryptoConfig.reverse.shouldProbeDirect(now,p.cryptoConfig.SecureReady(),
+                    func() time.Time {
+                        if freshLocalDemand {return p.cryptoConfig.sec.lastPeerTraffic()}
+                        return time.Time{}
+                    }()) {
                 // A single signed probe per minute checks Direct while
                 // Reverse remains absolutely preferred and untouched.
                 // Unlike a new transport session this carries no user data.

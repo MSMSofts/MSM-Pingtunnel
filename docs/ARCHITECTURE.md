@@ -2,7 +2,7 @@
 
 [README فارسی](../README.md) · [English README](../README.en.md) · [Security policy](../SECURITY.md)
 
-**Version:** Manager 3.3.24 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
+**Version:** Manager 3.4.2 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
 
 **خلاصه:** Pingtunnel Manager فقط دو VPS دارد. کاربر به پورت TCP/UDP سرور ایران وصل می‌شود؛ هسته Go ترافیک را در ICMP رمزنگاری‌شده به VPS خارج می‌رساند و سرور خارج آن را به پورت سرویس محلی خودش تحویل می‌دهد. Rust تنها کارهای راه‌اندازی، ذخیره تنظیمات و کنترل systemd را انجام می‌دهد.
 
@@ -214,11 +214,11 @@ It then copies the local Go files onto the pinned upstream tree and runs the Go 
 Rust code is independently testable:
 
 ~~~bash
-cargo test --manifest-path Rust/Cargo.toml
-cargo build --release --manifest-path Rust/Cargo.toml
+cargo test --locked --manifest-path Rust/Cargo.toml
+cargo build --locked --release --manifest-path Rust/Cargo.toml
 ~~~
 
-Release builds are verified with SHA256 and a release manifest specifying **manager 3.3.24 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The pinned published release is [v3.3.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.3.2); rolling assets may also exist for compatibility.
+Release builds are verified with SHA256 and a release manifest specifying **manager 3.4.2 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The versioned release is [v3.4.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.2); rolling assets may also exist for compatibility.
 
 ## 8. Compatibility contract and limitations
 
@@ -231,4 +231,4 @@ Release builds are verified with SHA256 and a release manifest specifying **mana
 
 Further changes must preserve schema 3 unless explicitly versioned and provide a documented migration path. Wire protocol modifications require explicit version negotiation or a planned, fail-closed coordinated upgrade. **Never silently fall back to plaintext or earlier unauthenticated packet formats.**
 
-Remaining omissions: multiple VPSs/HA, simultaneous TCP and UDP in one tunnel, independent cryptographic audit, and proven DPI resistance. Reverse-first Auto is implemented but needs field testing over an actual two-VPS ICMP path—including packet loss, high jitter, ICMP Echo kernel reply interactions, and application sessions.
+Remaining omissions: multiple VPSs/HA, an independently audited cryptographic protocol, proven DPI resistance and real two-hour field performance. Mixed TCP/UDP is supported for up to 12 services; its overload shedding and telemetry need real network validation. Reverse-first Auto is implemented but needs field testing over an actual two-VPS ICMP path—including packet loss, high jitter, ICMP Echo kernel reply interactions, and application sessions.

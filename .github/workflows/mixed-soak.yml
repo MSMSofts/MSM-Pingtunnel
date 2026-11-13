@@ -1,0 +1,52 @@
+name: Mixed TCP UDP sustained ICMP soak
+on:
+  workflow_dispatch:
+    inputs:
+      route:
+        description: "One route under test"
+        required: true
+        type: choice
+        options: [direct, auto_direct, reverse, auto]
+        default: auto
+      seconds:
+        description: "Duration in seconds (60..7200); 7200 is the full two-hour run"
+        required: true
+        type: number
+        default: 7200
+  schedule:
+    - cron: "30 3 * * 0"
+permissions:
+  contents: read
+jobs:
+  mixed-soak:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 145
+    env:
+      SOAK_ROUTE: ${{ github.event.inputs.route || 'auto' }}
+      SOAK_SECONDS: ${{ github.event.inputs.seconds || '900' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.0"
+      - name: Prepare production Go source
+        run: |
+          mkdir upstream
+          cp -a Upstream/pingtunnel-df16/. upstream/
+          cp Go/*.go upstream/
+          cp Go/cmd/main.go upstream/cmd/main.go
+          cd upstream
+          gofmt -w *.go cmd/main.go
+          go mod verify
+          go build -o /tmp/pingtunnel-soak-core ./cmd
+      - name: Sustained real raw-ICMP encrypted mixed-service workload
+        run: |
+          python3 -m py_compile Source/multi_port_smoke.py
+          sudo python3 Source/multi_port_smoke.py \
+            --binary /tmp/pingtunnel-soak-core \
+            --modes "$SOAK_ROUTE" --queue-profile tcp \
+            --soak-seconds "$SOAK_SECONDS"
+      - name: Report scope
+        if: always()
+        run: |
+          echo "GitHub Linux namespaces only; real two-VPS game RTT and provider drops require separate measurement."

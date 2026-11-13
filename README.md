@@ -2,7 +2,7 @@
 
 **تونل ICMP رمزنگاری‌شده برای انتقال ترافیک TCP/UDP بین یک VPS ایران و یک VPS خارج، با هستهٔ Go و مدیر Rust.**
 
-[English](README.en.md) · [نسخه پایدار: v3.4.1](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.1) · [توضیحات همه نسخه‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
+[English](README.en.md) · [نسخه پایدار: v3.4.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.2) · [توضیحات همه نسخه‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
 
 ## ویژگی‌ها
 
@@ -14,6 +14,17 @@
 - **قابل بازیابی:** پشتیبان‌گیری و اعتبارسنجی تنظیمات هنگام ارتقا؛ ویژگی‌های آزمایشی قطعه‌بندی و ترمیم UDP به‌طور پیش‌فرض غیرفعال‌اند.
 
 Pingtunnel **خودش سرور VPN نیست**؛ داده از Listenerهای TCP/UDP ایران با یک تونل ICMP رمزنگاری‌شده به سرویس‌های Loopback خارج منتقل می‌شود. برای راهنمای تنظیم ۱۲ سرویس و فایروال، [راهنمای Multi-Port](docs/MULTI_PORT.md) را ببینید.
+
+## تغییرات اصلی v3.4.2 — پایداری و تأخیر پایین
+
+- **رفع انسداد UDP هنگام اشباع TCP:** در حالت Multi-Port، صف TCP پر دیگر نمی‌تواند دریافت مشترک ICMP را تا ۳ ثانیه متوقف کند. پذیرش TCP DATA حداکثر ۲ میلی‌ثانیه فرصت دارد و بستهٔ اضافی به‌صورت شمارش‌شده کنار گذاشته می‌شود؛ بازیابی آن به قابلیت انتقال مطمئن TCP وابسته است. ظرفیت صف‌های فعلی تغییر نکرده است.
+- **Failover تأییدشده و سریع‌تر:** AUTO Reverse-first فقط هنگام **تقاضای واقعی مداوم، حداقل ۶۰ ثانیه سکوت پاسخ احرازشده، و دو اثبات مستقل از سلامت Direct** می‌تواند زودتر به Direct برود. قطع کوتاه، پینگ ساده یا اتصال TCP بیکار برای جابه‌جایی کافی نیست.
+- **آپدیت قابل ردیابی:** مدیر Rust آخرین Release پایدار را به Commit مشخص تبدیل کرده و نصب‌کننده را از همان Commit دریافت می‌کند؛ اسکریپت متغیر `main` مستقیماً با Root اجرا نمی‌شود.
+- **ساخت تکرارپذیر و آزمایش شبکه:** `Cargo.lock` قفل شده، CI شامل Go/Rust، Race Detector و آزمون ICMP و ۱۲ سرویس است. تست فشار کوتاه [۱۱۸۰ نمونه در ۶۰ ثانیه](https://github.com/MSMSofts/MSM-Pingtunnel/actions/runs/43441487148) بدون خطای کاربردی گذشت؛ تست اختیاری تا دو ساعت هم موجود است.
+
+**مرز اعتبار تست:** نتایج CI در محیط ایزولهٔ Linux هستند و هنوز نشان‌دهندهٔ بهبود پینگ واقعی Call of Duty یا دوام دوساعته میان دو VPS نیستند. برای مقایسه از `sudo pingtunnel security` و `Source/long_session_probe.py` استفاده کنید؛ شمارنده‌های `tcp_dispatch_overflow_drops` و `udp_dispatch_overflow_drops` باید در حالت عادی نزدیک صفر باشند.
+
+[جزئیات نسخه 3.4.2](docs/RELEASE_NOTES_v3.4.2.md) · [تست‌ها و ساخت نسخه](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
 
 ## سیاست‌های مسیر
 
@@ -90,7 +101,7 @@ ICMP Echo Request / Echo Reply (Reverse یا Direct)
 
 ## نصب سریع
 
-> **نسخه 3.4.1:** اصلاح مسیر UDP و TCP در Multi-Port با دو صف مجزای دریافت با همان ظرفیت‌های قبلی؛ در نصب تازه هیچ پورتی خودکار فعال نمی‌شود و TCP 443 در پیشنهادهای پیش‌فرض وجود ندارد.
+> **نسخه 3.4.2:** جلوگیری از مسدودشدن دریافت ICMP هنگام اشباع صف TCP در Multi-Port، با شمارنده افت و حفظ ظرفیت صف‌ها؛ در نصب تازه هیچ پورتی خودکار فعال نمی‌شود و TCP 443 در پیشنهادهای پیش‌فرض وجود ندارد.
 
 ### ⚠️ بسیار مهم: حتماً ابتدا نصب و راه‌اندازی را روی سرور خارج انجام دهید
 
@@ -103,7 +114,7 @@ ICMP Echo Request / Echo Reply (Reverse یا Direct)
 ابتدا از طریق SSH به **سرور خارج** متصل شوید و نصب را اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.1/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.2/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -115,7 +126,7 @@ sudo pingtunnel setup
 **فقط پس از تکمیل مرحلهٔ خارج** به سرور ایران متصل شوید و اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.3.24/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.2/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~

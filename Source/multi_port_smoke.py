@@ -268,7 +268,55 @@ def probe_all(mode):
         continuous_direct_udp_test()
     print(f"{mode}: TWELVE_MIXED_TCP_UDP_SERVICES_PASS",flush=True)
 
-def perform(mode,binary,iran,foreign,tmp,echo,queue_profile):
+def soak_mixed(mode, seconds):
+    """Sustained encrypted mixed TCP/UDP in isolated Linux namespaces.
+
+    Captures each cycle's service RTT and failure count. These are local
+    regression measurements, not field latency/throughput guarantees.
+    """
+    if seconds <= 0:
+        return
+    rows = [SERVICES[0], SERVICES[1], SERVICES[2], SERVICES[3]]
+    began = time.monotonic()
+    deadline = began + seconds
+    cycles, errors = 0, 0
+    samples = []
+    last_report = began
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        while time.monotonic() < deadline:
+            def probe(svc):
+                start = time.monotonic()
+                payload = os.urandom(512 if svc["protocol"] == "udp" else 12000)
+                if svc["protocol"] == "udp":
+                    try_udp(svc["iran_port"], payload, svc["foreign_port"], timeout=1.5)
+                else:
+                    try_tcp(svc["iran_port"], payload, svc["foreign_port"], timeout=6.0)
+                return (time.monotonic() - start) * 1000
+            results = [pool.submit(probe, svc) for svc in rows]
+            for future in results:
+                try:
+                    samples.append(future.result())
+                except (OSError, EOFError, ValueError) as exc:
+                    errors += 1
+                    print(f"SOAK_PROBE_ERROR {mode}: {exc}", flush=True)
+            cycles += 1
+            now = time.monotonic()
+            if now - last_report >= 60:
+                ordered = sorted(samples)
+                p95 = ordered[min(len(ordered)-1, int(len(ordered)*0.95))] if ordered else -1
+                print("SOAK_PROGRESS " + json.dumps(dict(mode=mode,
+                    elapsed_s=round(now-began), cycles=cycles,
+                    probe_errors=errors, rtt_p95_ms=round(p95,1))),flush=True)
+                last_report = now
+            time.sleep(0.2)
+    if cycles < max(1, seconds // 20):
+        raise RuntimeError(f"Soak did not exercise enough concurrent cycles: {cycles}")
+    if errors:
+        raise RuntimeError(f"Soak failed with {errors} application errors across {cycles} cycles")
+    print("SOAK_MIXED_TCP_UDP_PASS " + json.dumps(dict(mode=mode,
+        elapsed_s=round(time.monotonic()-began), cycles=cycles, samples=len(samples))),flush=True)
+
+def perform(mode,binary,iran,foreign,tmp,echo,queue_profile,soak_seconds=0):
     key=base64.b64encode(bytes(range(1,33))).decode()
     iran_conf=tmp/f"iran-{queue_profile}-{mode}.json";foreign_conf=tmp/f"foreign-{queue_profile}-{mode}.json"
     iran_conf.write_text(json.dumps(config("iran",mode,key,queue_profile)))
@@ -282,8 +330,8 @@ def perform(mode,binary,iran,foreign,tmp,echo,queue_profile):
     try:
         time.sleep(1)
         result=command(*in_ns(iran,sys.executable,"-u","-c",
-                       "import sys;sys.path.insert(0,sys.argv[1]);import multi_port_smoke as m;m.probe_all(sys.argv[2])",
-                       str(Path(__file__).resolve().parent),mode),
+                       "import sys;sys.path.insert(0,sys.argv[1]);import multi_port_smoke as m;m.probe_all(sys.argv[2]);m.soak_mixed(sys.argv[2],int(sys.argv[3]))",
+                       str(Path(__file__).resolve().parent),mode,str(soak_seconds)),
                        check=False,capture=True)
         print(result.stdout[-9000:],flush=True)
         if result.returncode:
@@ -310,7 +358,11 @@ def main():
                         default=["direct","auto"])
     parser.add_argument("--queue-profile",choices=["tcp","udp"],default="tcp",
                         help="select the existing global queue/dispatcher profile without tuning it")
+    parser.add_argument("--soak-seconds",type=int,default=0,
+                        help="extra sustained clean-namespace mixed TCP/UDP probing (0..7200s)")
     args=parser.parse_args()
+    if not 0 <= args.soak_seconds <= 7200:
+        parser.error("--soak-seconds must be between 0 and 7200")
     if os.geteuid()!=0: raise SystemExit("Requires root, CAP_NET_RAW and CAP_NET_ADMIN")
     binary=str(Path(args.binary).resolve())
     if not Path(binary).is_file():raise SystemExit("Missing Go binary")
@@ -339,7 +391,7 @@ def main():
                     echo_log.seek(0)
                     raise RuntimeError("Foreign echo services exited: "+echo_log.read())
                 for mode in args.modes:
-                    perform(mode,binary,iran,foreign,temp,echo,args.queue_profile)
+                    perform(mode,binary,iran,foreign,temp,echo,args.queue_profile,args.soak_seconds)
             finally:
                 if echo.poll() is None:
                     echo.terminate()

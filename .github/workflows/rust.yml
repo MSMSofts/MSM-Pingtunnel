@@ -6,6 +6,10 @@ on:
       - "Go/**"
       - "Source/install.sh"
       - "Source/update.sh"
+      - "Source/direct_mode_smoke.py"
+      - "Source/multi_port_smoke.py"
+      - "Source/tests/**"
+      - "Upstream/**"
       - ".github/workflows/rust.yml"
   push:
     branches: [main]
@@ -14,6 +18,10 @@ on:
       - "Go/**"
       - "Source/install.sh"
       - "Source/update.sh"
+      - "Source/direct_mode_smoke.py"
+      - "Source/multi_port_smoke.py"
+      - "Source/tests/**"
+      - "Upstream/**"
       - ".github/workflows/rust.yml"
   workflow_dispatch:
 concurrency:
@@ -31,10 +39,11 @@ jobs:
         run: bash -n Source/*.sh
       - name: Verify Release notes migration script syntax
         run: python3 -m py_compile Source/publish_release_history.py
-      - run: cargo test --manifest-path Rust/Cargo.toml
+      - name: Rust reproducible dependency and unit tests
+        run: cargo test --locked --manifest-path Rust/Cargo.toml
       - name: Verify Auto Tune is not exposed through the CLI
         run: |
-          cargo run --quiet --manifest-path Rust/Cargo.toml -- --help > /tmp/pingtunnel-help
+          cargo run --locked --quiet --manifest-path Rust/Cargo.toml -- --help > /tmp/pingtunnel-help
           if grep -iq 'auto-tune' /tmp/pingtunnel-help; then
             echo "Auto Tune remains in CLI help" >&2
             exit 1
@@ -65,7 +74,7 @@ jobs:
       - name: Install musl compiler
         run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: Build
-        run: cargo build --release --manifest-path Rust/Cargo.toml --target "${{ matrix.target }}"
+        run: cargo build --locked --release --manifest-path Rust/Cargo.toml --target "${{ matrix.target }}"
       - name: Create checksum and asset
         run: |
           mkdir -p dist
@@ -107,13 +116,15 @@ jobs:
       - name: Run upstream and auto crypto tests
         run: |
           cd upstream
-          go test ./...
+          go mod verify
+          go vet ./...
+          go test -count=1 ./...
           go test -race -count=1 ./...
       - name: Verify fail-closed CLI and versioned Go core identity
         run: |
           cd upstream
           go build -o /tmp/pingtunnel-security-verify ./cmd
-          test "$(/tmp/pingtunnel-security-verify -security-protocol)" = "pingtunnel-go-core=3.4.1 config-schema=3 wire=4"
+          test "$(/tmp/pingtunnel-security-verify -security-protocol)" = "pingtunnel-go-core=3.4.2 config-schema=3 wire=4"
           if /tmp/pingtunnel-security-verify -c /tmp/does-not-exist-pingtunnel-config.json; then
             echo "Go core returned success for an invalid config" >&2
             exit 1
@@ -165,6 +176,11 @@ jobs:
           # Also exercise legacy UDP queue policy with mixed TCP+UDP listeners.
           # Existing sizes, drop policy and scheduling remain untouched.
           sudo python3 Source/multi_port_smoke.py --binary "$PWD/dist/pingtunnel-core-linux-amd64" --modes direct reverse --queue-profile udp
+      - name: One-minute sustained mixed TCP/UDP regression
+        if: matrix.arch == 'amd64'
+        timeout-minutes: 5
+        run: |
+          sudo python3 Source/multi_port_smoke.py --binary "$PWD/dist/pingtunnel-core-linux-amd64" --modes direct --queue-profile tcp --soak-seconds 60
       - uses: actions/upload-artifact@v4
         with:
           name: go-core-${{ matrix.arch }}
@@ -185,7 +201,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view v3.4.1 --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+          if gh release view v3.4.2 --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             echo 'exists=true' >> "$GITHUB_OUTPUT"
           else
             echo 'exists=false' >> "$GITHUB_OUTPUT"
@@ -203,7 +219,7 @@ jobs:
       - name: Build release compatibility manifest
         run: |
           {
-            printf 'release=v3.4.1\nconfig_schema=3\nwire=4\n'
+            printf 'release=v3.4.2\nconfig_schema=3\nwire=4\n'
             printf 'upstream_go=df16e52771ee67f1f9770ec68763b425672a36fc\n'
             printf 'source_commit=%s\n' "$GITHUB_SHA"
             (cd dist && sha256sum pingtunnel-core-linux-* pingtunnel-manager-linux-* | grep -v '\.sha256') 
@@ -211,9 +227,9 @@ jobs:
       - uses: softprops/action-gh-release@v2
         if: steps.version_release.outputs.exists == 'false'
         with:
-          tag_name: v3.4.1
-          name: MSM-Pingtunnel v3.4.1 — Stable
-          body_path: docs/RELEASE_NOTES_v3.4.1.md
+          tag_name: v3.4.2
+          name: MSM-Pingtunnel v3.4.2 — Stable
+          body_path: docs/RELEASE_NOTES_v3.4.2.md
           prerelease: false
           make_latest: true
           files: dist/*
