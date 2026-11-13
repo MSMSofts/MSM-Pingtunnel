@@ -116,12 +116,11 @@ func (p *Server) Run() error {
         recvUDP = make(chan *Packet, packetQueueCapacity(true))
         recvControl = make(chan *Packet, mixedControlQueueCapacity)
         if p.maxprocessthread > 0 {
-            // Hash-by-flow ordering remains, but UDP uses a bounded,
-            // independent worker pool so 1s TCP dial timeouts and slow
-            // TCP frame handlers cannot monopolize the UDP work queue.
-            udpThreads:=p.maxprocessthread
-            if udpThreads>16 {udpThreads=16}
-            p.udpProcesstp=thread.NewThreadPool(udpThreads,p.maxprocessbuffer,func(v interface{}) {
+            // Restore pre-Multi-Port v3.3.24's configured UDP worker
+            // parallelism (normally 100) instead of the mixed-mode 16 cap.
+            // Keep UDP jobs in their own pool so concurrent TCP connects
+            // cannot block these original hash-by-flow UDP worker lanes.
+            p.udpProcesstp=thread.NewThreadPool(p.maxprocessthread,p.maxprocessbuffer,func(v interface{}) {
                 p.processDataPacket(v.(*Packet))
             })
         }
