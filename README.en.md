@@ -2,7 +2,7 @@
 
 **An authenticated, encrypted ICMP tunnel for forwarding TCP/UDP traffic between two Linux VPSs, with a Go transport core and a Rust control menu.**
 
-[فارسی](README.md) · [Stable release: v3.4.5](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.5) · [All release notes](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0](LICENSE)
+[فارسی](README.md) · [Stable release: v3.4.6](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.6) · [All release notes](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0](LICENSE)
 
 ## Features
 
@@ -14,6 +14,19 @@
 - **Conservative compatibility:** config schema 3 and Wire v4, installation checks/rollback, experimental segmentation and UDP repair opt-in only.
 
 Pingtunnel **is not a VPN server**. It forwards traffic from multiple Iran-side TCP/UDP listeners over one encrypted ICMP tunnel to Foreign VPS loopback services. See the [Multi-Port setup guide](docs/MULTI_PORT.en.md) for port mapping, firewall and profile import/export.
+
+## v3.4.6 — revert UDP queue/worker behavior to pre-Multi-Port v3.3.24
+
+Following degraded real-world UDP responsiveness, we compared the **actual v3.3.24 source tag** (before Multi-Port) against v3.4.5 and restored the changed UDP behavior:
+
+- **Legacy FIFO 256-datagram queue:** preserve already accepted UDP DATA and discard the *incoming* packet when the queue is full. Remove v3.4.3's newest-first/evict-oldest speculative mixed-UDP policy.
+- **Legacy configured UDP worker count:** remove the new 16-worker cap on Foreign; honor the original configured process worker count (typically 100), preserving per-flow hash order.
+- **Keep security and Multi-Port:** TCP/control lanes remain separate, 12 mixed services remain configured, Wire 4 and Direct/Reverse exact Echo-reflection authentication protection are unchanged.
+- `pingtunnel security` explicitly reports `v3.3.24-fifo-drop-new` and the Foreign UDP worker count.
+
+**Important limitation:** a single shared ICMP socket carrying 12 services is still structurally different from v3.3.24's UDP-only single-service process. This is a rollback of the changed UDP scheduling behavior, not a claim of identical on-wire performance or a guarantee of no buffering.
+
+[Source comparison, revert design and verification](docs/RELEASE_NOTES_v3.4.6.md)
 
 ## v3.4.5 — Upstream-inspired fair ICMP TCP transmission
 
@@ -125,7 +138,7 @@ Session and replay checks → decryption → data delivery
 
 ## Quick installation
 
-> **v3.4.5:** fair 8KiB per-flow TCP ICMP send quanta, preserved UDP isolation, reusable idle timers, raw probe RTT tail.
+> **v3.4.6:** restores pre-Multi-Port UDP FIFO/drop-new semantics and configured UDP worker parallelism; Wire 4 unchanged.
 ### ⚠️ Important: install and set up the OVERSEAS VPS first
 
 > **Required first-time setup order: 1) Overseas VPS → 2) Iran VPS.**
@@ -137,7 +150,7 @@ Session and replay checks → decryption → data delivery
 Connect to the **overseas VPS** via SSH and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.5/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.6/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -149,7 +162,7 @@ Select **Foreign**, enter the Iran VPS public IPv4 address, choose **TCP or UDP*
 **Only after finishing overseas setup**, connect to the Iran VPS and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.5/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.6/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
