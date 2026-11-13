@@ -2,7 +2,7 @@
 
 **تونل ICMP رمزنگاری‌شده برای انتقال ترافیک TCP/UDP بین یک VPS ایران و یک VPS خارج، با هستهٔ Go و مدیر Rust.**
 
-[English](README.en.md) · [نسخه پایدار: v3.4.5](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.5) · [توضیحات همه نسخه‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
+[English](README.en.md) · [نسخه پایدار: v3.4.6](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.6) · [توضیحات همه نسخه‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
 
 ## ویژگی‌ها
 
@@ -14,6 +14,19 @@
 - **قابل بازیابی:** پشتیبان‌گیری و اعتبارسنجی تنظیمات هنگام ارتقا؛ ویژگی‌های آزمایشی قطعه‌بندی و ترمیم UDP به‌طور پیش‌فرض غیرفعال‌اند.
 
 Pingtunnel **خودش سرور VPN نیست**؛ داده از Listenerهای TCP/UDP ایران با یک تونل ICMP رمزنگاری‌شده به سرویس‌های Loopback خارج منتقل می‌شود. برای راهنمای تنظیم ۱۲ سرویس و فایروال، [راهنمای Multi-Port](docs/MULTI_PORT.md) را ببینید.
+
+## نسخه 3.4.6 — بازگشت منطق UDP به قبل از Multi-Port
+
+به‌دنبال افت کیفیت محسوس UDP، مسیر دریافت/پردازش را **با کد واقعی v3.3.24** (قبل از Multi-Port) مقایسه و تغییرهای نامطلوب پس از آن را برگرداندیم:
+
+- **صف UDP همان FIFO قدیمی:** ظرفیت ۲۵۶ بسته، حفظ بسته‌های پذیرفته‌شده و حذف *بسته ورودی جدید* فقط هنگام پرشدن صف. سیاست جدید «حذف قدیمی‌ترین و جایگزینی با جدیدترین» از v3.4.3 کنار گذاشته شد.
+- **بازگشت تعداد workerهای UDP سرور:** محدودیت جدید حداکثر ۱۶ worker حذف شد؛ تعداد تنظیم‌شده اصلی (معمولاً ۱۰۰) با حفظ ترتیب هر جریان به‌کار می‌رود.
+- **امنیت و سایر سرویس‌ها محفوظ:** صف TCP و کنترل مستقل، نگاشت‌های ۱۲ سرویس، Wire 4، حالت‌های Direct/Reverse، حفاظت‌های AEAD و اصلاح بازتاب کرنل همچنان برقرارند.
+- در `sudo pingtunnel security` سیاست `v3.3.24-fifo-drop-new` و در سرور خارج تعداد workerهای واقعی نمایش داده می‌شود.
+
+**محدودیت مهم:** بازگشت سیاست صف و workerها به قبل از Multi-Port به معنی یکسان‌شدن کامل معماری نیست؛ چند سرویس هنوز یک سوکت ICMP مشترک دارند. برای مقایسه کاملاً همسان با اجرای تک‌سرویسی قدیمی، باید یک UDP مستقل بدون Multi-Port آزمایش شود.
+
+[مقایسه کد، جزئیات بازگشت و تست‌ها](docs/RELEASE_NOTES_v3.4.6.md)
 
 ## نسخه 3.4.5 — عدالت ارسال ICMP بر اساس نسخه اصلی Pingtunnel
 
@@ -125,7 +138,7 @@ ICMP Echo Request / Echo Reply (Reverse یا Direct)
 
 ## نصب سریع
 
-> **نسخه 3.4.5:** عدالت ارسال ICMP میان TCPها، نوبت‌های ۸KiB، حفظ جداسازی UDP و ثبت P99 خام RTT.
+> **نسخه 3.4.6:** بازگشت صف UDP به FIFO نسخه 3.3.24 و حذف سقف ۱۶ worker پس از Multi-Port؛ بدون تغییر Wire 4.
 ### ⚠️ بسیار مهم: حتماً ابتدا نصب و راه‌اندازی را روی سرور خارج انجام دهید
 
 > **ترتیب نصب اولیه را رعایت کنید: ۱) سرور خارج → ۲) سرور ایران.**
@@ -137,7 +150,7 @@ ICMP Echo Request / Echo Reply (Reverse یا Direct)
 ابتدا از طریق SSH به **سرور خارج** متصل شوید و نصب را اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.5/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.6/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -149,7 +162,7 @@ sudo pingtunnel setup
 **فقط پس از تکمیل مرحلهٔ خارج** به سرور ایران متصل شوید و اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.5/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.6/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
