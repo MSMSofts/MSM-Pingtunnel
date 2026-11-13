@@ -17,11 +17,14 @@ SECURITY_NAMES = {
     "state", "last_valid_age_seconds", "recoveries", "replay_drops",
     "authentication_failures", "pending_packets", "expired_or_overflow_packets",
 }
-SECURITY_PREFIXES = ("icmp_", "reverse_", "smart_", "auto_", "direct_", "udp_")
+SECURITY_PREFIXES = ("icmp_", "reverse_", "smart_", "auto_", "direct_", "udp_", "tcp_")
 PERF_NAMES = {
     "profile", "rtt_samples", "rtt_ms", "jitter_ms", "probe_loss_estimate",
     "recent_rtt_samples", "recent_rtt_ms", "recent_jitter_ms",
     "last_rtt_sample_age_seconds", "next_tcp_resend_ms", "next_tcp_window",
+    "recent_raw_rtt_p50_ms", "recent_raw_rtt_p95_ms",
+    "recent_raw_rtt_p99_ms", "recent_raw_rtt_max_ms",
+    "recent_raw_rtt_over_250ms", "recent_raw_rtt_over_1000ms",
 }
 SNMP_NAMES = {
     "Udp": {"InDatagrams", "InErrors", "RcvbufErrors", "SndbufErrors", "OutDatagrams"},
@@ -164,7 +167,11 @@ def report(path):
     print("Samples:", len(records), "duration_sec:", round(elapsed),
           "label:", start.get("label"))
     for section, keys in (
-        ("performance", ("recent_rtt_ms", "recent_jitter_ms", "probe_loss_estimate")),
+        ("performance", ("recent_rtt_ms", "recent_jitter_ms",
+                         "recent_raw_rtt_p95_ms", "recent_raw_rtt_p99_ms",
+                         "recent_raw_rtt_max_ms", "recent_raw_rtt_over_1000ms",
+                         "probe_loss_estimate")),
+        ("security", ("tcp_icmp_fair_max_wait_ms", "tcp_icmp_fair_contended")),
         ("security", ("reverse_p95_delivery_delay_ms", "reverse_oldest_queue_age_ms",
                       "reverse_queue_packets", "icmp_userspace_pps")),
         ("process", ("rss_kb", "threads", "open_fds")),
@@ -182,7 +189,9 @@ def report(path):
     for section, keys in (
         ("security", ("replay_drops", "authentication_failures",
                       "reverse_queue_drops", "icmp_write_failures",
-                      "icmp_fragment_drops", "recoveries")),
+                      "icmp_fragment_drops", "recoveries",
+                      "tcp_icmp_fair_contended", "tcp_icmp_fair_turns",
+                      "udp_dispatch_overflow_drops", "tcp_dispatch_overflow_drops")),
         ("kernel_host_wide", ("Udp_InErrors", "Udp_RcvbufErrors",
                               "Udp_SndbufErrors", "Ip_InDiscards")),
     ):
