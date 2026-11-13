@@ -890,6 +890,10 @@ fn show_security_status() -> Result<()> {
             println!("  NOTE: UDP dispatcher intentionally drops under saturation to avoid blocking the ICMP reader.");
         }
     }
+    if let Some(drops)=report["tcp_dispatch_overflow_drops"].as_u64() {
+        println!("  Mixed TCP DATA admission drops (cumulative; bounded 2ms grace): {drops}");
+        if drops>0 {println!("  NOTE: TCP FrameMgr retransmission must recover dropped encrypted application frames; check RTT and TCP throughput.");}
+    }
     if let Some(truncated)=report["udp_truncated_datagrams"].as_u64() {
         println!("  UDP receive-buffer truncation events (cumulative): {truncated}");
     }
