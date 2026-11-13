@@ -214,11 +214,11 @@ It then copies the local Go files onto the pinned upstream tree and runs the Go 
 Rust code is independently testable:
 
 ~~~bash
-cargo test --manifest-path Rust/Cargo.toml
-cargo build --release --manifest-path Rust/Cargo.toml
+cargo test --locked --manifest-path Rust/Cargo.toml
+cargo build --locked --release --manifest-path Rust/Cargo.toml
 ~~~
 
-Release builds are verified with SHA256 and a release manifest specifying **manager 3.4.2 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The proposed release is [v3.4.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.2); rolling assets may also exist for compatibility.
+Release builds are verified with SHA256 and a release manifest specifying **manager 3.4.2 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The versioned release is [v3.4.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.2); rolling assets may also exist for compatibility.
 
 ## 8. Compatibility contract and limitations
 
