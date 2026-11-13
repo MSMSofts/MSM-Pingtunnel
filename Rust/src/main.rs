@@ -940,6 +940,9 @@ fn show_security_status() -> Result<()> {
     if let Some(policy)=report["udp_dispatch_policy"].as_str() {
         println!("  UDP forwarding admission: {policy}");
         println!("  Legacy v3.3.24 UDP: FIFO, 256 pending datagrams, drop incoming DATA when full; no oldest-frame eviction.");
+        if let Some(workers)=report["udp_legacy_server_workers"].as_i64().filter(|w|*w>0) {
+            println!("  Foreign UDP processing workers (pre-Multi-Port configured count): {workers}");
+        }
     }
     if let Some(drops)=report["udp_dispatch_overflow_drops"].as_u64() {
         println!("  UDP/QUIC ingress dispatch queue drops (cumulative): {drops}");
