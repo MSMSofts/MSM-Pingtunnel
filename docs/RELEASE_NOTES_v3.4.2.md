@@ -6,6 +6,12 @@
 - Authenticated control traffic can bypass a saturated TCP queue via the separate UDP dispatch queue; no new unauthenticated control path is added.
 - Added regression tests for saturated TCP, live UDP and control admission, and ordinary burst behavior. Record both TCP and UDP overload counters and keep them at zero during normal operation.
 
+## Verified and bounded Reverse-first recovery
+- For a genuinely active application with at least 60s of sustained demand and missing authenticated return traffic, two independent nonce-matched root-HMACed Direct path proofs permit a **verified fast fallback at 60 seconds**.
+- The Direct probe cadence temporarily increases to one per 10 seconds only while user activity is fresh and authenticated traffic has been stale for at least 25 seconds; probes remain authenticated and rate-limited.
+- Mere ICMP ping, an idle TCP connection, transient RTT spikes and unverified reachability cannot invoke the fast path. If proof is absent, the original conservative 90–150s gates remain. Emergency recovery still rekeys the Wire-v4 session.
+- No premature healthy-route rotation; the four manual/auto policies remain unchanged.
+
 ## Update security
 - The Rust manager selects the latest **published stable** GitHub release, validates its numeric semantic tag and resolves the tag to a concrete immutable Git commit, including annotated tags.
 - It downloads and executes the installer from that exact commit, **never mutable `main`**. The installer still verifies matching binaries, hashes and the release manifest; rollback on process-health failure remains.
@@ -14,10 +20,10 @@
 ## CI and observability
 - Changes under `Upstream/**` and network-smoke scripts now trigger CI.
 - Go dependency verification, `go vet`, uncached unit tests and race tests are included.
-- Rust dependency lockfile generation is captured in CI so that the lock can be committed and `--locked` enforced.
+- The CI-resolved `Rust/Cargo.lock` is committed and all Rust tests/releases use `--locked`.
 - A separate opt-in sustained Linux namespace soak is provided; this does NOT substitute for real Iran/Foreign VPS gaming, latency or provider measurements.
 
 ## Compatibility and validation
-Config schema **3** and authenticated Wire **4** are unchanged. Match the same release on both VPSs, preserve pairing keys, verify service-profile fingerprints, and measure real user traffic before assuming a performance improvement. A queue overflow is an overload signal, not a throughput guarantee. No automatic route timeouts are shortened: they remain fail-closed pending real two-peer evidence. Direct/Reverse route policies, encryption, FEC, segmentation, BBR and TCP settings otherwise remain unchanged.
+Config schema **3** and authenticated Wire **4** are unchanged. Match the same release on both VPSs, preserve pairing keys, verify service-profile fingerprints, and measure real user traffic before assuming a performance improvement. A queue overflow is an overload signal, not a throughput guarantee. Only the dual-verified 60-second failure path is accelerated; otherwise fail-closed conservative timeouts remain. Direct/Reverse route policies, encryption, FEC, segmentation, BBR and TCP settings otherwise remain unchanged.
 
-**Release condition:** do not publish or merge without successful Rust/Go CI (including raw ICMP namespace tests), a committed reproducible Cargo lockfile, and a coordinated deployment plan.
+**Release condition:** do not publish or merge without successful Rust/Go CI (including raw ICMP namespace tests), the reproducible Cargo lockfile, and a coordinated deployment plan.
