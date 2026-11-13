@@ -586,6 +586,7 @@ type secureStatus struct{
  ICMPUserspaceRequests uint64 `json:"icmp_userspace_echo_requests"`
  ICMPUserspaceReplies uint64 `json:"icmp_userspace_echo_replies"`
  ICMPCurrentPPS uint64 `json:"icmp_userspace_pps"`
+ UDPDispatchPolicy string `json:"udp_dispatch_policy"`
  UDPQueueOverflowDrops uint64 `json:"udp_dispatch_overflow_drops"`
  TCPQueueOverflowDrops uint64 `json:"tcp_dispatch_overflow_drops"`
  TCPICMPFairTurns uint64 `json:"tcp_icmp_fair_turns"`
@@ -705,6 +706,7 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.ICMPWriteEMSGSIZE=icmpMessageTooLong.Load()
  report.ICMPUserspaceRequests=icmpRequestsSent.Load()
  report.ICMPUserspaceReplies=icmpRepliesSent.Load()
+ report.UDPDispatchPolicy="v3.3.24-fifo-drop-new"
  report.UDPQueueOverflowDrops=udpIngressOverflowDrops.Load()
  report.TCPQueueOverflowDrops=tcpIngressOverflowDrops.Load()
  report.TCPICMPFairTurns=tcpICMPFairTurns.Load()
