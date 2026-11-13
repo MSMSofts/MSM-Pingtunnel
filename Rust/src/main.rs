@@ -912,6 +912,21 @@ fn show_security_status() -> Result<()> {
     println!("  Pending key renegotiation: {}",report["pending_rekey"]);
     println!("  Replays rejected: {}",report["replay_drops"]);
     println!("  Authentication failures: {}",report["authentication_failures"]);
+    if let (Some(invalid),Some(session),Some(tag))=(
+        report["authentication_invalid_frame_failures"].as_u64(),
+        report["authentication_wrong_session_failures"].as_u64(),
+        report["authentication_aead_tag_failures"].as_u64()) {
+        println!("    Breakdown — invalid frame / wrong session / AEAD tag: {invalid} / {session} / {tag}");
+    }
+    if let (Some(data),Some(ping),Some(other))=(
+        report["direct_data_echo_reflections"].as_u64(),
+        report["direct_ping_echo_reflections"].as_u64(),
+        report["direct_other_echo_reflections"].as_u64()) {
+        println!("  Direct-mode exact kernel Echo reflections filtered (DATA/PING/other): {data} / {ping} / {other}");
+        if data>0 || ping>0 || other>0 {
+            println!("  NOTE: exact reflected outgoing ciphertext is not an authenticated peer response; this traffic is now suppressed before AEAD.");
+        }
+    }
     if let Some(failed)=report["icmp_write_failures"].as_u64() {
         println!("  ICMP socket write failures (all paths): {failed}");
     }
