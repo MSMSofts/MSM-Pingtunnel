@@ -102,19 +102,19 @@ func TestMixedTCPBurstBelowCapacityIsLossless(t *testing.T) {
     }
 }
 
-func TestMixedDropsOldUDPNotNewestWhenControlLaneIsolated(t *testing.T) {
+func TestMixedRetainsLegacyOldestUDPAndDropsNewWhenControlLaneIsolated(t *testing.T) {
     reliable:=make(chan *Packet,1)
     udp:=make(chan *Packet,3)
     control:=make(chan *Packet,1)
     for _,id:=range []string{"old-A","old-B","old-C","fresh-D"} {
         packet:=&Packet{my:&MyMsg{Type:int32(MyMsg_DATA),Tcpmode:0,Id:id}}
         if !enqueueAuthenticatedPacketByTransport(reliable,udp,packet,false,control) {
-            t.Fatal("UDP overflow must not stall the ICMP receiver")
+            t.Fatal("legacy UDP FIFO overflow must not stall ICMP reader")
         }
     }
     got:=[]string{(<-udp).my.Id,(<-udp).my.Id,(<-udp).my.Id}
-    for i,id:=range []string{"old-B","old-C","fresh-D"} {
-        if got[i]!=id {t.Fatalf("expected fresh-only bounded queue, got %v",got)}
+    for i,id:=range []string{"old-A","old-B","old-C"} {
+        if got[i]!=id {t.Fatalf("v3.3.24 FIFO must retain existing datagrams, got %v",got)}
     }
     // Control is never enqueued in the evicting UDP lane.
     ping:=&Packet{my:&MyMsg{Type:int32(MyMsg_PING)}}
