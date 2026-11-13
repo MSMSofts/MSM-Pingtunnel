@@ -931,6 +931,17 @@ fn show_security_status() -> Result<()> {
         println!("  Mixed TCP DATA admission drops (cumulative; bounded 2ms grace): {drops}");
         if drops>0 {println!("  NOTE: TCP FrameMgr retransmission must recover dropped encrypted application frames; check RTT and TCP throughput.");}
     }
+    if let (Some(udp_max),Some(tcp_max),Some(udp_slow),Some(tcp_slow))=(
+        report["udp_dispatch_queue_max_delay_ms"].as_u64(),
+        report["tcp_dispatch_queue_max_delay_ms"].as_u64(),
+        report["udp_dispatch_delayed_over_250ms"].as_u64(),
+        report["tcp_dispatch_delayed_over_250ms"].as_u64()) {
+        println!("  Mixed UDP/TCP maximum ICMP dispatch queue wait: {udp_max} / {tcp_max} ms");
+        println!("  Mixed UDP/TCP frames queued over 250ms: {udp_slow} / {tcp_slow}");
+        if udp_slow>0 {
+            println!("  NOTE: UDP frames exceeded 250ms in local dispatch; inspect queue pressure and service load.");
+        }
+    }
     if let Some(truncated)=report["udp_truncated_datagrams"].as_u64() {
         println!("  UDP receive-buffer truncation events (cumulative): {truncated}");
     }
