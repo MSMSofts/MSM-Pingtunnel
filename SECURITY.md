@@ -4,12 +4,13 @@
 
 ## سیاست امنیتی
 
-**Pingtunnel Manager 3.4.5** یک پروتکل انتقال ICMP با رمزنگاری احرازشده و توافق کلید موقت دارد. این پیاده‌سازی **ممیزی رمزنگاری مستقل عمومی نشده است** و ادعای ناشناس‌بودن ICMP، عبور قطعی از فیلترینگ یا مقاومت کامل در برابر حملات حجمی ندارد.
+**Pingtunnel Manager 3.4.6** یک پروتکل انتقال ICMP با رمزنگاری احرازشده و توافق کلید موقت دارد. این پیاده‌سازی **ممیزی رمزنگاری مستقل عمومی نشده است** و ادعای ناشناس‌بودن ICMP، عبور قطعی از فیلترینگ یا مقاومت کامل در برابر حملات حجمی ندارد.
 
 ### نسخه‌های پشتیبانی‌شده
 
 | نسخه | وضعیت |
 | --- | --- |
+| **3.4.6** | بازگشت سیاست صف UDP به FIFO/drop-new نسخه 3.3.24 و تعداد workerهای UDP تنظیم‌شده؛ رمزنگاری Wire 4، Multi-Port و بازتاب ICMP بدون تغییر |
 | **3.4.5** | عدالت نوبت‌دهی ارسال ICMP در اتصال‌های TCP و کاهش سربار تایمر، با حفظ صف‌های مستقل UDP/کنترل و امنیت Wire v4 |
 | **3.4.4** | فیلتر بازتاب ICMP رمزنگاری‌شدهٔ Direct تنها با تطبیق کامل رمزمتن و شناسه/توالی؛ تفکیک خطاهای AEAD، قالب و نشست |
 | **3.4.3** | نسخهٔ جداسازی پردازش TCP/UDP/کنترل و تازه‌محوری صف UDP در Multi-Port؛ امنیت Wire v4 و کنترل‌های موجود بدون تغییر |
@@ -76,13 +77,13 @@
 
 ## English security notes
 
-Pingtunnel Manager uses a **custom authenticated ICMP transport**. Version **3.4.5** adds bounded fair TCP ICMP sending and reuse of idle timers; exact Direct Echo reflection authentication checks remain. Automated CI covers Go/Rust, race and Linux namespace ICMP, but is not a substitute for field testing. Real two-VPS field testing and an independent cryptographic audit are still outstanding. This project has **not been independently audited**, and encryption does **not** guarantee resistance to traffic analysis, ICMP blocking, denial of service, or endpoint compromise.
+Pingtunnel Manager uses a **custom authenticated ICMP transport**. Version **3.4.6** restores pre-Multi-Port UDP FIFO/drop-new scheduling and full configured UDP worker count, while retaining v3.4.5's bounded fair TCP ICMP sending and reuse of idle timers; exact Direct Echo reflection authentication checks remain. Automated CI covers Go/Rust, race and Linux namespace ICMP, but is not a substitute for field testing. Real two-VPS field testing and an independent cryptographic audit are still outstanding. This project has **not been independently audited**, and encryption does **not** guarantee resistance to traffic analysis, ICMP blocking, denial of service, or endpoint compromise.
 
 **Supported security properties:** a random 256-bit pairing root, PSK-authenticated ephemeral X25519 agreement, HKDF-SHA256 directional session keys, auto-selected AES-256-GCM/XChaCha20-Poly1305, authenticated 64-bit sequence numbers, a 1,024-packet replay window, and an overseas server policy restricting ingress peer IPv4 and the forwarding target to local loopback.
 
 **Limitations:** ICMP is observable and the wire framing has identifiable fixed markers. Root-key compromise can enable future impersonation. Active process compromise may reveal session data. Bounded recovery buffers can lose application traffic. Automatic failover is available in the two AUTO routing policies, with authenticated path proofs and bounded grace periods. Manual routes never switch automatically. Full ICMP DoS protection and zero-downtime pairing-root rotation are not provided.
 
-**Compatibility:** config schema 3 and authenticated Wire v4 remain unchanged in 3.4.5. Use matching 3.4.5 manager and core builds on both peers; there is no silent downgrade to plaintext or legacy wire versions.
+**Compatibility:** config schema 3 and authenticated Wire v4 remain unchanged in 3.4.6. Use matching 3.4.6 manager and core builds on both peers; there is no silent downgrade to plaintext or legacy wire versions.
 
 **Responsible reporting:** Do not disclose exploit details or keys in public issues. Use private GitHub vulnerability reporting if enabled, or coordinate privately with the maintainer before sharing details. Non-sensitive bugs can be filed in [Issues](https://github.com/MSMSofts/MSM-Pingtunnel/issues).
 

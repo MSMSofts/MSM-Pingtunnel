@@ -124,7 +124,7 @@ jobs:
         run: |
           cd upstream
           go build -o /tmp/pingtunnel-security-verify ./cmd
-          test "$(/tmp/pingtunnel-security-verify -security-protocol)" = "pingtunnel-go-core=3.4.5 config-schema=3 wire=4"
+          test "$(/tmp/pingtunnel-security-verify -security-protocol)" = "pingtunnel-go-core=3.4.6 config-schema=3 wire=4"
           if /tmp/pingtunnel-security-verify -c /tmp/does-not-exist-pingtunnel-config.json; then
             echo "Go core returned success for an invalid config" >&2
             exit 1
@@ -201,7 +201,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view v3.4.5 --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+          if gh release view v3.4.6 --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             echo 'exists=true' >> "$GITHUB_OUTPUT"
           else
             echo 'exists=false' >> "$GITHUB_OUTPUT"
@@ -219,7 +219,7 @@ jobs:
       - name: Build release compatibility manifest
         run: |
           {
-            printf 'release=v3.4.5\nconfig_schema=3\nwire=4\n'
+            printf 'release=v3.4.6\nconfig_schema=3\nwire=4\n'
             printf 'upstream_go=df16e52771ee67f1f9770ec68763b425672a36fc\n'
             printf 'source_commit=%s\n' "$GITHUB_SHA"
             (cd dist && sha256sum pingtunnel-core-linux-* pingtunnel-manager-linux-* | grep -v '\.sha256') 
@@ -227,9 +227,9 @@ jobs:
       - uses: softprops/action-gh-release@v2
         if: steps.version_release.outputs.exists == 'false'
         with:
-          tag_name: v3.4.5
-          name: MSM-Pingtunnel v3.4.5 — Stable
-          body_path: docs/RELEASE_NOTES_v3.4.5.md
+          tag_name: v3.4.6
+          name: MSM-Pingtunnel v3.4.6 — Stable
+          body_path: docs/RELEASE_NOTES_v3.4.6.md
           prerelease: false
           make_latest: true
           files: dist/*
