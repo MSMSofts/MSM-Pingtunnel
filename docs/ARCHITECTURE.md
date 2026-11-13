@@ -2,7 +2,7 @@
 
 [README فارسی](../README.md) · [English README](../README.en.md) · [Security policy](../SECURITY.md)
 
-**Version:** Manager 3.4.3 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
+**Version:** Manager 3.4.4 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
 
 **خلاصه:** Pingtunnel Manager فقط دو VPS دارد. کاربر به پورت TCP/UDP سرور ایران وصل می‌شود؛ هسته Go ترافیک را در ICMP رمزنگاری‌شده به VPS خارج می‌رساند و سرور خارج آن را به پورت سرویس محلی خودش تحویل می‌دهد. Rust تنها کارهای راه‌اندازی، ذخیره تنظیمات و کنترل systemd را انجام می‌دهد.
 
@@ -66,6 +66,14 @@ On Iran, encrypted frames are held in a FIFO queue bounded by **256 frames, 2 Mi
 For predominantly Iran→Foreign flows, Foreign sends an encrypted delivery receipt at most every eight seconds **only** while genuine authenticated incoming DATA has arrived within the previous ten seconds. Iran validates it using the existing session AEAD, which is useful evidence that Foreign received data and helps avoid an accidental reverse-to-direct switch during one-way traffic. Unsigned Echo Replies are not delivery evidence.
 
 Runtime JSON at `/run/pingtunnel-security.json` now reports `reverse_queue_packets`, `reverse_queue_bytes`, `reverse_queue_peak`, `reverse_queue_drops`, `reverse_write_failures`, `reverse_poll_interval_ms` and `reverse_last_data_age_seconds` along with the existing handshake and replay data. Do not treat incoming HMAC-verified polls alone as proof of a functioning reverse return path.
+
+## Direct ICMP kernel Echo reflection filtering (v3.4.4)
+
+The Linux kernel on the **Foreign** host can respond to an Iran-origin encrypted ICMP Echo Request with an automatic Echo Reply containing identical outgoing bytes. Iran receives that kernel reflection in addition to the Foreign userspace application reply. Since receive-direction AEAD keys are distinct, passing our own copied ciphertext to Iran's decryptor generates a **spurious AEAD tag error**. The earlier exact-reflection filter applied only to Foreign-origin Reverse Echo Requests.
+
+For **both** Foreign Reverse and Iran Direct, senders now stage SHA-256 of the **entire encrypted request payload**, ICMP Echo ID/sequence, message kind and time in the existing 16,384-entry / eight-second bounded signature cache. A failed socket write removes its pending record. Receivers first enforce the pinned peer IP; type-0 Echo Reply is suppressed only if digest **and** both ICMP identifiers match an unexpired own request. Never drop PTD4 based solely on a prefix, packet length or source IP: a valid peer's opposite-direction encrypted ACK must survive. Direct and Reverse counters remain distinct. Local `pingtunnel security` also separates malformed framing, wrong session and failed AEAD tags.
+
+The user-observed high Iran authentication-failure counter is *consistent* with this missing Direct filter, but not proof that every error was a kernel reflection, nor proof that Instagram's 1–3-second stalls will be removed. Evaluate per-minute deltas against a real packet capture or test. Wire v4 and all destination restrictions are unchanged.
 
 ## Multi-Port latency isolation (v3.4.3 compared with v3.3.24)
 
@@ -226,7 +234,7 @@ cargo test --locked --manifest-path Rust/Cargo.toml
 cargo build --locked --release --manifest-path Rust/Cargo.toml
 ~~~
 
-Release builds are verified with SHA256 and a release manifest specifying **manager 3.4.3 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The versioned release is [v3.4.3](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.3); rolling assets may also exist for compatibility.
+Release builds are verified with SHA256 and a release manifest specifying **manager 3.4.4 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The versioned release is [v3.4.4](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.4); rolling assets may also exist for compatibility.
 
 ## 8. Compatibility contract and limitations
 
