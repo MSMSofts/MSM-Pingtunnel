@@ -686,6 +686,7 @@ func (p *Client) acceptTcpConn(conn *net.TCPConn, targetAddr string, mode int, s
 	clientConn.fm.Connect()
 	startConnectTime := common.GetNowUpdateInSecond()
 	connectWait := newAdaptiveLoopWait(2*time.Millisecond, 80*time.Millisecond)
+    defer connectWait.stop()
 	for !p.exit.Load() && !clientConn.exit.Load() {
 		if clientConn.fm.IsConnected() {
 			break
@@ -725,7 +726,7 @@ func (p *Client) acceptTcpConn(conn *net.TCPConn, targetAddr string, mode int, s
 		select {
 		case <-clientConn.activity:
 			connectWait.hit()
-		case <-time.After(wait):
+		case <-connectWait.arm(wait):
 		}
 	}
 
@@ -745,6 +746,7 @@ func (p *Client) acceptTcpConn(conn *net.TCPConn, targetAddr string, mode int, s
 		defer common.CrashLog()
 
 		readWait := newAdaptiveLoopWait(2*time.Millisecond, 80*time.Millisecond)
+    defer readWait.stop()
 		for !p.exit.Load() && !clientConn.exit.Load() {
 			left := common.MinOfInt(clientConn.fm.GetSendBufferLeft(), len(bytes))
 			if left <= 0 {
@@ -755,7 +757,7 @@ func (p *Client) acceptTcpConn(conn *net.TCPConn, targetAddr string, mode int, s
 				case <-clientConn.activity:
 					readWait.hit()
 					continue
-				case <-time.After(wait):
+				case <-readWait.arm(wait):
 					continue
 				}
 			}
@@ -786,6 +788,7 @@ func (p *Client) acceptTcpConn(conn *net.TCPConn, targetAddr string, mode int, s
 	}()
 
 	loopWait := newAdaptiveLoopWait(2*time.Millisecond, 250*time.Millisecond)
+    defer loopWait.stop()
 
 mainLoop:
 	for !p.exit.Load() && !clientConn.exit.Load() {
@@ -880,7 +883,7 @@ mainLoop:
 					clientConn.fm.Close()
 					break mainLoop
 				}
-			case <-time.After(wait):
+			case <-loopWait.arm(wait):
 			}
 		} else {
 			loopWait.hit()
