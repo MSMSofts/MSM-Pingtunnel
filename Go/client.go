@@ -447,7 +447,8 @@ func (p *Client) Run() error {
                 }
             }
             if p.cryptoConfig!=nil && p.cryptoConfig.reverse!=nil &&
-                p.cryptoConfig.reverse.shouldProbeDirect(now,p.cryptoConfig.SecureReady()) {
+                p.cryptoConfig.reverse.shouldProbeDirect(now,p.cryptoConfig.SecureReady(),
+                    p.cryptoConfig.sec.lastPeerTraffic()) {
                 // A single signed probe per minute checks Direct while
                 // Reverse remains absolutely preferred and untouched.
                 // Unlike a new transport session this carries no user data.
