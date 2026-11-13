@@ -140,3 +140,23 @@ func TestAuthenticatedFailureTypesSeparatedFromEchoReflections(t *testing.T) {
     }
     if _,err=iran.Decrypt(good);err!=nil {t.Fatalf("valid peer frame rejected after bad frames: %v",err)}
 }
+
+func TestHandshakeAuthenticationErrorsAreNotCountedAsAEADTags(t *testing.T) {
+    key:=pairedTestKey(t)
+    iran,err:=NewCryptoConfig(AUTO,key)
+    if err!=nil {t.Fatal(err)}
+    foreign,err:=NewCryptoConfig(AUTO,key)
+    if err!=nil {t.Fatal(err)}
+    establishEphemeralPair(t,iran,foreign)
+    forged:=controlBody(helloClient,[16]byte{1,2,3},[16]byte{},bytes.Repeat([]byte{7},32))
+    forged=append(forged,bytes.Repeat([]byte{0},32)...)
+    if _,err:=foreign.ReceiveSecureControl(forged,time.Now());err==nil {
+        t.Fatal("unauthenticated reconnect control was accepted")
+    }
+    status:=foreign.sec.status()
+    if status.AuthFailures!=1 || status.AuthControlFailures!=1 ||
+       status.AuthTagFailures!=0 || status.AuthWrongSession!=0 {
+        t.Fatalf("bad control MAC was misclassified as an application AEAD failure: %+v",status)
+    }
+    if !foreign.SecureReady() {t.Fatal("forged reconnect disrupted existing authenticated session")}
+}
