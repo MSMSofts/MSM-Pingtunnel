@@ -47,6 +47,7 @@ type Server struct {
 	cryptoConfig     *CryptoConfig
 	forwardConfig    *ForwardConfig
 	congestion       string
+    tcpFairShare icmpTCPFairShare // per-core fair scheduling across all TCP Multi-Port flows
 	fixedTarget      string
 	forwardServices  map[string]multiForwardTarget
 	allowedPeer      net.IP
@@ -485,8 +486,12 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
 		conn.fm.Update()
 		sendlist := conn.fm.GetSendList()
 		hadWork := sendlist.Len() > 0
-		for e := sendlist.Front(); e != nil; e = e.Next() {
-			f := e.Value.(*network.Frame)
+		frames := make([]*network.Frame,0,sendlist.Len())
+    for e := sendlist.Front(); e != nil; e = e.Next() {
+        frames=append(frames,e.Value.(*network.Frame))
+    }
+    p.tcpFairShare.emitFrames(frames,func(f *network.Frame) int {
+        
 			mb, _ := conn.fm.MarshalFrame(f)
 			echoID,echoSeq:=p.applicationEchoIdentity(int(conn.echoId.Load()),int(conn.echoSeq.Load()))
             sendICMP(echoID, echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
@@ -495,7 +500,9 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
 				0, p.cryptoConfig)
 			p.sendPacket.Add(1)
 			p.sendPacketSize.Add(uint64(len(mb)))
-		}
+		
+        return len(mb)
+    })
 		now := common.GetNowUpdateInSecond()
 		diffclose := now.Sub(startConnectTime)
 		if diffclose > time.Second*15 {
@@ -584,12 +591,16 @@ mainLoop:
 		if sendlist.Len() > 0 {
 			hadWork = true
 			conn.activeSendUnixNano.Store(now.UnixNano())
-			for e := sendlist.Front(); e != nil; e = e.Next() {
-				f := e.Value.(*network.Frame)
+			frames := make([]*network.Frame,0,sendlist.Len())
+    for e := sendlist.Front(); e != nil; e = e.Next() {
+        frames=append(frames,e.Value.(*network.Frame))
+    }
+    p.tcpFairShare.emitFrames(frames,func(f *network.Frame) int {
+        
 				mb, err := conn.fm.MarshalFrame(f)
 				if err != nil {
 					loggo.Error("Error tcp Marshal %s %s %s", conn.id, conn.tcpaddrTarget.String(), err)
-					continue
+					return 0
 				}
 				echoID,echoSeq:=p.applicationEchoIdentity(int(conn.echoId.Load()),int(conn.echoSeq.Load()))
             sendICMP(echoID, echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
@@ -598,7 +609,9 @@ mainLoop:
 					0, p.cryptoConfig)
 				p.sendPacket.Add(1)
 				p.sendPacketSize.Add(uint64(len(mb)))
-			}
+			
+        return len(mb)
+    })
 		}
 
 		if conn.fm.GetRecvBufferSize() > 0 {
@@ -675,8 +688,12 @@ mainLoop:
 		conn.fm.Update()
 
 		sendlist := conn.fm.GetSendList()
-		for e := sendlist.Front(); e != nil; e = e.Next() {
-			f := e.Value.(*network.Frame)
+		frames := make([]*network.Frame,0,sendlist.Len())
+    for e := sendlist.Front(); e != nil; e = e.Next() {
+        frames=append(frames,e.Value.(*network.Frame))
+    }
+    p.tcpFairShare.emitFrames(frames,func(f *network.Frame) int {
+        
 			mb, _ := conn.fm.MarshalFrame(f)
 			echoID,echoSeq:=p.applicationEchoIdentity(int(conn.echoId.Load()),int(conn.echoSeq.Load()))
             sendICMP(echoID, echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
@@ -685,7 +702,9 @@ mainLoop:
 				0, p.cryptoConfig)
 			p.sendPacket.Add(1)
 			p.sendPacketSize.Add(uint64(len(mb)))
-		}
+		
+        return len(mb)
+    })
 
 		nodatarecv := true
 		if conn.fm.GetRecvBufferSize() > 0 {
