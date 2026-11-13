@@ -133,16 +133,28 @@ func isReflectedReversePoll(crypto *CryptoConfig, icmpType byte, data []byte) bo
          stdbytes.Equal(data[:len(reverseSwitchMagic)],reverseSwitchMagic[:]))
 }
 
-// Unlike PTR4 reflections, PTD4 Echo Replies can also be genuine encrypted
-// peer DATA. Only suppress an Echo Reply that exactly matches the full
-// ciphertext and ICMP ID/sequence of a recently transmitted request.
-// Call this only after the paired source-IP check.
+// Only suppress an Echo Reply that exactly matches the full ciphertext
+// and ICMP ID/sequence of OUR recently transmitted Echo Request from the
+// pinned peer address. Foreign does this for Reverse; Iran must also do it
+// in Direct, otherwise the Foreign Linux kernel's verbatim auto-echo is
+// sent into Iran's *opposite-direction* AEAD and inflates auth errors.
+// Never drop all PTD4 Echo Replies: legitimate application ACKs share the
+// same prefix and must reach the decryptor.
+func isReflectedEncryptedEcho(crypto *CryptoConfig, icmpType byte, id,seq int, data []byte,now time.Time) bool {
+    if crypto==nil || crypto.sec==nil || crypto.reverse==nil ||
+        icmpType!=0 || len(data)<len(secureDataMagic) ||
+        !stdbytes.Equal(data[:len(secureDataMagic)],secureDataMagic[:]) {
+        return false
+    }
+    direct:=crypto.sec.region=="iran" && !useReverse(crypto)
+    reverse:=crypto.sec.region=="foreign" && useReverse(crypto)
+    if !direct && !reverse {return false}
+    return crypto.reverse.filterReflectedEncryptedEcho(id,seq,data,now,direct)
+}
+
+// Backward-compatible internal regression helper for old Reverse tests.
 func isReflectedReverseDataEcho(crypto *CryptoConfig, icmpType byte, id,seq int, data []byte,now time.Time) bool {
-    return crypto!=nil && crypto.sec!=nil && crypto.sec.region=="foreign" &&
-        crypto.reverse!=nil && icmpType==0 &&
-        len(data)>=len(secureDataMagic) &&
-        stdbytes.Equal(data[:len(secureDataMagic)],secureDataMagic[:]) &&
-        crypto.reverse.filterReflectedDataEcho(id,seq,data,now)
+    return isReflectedEncryptedEcho(crypto,icmpType,id,seq,data,now)
 }
 
 // Keep reflection classification separate from the DATA-only traffic hint.
@@ -186,10 +198,14 @@ func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr,
   }
   proto=8
  }
- // Track ALL encrypted Foreign-origin Echo Requests, including PING.
- // Only app DATA can accelerate BBR/QUIC return-ACK polling.
- tracked:=useReverse(crypto) && crypto!=nil &&
-    crypto.sec!=nil && crypto.sec.region=="foreign" && proto==8 &&
+ // Stage exact encrypted Echo Request signatures before socket write.
+ // Foreign Reverse and Iran Direct both originate userland Echo Requests
+ // that the receiving Linux kernel can automatically reflect unchanged.
+ // Keep the existing bounded 8s/16384 digest-only cache and roll back
+ // a failed send; never track plain Echo Replies or return ACK payloads.
+ tracked:=crypto!=nil && crypto.sec!=nil && crypto.reverse!=nil && proto==8 &&
+    ((crypto.sec.region=="foreign" && useReverse(crypto)) ||
+     (crypto.sec.region=="iran" && !useReverse(crypto))) &&
     len(encrypted)>=len(secureDataMagic) &&
     stdbytes.Equal(encrypted[:len(secureDataMagic)],secureDataMagic[:])
  var signature reverseSentEchoSignature
@@ -289,7 +305,7 @@ func recvICMPWithMixedUDP(workResultLock *sync.WaitGroup, exit *atomic.Bool, con
             // PTD4 itself is not a reason to drop a reply: Iran's authentic
             // encrypted DATA/QUIC ACKs also start with PTD4. Reject only
             // an exact reflection of our own recent outbound ciphertext.
-            if isReflectedReverseDataEcho(cryptoConfig,bytes[0],echoId,echoSeq,payloadData,now) {
+            if isReflectedEncryptedEcho(cryptoConfig,bytes[0],echoId,echoSeq,payloadData,now) {
                 continue
             }
             // PTQ4 is a root-HMAC-authenticated queue-depth/age wake.
