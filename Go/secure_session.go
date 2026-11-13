@@ -112,6 +112,9 @@ type secureSession struct{
  lastValid time.Time
  started time.Time
  errors uint64
+ invalidFormatErrors uint64
+ wrongSessionErrors uint64
+ aeadTagErrors uint64
  replays uint64
  recoveries uint64
  // A verified new handshake is staged separately from the established
@@ -315,7 +318,7 @@ func (s *secureSession) handle(frame []byte,now time.Time)([]byte,error){
   }
   if typ==helloFinish && s.pending!=nil {
    result,err:=s.pending.handle(frame,now)
-   if err!=nil{s.errors++;return nil,err}
+   if err!=nil{s.errors++;s.aeadTagErrors++;return nil,err}
    if s.pending.state==4 {
     // Keep only a bounded recent-ID memory; old HMACed hellos are rejected
     // without allocating a candidate or disturbing the active data path.
@@ -449,12 +452,14 @@ func (s *secureSession) decrypt(frame []byte)([]byte,error){
  }
  if len(frame)<secureHeaderSize+16||!bytes.Equal(frame[:4],secureDataMagic[:]){
   s.errors++
+  s.invalidFormatErrors++
   s.mu.Unlock()
   return nil,errors.New("v4 authenticated frame required")
  }
  k:=s.keys
  if !hmac.Equal(frame[5:21],k.id[:]){
   s.errors++
+  s.wrongSessionErrors++
   s.mu.Unlock()
   return nil,errors.New("wrong session")
  }
@@ -627,6 +632,9 @@ type secureStatus struct{
  ReverseDataEchoReflections uint64 `json:"reverse_data_echo_reflections"`
  ReversePingEchoReflections uint64 `json:"reverse_ping_echo_reflections"`
  ReverseOtherEchoReflections uint64 `json:"reverse_other_echo_reflections"`
+ DirectDataEchoReflections uint64 `json:"direct_data_echo_reflections"`
+ DirectPingEchoReflections uint64 `json:"direct_ping_echo_reflections"`
+ DirectOtherEchoReflections uint64 `json:"direct_other_echo_reflections"`
  ReverseEchoCacheExpired uint64 `json:"reverse_echo_cache_expired"`
  ReverseEchoCacheCapacityEvicted uint64 `json:"reverse_echo_cache_capacity_evicted"`
  ReverseDataEchoCacheEntries int `json:"reverse_data_echo_cache_entries"`
@@ -651,6 +659,9 @@ type secureStatus struct{
  PendingRekey bool `json:"pending_rekey"`
  ReplayDrops uint64 `json:"replay_drops"`
  AuthFailures uint64 `json:"authentication_failures"`
+ AuthInvalidFormat uint64 `json:"authentication_invalid_frame_failures"`
+ AuthWrongSession uint64 `json:"authentication_wrong_session_failures"`
+ AuthTagFailures uint64 `json:"authentication_aead_tag_failures"`
  Recoveries uint64 `json:"recoveries"`
  PendingPackets uint64 `json:"pending_packets"`
  ExpiredOrOverflowPackets uint64 `json:"expired_or_overflow_packets"`
@@ -666,6 +677,8 @@ func (s *secureSession) status()secureStatus{
   ConfigSchema:3,WireVersion:4,Region:s.region,State:phase,
   LastValidAgeSeconds:age,PendingRekey:s.pending!=nil,
   ReplayDrops:s.replays,AuthFailures:s.errors,
+  AuthInvalidFormat:s.invalidFormatErrors,AuthWrongSession:s.wrongSessionErrors,
+  AuthTagFailures:s.aeadTagErrors,
   Recoveries:s.recoveries,PendingPackets:uint64(len(s.queued)),
   ExpiredOrOverflowPackets:s.queueDrops,
  }
@@ -741,6 +754,9 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.ReverseDataEchoReflections=diag.ReflectedDataEchoes
  report.ReversePingEchoReflections=diag.ReflectedPingEchoes
  report.ReverseOtherEchoReflections=diag.ReflectedOtherEchoes
+ report.DirectDataEchoReflections=diag.DirectReflectedDataEchoes
+ report.DirectPingEchoReflections=diag.DirectReflectedPingEchoes
+ report.DirectOtherEchoReflections=diag.DirectReflectedOtherEchoes
  report.ReverseEchoCacheExpired=diag.ExpiredEchoSignatures
  report.ReverseEchoCacheCapacityEvicted=diag.CapacityEvictedEchoSignatures
  report.ReverseDataEchoCacheEntries=diag.OutboundEchoCacheEntries
