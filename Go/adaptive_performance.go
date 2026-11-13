@@ -7,6 +7,7 @@ import (
  "encoding/json"
  "math"
  "os"
+ "sort"
  "sync"
  "time"
 )
@@ -17,7 +18,7 @@ type AdaptiveFrameSettings struct {
 }
 type adaptiveRecentRTT struct { at time.Time; ms float64 }
 type AdaptivePerformance struct {
- recent [16]adaptiveRecentRTT
+ recent [128]adaptiveRecentRTT
  recentNext uint64
  mu sync.Mutex
  outstanding []time.Time
@@ -136,6 +137,12 @@ type adaptiveStatus struct {
  RecentSamples uint64 `json:"recent_rtt_samples"`
  RecentRTTMs float64 `json:"recent_rtt_ms"`
  RecentJitterMs float64 `json:"recent_jitter_ms"`
+ RecentRawP50Ms float64 `json:"recent_raw_rtt_p50_ms"`
+ RecentRawP95Ms float64 `json:"recent_raw_rtt_p95_ms"`
+ RecentRawP99Ms float64 `json:"recent_raw_rtt_p99_ms"`
+ RecentRawMaxMs float64 `json:"recent_raw_rtt_max_ms"`
+ RecentRawOver250Ms uint64 `json:"recent_raw_rtt_over_250ms"`
+ RecentRawOver1000Ms uint64 `json:"recent_raw_rtt_over_1000ms"`
  RTTMs float64 `json:"rtt_ms"`
  JitterMs float64 `json:"jitter_ms"`
  LossEstimate float64 `json:"probe_loss_estimate"`
@@ -164,11 +171,35 @@ func (a *AdaptivePerformance) recentMeasurementsLocked(now time.Time) (uint64,fl
  if count>1 {jitter/=float64(count-1)}
  return count,math.Round(total/float64(count)*10)/10,math.Round(jitter*10)/10
 }
+// These are percentiles of *individual* authenticated ICMP RTT samples,
+// NOT percentiles of the smoothed status fields. The 128-sample ring covers
+// at most 120 seconds and is copied/sorted only when taking a snapshot.
+func (a *AdaptivePerformance) recentRawRTTLocked(now time.Time)(p50,p95,p99,max float64,slow250,slow1000 uint64) {
+    values:=make([]float64,0,len(a.recent))
+    for _,v:=range a.recent {
+        if v.at.IsZero()||now.Sub(v.at)>120*time.Second||now.Before(v.at) {continue}
+        values=append(values,v.ms)
+        if v.ms>250 {slow250++}
+        if v.ms>1000 {slow1000++}
+    }
+    if len(values)==0{return}
+    sort.Float64s(values)
+    at:=func(q int) float64 {
+        // Nearest rank with integer arithmetic (ceil of q*n/100).
+        i:=(len(values)*q+99)/100-1
+        if i<0{i=0}
+        return math.Round(values[i]*10)/10
+    }
+    return at(50),at(95),at(99),at(100),slow250,slow1000
+}
+
 func (a *AdaptivePerformance) Status(bufferBytes,maxWindow,rto int) adaptiveStatus {
  a.mu.Lock();defer a.mu.Unlock()
  p:=a.parametersLocked(bufferBytes,maxWindow,rto)
  profile:="learning"
- recentCount,recentRtt,recentJitter:=a.recentMeasurementsLocked(time.Now())
+ now:=time.Now()
+ recentCount,recentRtt,recentJitter:=a.recentMeasurementsLocked(now)
+ rawP50,rawP95,rawP99,rawMax,slow250,slow1000:=a.recentRawRTTLocked(now)
  age:=int64(-1)
  if !a.lastPongAt.IsZero() {
   since:=time.Since(a.lastPongAt)
@@ -179,6 +210,9 @@ func (a *AdaptivePerformance) Status(bufferBytes,maxWindow,rto int) adaptiveStat
  return adaptiveStatus{
   Profile:profile, Samples:a.samples, LastSampleAgeSeconds:age,
   RecentSamples:recentCount,RecentRTTMs:recentRtt,RecentJitterMs:recentJitter,
+  RecentRawP50Ms:rawP50,RecentRawP95Ms:rawP95,
+  RecentRawP99Ms:rawP99,RecentRawMaxMs:rawMax,
+  RecentRawOver250Ms:slow250,RecentRawOver1000Ms:slow1000,
   RTTMs:math.Round(a.srttMs*10)/10,
   JitterMs:math.Round(a.jitterMs*10)/10,
   LossEstimate:math.Round(a.lossScore*1000)/1000,

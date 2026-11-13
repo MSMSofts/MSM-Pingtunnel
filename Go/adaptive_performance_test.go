@@ -150,3 +150,36 @@ func TestRecentAdaptiveRTTWindowExcludesOldHistory(t *testing.T) {
  }
  if st.RecentJitterMs>2 {t.Fatalf("unexpected stable-path jitter: %+v",st)}
 }
+
+func TestRawRTTPercentilesExposeShortStalls(t *testing.T) {
+ a:=NewAdaptivePerformance(); now:=time.Now()
+ for i:=0;i<100;i++{
+  ms:=100.0; if i==97{ms=300};if i==98{ms=900};if i==99{ms=1750}
+  a.recent[i]=adaptiveRecentRTT{at:now.Add(-time.Duration(100-i)*time.Millisecond),ms:ms}
+ }
+ a.recentNext=100
+ st:=a.Status(1048576,20000,400)
+ if st.RecentSamples!=100 || st.RecentRawP50Ms!=100 || st.RecentRawP95Ms!=100 ||
+    st.RecentRawP99Ms!=900 || st.RecentRawMaxMs!=1750 ||
+    st.RecentRawOver250Ms!=3 || st.RecentRawOver1000Ms!=1 {
+  t.Fatalf("raw RTT tail incorrectly measured: %+v",st)
+ }
+ b,err:=json.Marshal(st);if err!=nil{t.Fatal(err)}
+ var fields map[string]any
+ if err=json.Unmarshal(b,&fields);err!=nil{t.Fatal(err)}
+ if fields["recent_raw_rtt_p99_ms"]!=float64(900) ||
+    fields["recent_raw_rtt_over_1000ms"]!=float64(1) {
+  t.Fatalf("RTT tail JSON fields missing: %s",string(b))
+ }
+}
+
+func TestRawRTTWindowExpiresHistoricalSpikes(t *testing.T) {
+ a:=NewAdaptivePerformance(); now:=time.Now()
+ a.recent[0]=adaptiveRecentRTT{at:now.Add(-150*time.Second),ms:3000}
+ a.recent[1]=adaptiveRecentRTT{at:now.Add(-time.Second),ms:91}
+ a.recentNext=2
+ p50,p95,p99,max,slow250,slow1000:=a.recentRawRTTLocked(now)
+ if p50!=91||p95!=91||p99!=91||max!=91||slow250!=0||slow1000!=0{
+  t.Fatal("old RTT spikes contaminated the recent sample distribution")
+ }
+}

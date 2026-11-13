@@ -2,7 +2,7 @@
 
 [README فارسی](../README.md) · [English README](../README.en.md) · [Security policy](../SECURITY.md)
 
-**Version:** Manager 3.4.4 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
+**Version:** Manager 3.4.5 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
 
 **خلاصه:** Pingtunnel Manager فقط دو VPS دارد. کاربر به پورت TCP/UDP سرور ایران وصل می‌شود؛ هسته Go ترافیک را در ICMP رمزنگاری‌شده به VPS خارج می‌رساند و سرور خارج آن را به پورت سرویس محلی خودش تحویل می‌دهد. Rust تنها کارهای راه‌اندازی، ذخیره تنظیمات و کنترل systemd را انجام می‌دهد.
 
@@ -66,6 +66,12 @@ On Iran, encrypted frames are held in a FIFO queue bounded by **256 frames, 2 Mi
 For predominantly Iran→Foreign flows, Foreign sends an encrypted delivery receipt at most every eight seconds **only** while genuine authenticated incoming DATA has arrived within the previous ten seconds. Iran validates it using the existing session AEAD, which is useful evidence that Foreign received data and helps avoid an accidental reverse-to-direct switch during one-way traffic. Unsigned Echo Replies are not delivery evidence.
 
 Runtime JSON at `/run/pingtunnel-security.json` now reports `reverse_queue_packets`, `reverse_queue_bytes`, `reverse_queue_peak`, `reverse_queue_drops`, `reverse_write_failures`, `reverse_poll_interval_ms` and `reverse_last_data_age_seconds` along with the existing handshake and replay data. Do not treat incoming HMAC-verified polls alone as proof of a functioning reverse return path.
+
+## Upstream fair TCP underlay and raw tail diagnosis (v3.4.5)
+
+Reference: [esrrhs/pingtunnel upstream commit a557d216 (2026-11-08)](https://github.com/esrrhs/pingtunnel/tree/a557d2169ff8b13ca64f227b0549bbd6f1f84587). Its `underlay_share.go` avoids a single connection dumping its entire congestion window into the kernel ICMP buffer; FIFO underlay scheduling yields every **8 KiB of TCP FrameMgr payload**. The MSM Go overlay now uses one fair share **per client/server process**, across all TCP service aliases and all TCP send phases (initial, active and close/drain). This is send-side scheduling only; the 3-lane Multi-Port receive queue and independent UDP worker pool remain unchanged. Independent UDP traffic and authenticated controls **bypass** the TCP gate to avoid new video latency.
+
+Adaptive idle-loop scheduling reuses lazily allocated timers with the original 2–80/250ms bounds instead of repeated `time.After` allocations. Neither change modifies existing congestion-control or cryptographic semantics. `pingtunnel security` adds the cumulative `tcp_icmp_fair_turns`, `tcp_icmp_fair_contended` and `tcp_icmp_fair_max_wait_ms` counters. Adaptive performance now stores the most recent 128 *individual* authenticated ICMP RTT samples no older than 120s and reports raw P50/P95/P99/max, counts above 250ms/1000ms, rather than presenting only averages of smoothed RTT. A 1s application pause with no simultaneous probe can still evade detection.
 
 ## Direct ICMP kernel Echo reflection filtering (v3.4.4)
 
@@ -234,7 +240,7 @@ cargo test --locked --manifest-path Rust/Cargo.toml
 cargo build --locked --release --manifest-path Rust/Cargo.toml
 ~~~
 
-Release builds are verified with SHA256 and a release manifest specifying **manager 3.4.4 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The versioned release is [v3.4.4](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.4); rolling assets may also exist for compatibility.
+Release builds are verified with SHA256 and a release manifest specifying **manager 3.4.5 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The versioned release is [v3.4.5](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.5); rolling assets may also exist for compatibility.
 
 ## 8. Compatibility contract and limitations
 

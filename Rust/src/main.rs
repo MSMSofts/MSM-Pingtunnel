@@ -947,6 +947,15 @@ fn show_security_status() -> Result<()> {
         println!("  Mixed TCP DATA admission drops (cumulative; no blocking wait): {drops}");
         if drops>0 {println!("  NOTE: TCP FrameMgr retransmission must recover dropped encrypted application frames; check RTT and TCP throughput.");}
     }
+    if let (Some(turns),Some(contended),Some(max_wait))=(
+        report["tcp_icmp_fair_turns"].as_u64(),
+        report["tcp_icmp_fair_contended"].as_u64(),
+        report["tcp_icmp_fair_max_wait_ms"].as_u64()) {
+        println!("  Fair TCP ICMP scheduling: {turns} bounded turns, {contended} contended waits, max handoff {max_wait} ms");
+        if max_wait>250 {
+            println!("  NOTE: TCP shared-ICMP scheduling exceeded 250ms; inspect bulk load and kernel ICMP pressure.");
+        }
+    }
     if let (Some(udp_max),Some(tcp_max),Some(udp_slow),Some(tcp_slow))=(
         report["udp_dispatch_queue_max_delay_ms"].as_u64(),
         report["tcp_dispatch_queue_max_delay_ms"].as_u64(),
@@ -1099,6 +1108,17 @@ fn show_adaptive_status() -> Result<()> {
             println!("  Profile: {}", data["profile"].as_str().unwrap_or("unknown"));
             println!("  RTT: {} ms", data["rtt_ms"]);
             println!("  Jitter: {} ms", data["jitter_ms"]);
+            if let (Some(p50),Some(p95),Some(p99),Some(max),Some(over250),Some(over1000))=(
+                data["recent_raw_rtt_p50_ms"].as_f64(),
+                data["recent_raw_rtt_p95_ms"].as_f64(),
+                data["recent_raw_rtt_p99_ms"].as_f64(),
+                data["recent_raw_rtt_max_ms"].as_f64(),
+                data["recent_raw_rtt_over_250ms"].as_u64(),
+                data["recent_raw_rtt_over_1000ms"].as_u64()) {
+                println!("  Individual RTT probes (last up to 120s): P50 {p50:.1} / P95 {p95:.1} / P99 {p99:.1} / max {max:.1} ms");
+                println!("  Raw ICMP RTT probes over 250ms / over 1000ms: {over250} / {over1000}");
+                println!("  NOTE: individual ICMP probes are not an application end-to-end latency guarantee.");
+            }
             println!("  Probe loss estimate: {}", data["probe_loss_estimate"]);
             println!("  Samples: {}", data["rtt_samples"]);
             if let Some(age)=data["last_rtt_sample_age_seconds"].as_i64() {

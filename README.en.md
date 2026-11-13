@@ -2,7 +2,7 @@
 
 **An authenticated, encrypted ICMP tunnel for forwarding TCP/UDP traffic between two Linux VPSs, with a Go transport core and a Rust control menu.**
 
-[فارسی](README.md) · [Stable release: v3.4.4](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.4) · [All release notes](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0](LICENSE)
+[فارسی](README.md) · [Stable release: v3.4.5](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.5) · [All release notes](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0](LICENSE)
 
 ## Features
 
@@ -14,6 +14,19 @@
 - **Conservative compatibility:** config schema 3 and Wire v4, installation checks/rollback, experimental segmentation and UDP repair opt-in only.
 
 Pingtunnel **is not a VPN server**. It forwards traffic from multiple Iran-side TCP/UDP listeners over one encrypted ICMP tunnel to Foreign VPS loopback services. See the [Multi-Port setup guide](docs/MULTI_PORT.en.md) for port mapping, firewall and profile import/export.
+
+## v3.4.5 — Upstream-inspired fair ICMP TCP transmission
+
+Compared with [original esrrhs/pingtunnel](https://github.com/esrrhs/pingtunnel/tree/a557d2169ff8b13ca64f227b0549bbd6f1f84587), v3.4.4 had isolated TCP/UDP **receive** lanes but could still burst an entire bulk TCP FrameMgr window into the shared ICMP kernel socket. v3.4.5 introduces a **FIFO 8 KiB TCP send quantum** across connections on both peers, covering initial handshake, active transfer and close/drain.
+
+- **Independent UDP/control:** UDP and authenticated control bypass the TCP fairness gate; support for up to 12 mixed services remains.
+- **No unproven queue inflation:** 10,000 TCP, 256 UDP and 128 control frames stay unchanged. Wire v4, anti-replay, AEAD and FrameMgr resend/congestion decisions are preserved.
+- **Lower allocation pressure:** TCP idle loops reuse lazily allocated timers rather than allocating `time.After` on every spin.
+- **Measured tail:** `pingtunnel performance` reports individual ICMP RTT **P50/P95/P99/max** and probe samples over **250/1000ms** during the last 120 seconds. `security` reports fair TCP turns, contention and peak handoff wait.
+
+[Design details, regression tests and limitations](docs/RELEASE_NOTES_v3.4.5.md)
+
+**Scope:** Better fair transmission is not a promise of stall-free Instagram; real two-VPS tail latency and packet loss must still be correlated with playback.
 
 ## v3.4.4 — Separate Direct kernel Echo reflections from real authentication errors
 
@@ -112,7 +125,7 @@ Session and replay checks → decryption → data delivery
 
 ## Quick installation
 
-> **v3.4.4:** exact Direct ICMP kernel Echo reflection filtering and per-cause authentication diagnostics; preserving 12-service Multi-Port and secure Wire v4.
+> **v3.4.5:** fair 8KiB per-flow TCP ICMP send quanta, preserved UDP isolation, reusable idle timers, raw probe RTT tail.
 ### ⚠️ Important: install and set up the OVERSEAS VPS first
 
 > **Required first-time setup order: 1) Overseas VPS → 2) Iran VPS.**
@@ -124,7 +137,7 @@ Session and replay checks → decryption → data delivery
 Connect to the **overseas VPS** via SSH and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.4/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.5/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -136,7 +149,7 @@ Select **Foreign**, enter the Iran VPS public IPv4 address, choose **TCP or UDP*
 **Only after finishing overseas setup**, connect to the Iran VPS and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.4/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.5/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
