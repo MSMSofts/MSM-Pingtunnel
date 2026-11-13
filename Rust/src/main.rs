@@ -912,11 +912,12 @@ fn show_security_status() -> Result<()> {
     println!("  Pending key renegotiation: {}",report["pending_rekey"]);
     println!("  Replays rejected: {}",report["replay_drops"]);
     println!("  Authentication failures: {}",report["authentication_failures"]);
-    if let (Some(invalid),Some(session),Some(tag))=(
+    if let (Some(invalid),Some(session),Some(tag),Some(control))=(
         report["authentication_invalid_frame_failures"].as_u64(),
         report["authentication_wrong_session_failures"].as_u64(),
-        report["authentication_aead_tag_failures"].as_u64()) {
-        println!("    Breakdown — invalid frame / wrong session / AEAD tag: {invalid} / {session} / {tag}");
+        report["authentication_aead_tag_failures"].as_u64(),
+        report["authentication_control_failures"].as_u64()) {
+        println!("    Breakdown — invalid frame / wrong session / AEAD tag / handshake control: {invalid} / {session} / {tag} / {control}");
     }
     if let (Some(data),Some(ping),Some(other))=(
         report["direct_data_echo_reflections"].as_u64(),
