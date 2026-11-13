@@ -107,6 +107,7 @@ type Client struct {
 	cryptoConfig *CryptoConfig
 	congestion   string
 	adaptive     *AdaptivePerformance
+    tcpFairShare icmpTCPFairShare // per-core fair scheduling across all TCP Multi-Port flows
 
 	ipaddr  *net.UDPAddr
 	tcpaddr *net.TCPAddr
@@ -692,8 +693,12 @@ func (p *Client) acceptTcpConn(conn *net.TCPConn, targetAddr string, mode int, s
 		clientConn.fm.Update()
 		sendlist := clientConn.fm.GetSendList()
 		hadWork := sendlist.Len() > 0
-		for e := sendlist.Front(); e != nil; e = e.Next() {
-			f := e.Value.(*network.Frame)
+		frames := make([]*network.Frame,0,sendlist.Len())
+    for e := sendlist.Front(); e != nil; e = e.Next() {
+        frames=append(frames,e.Value.(*network.Frame))
+    }
+    p.tcpFairShare.emitFrames(frames,func(f *network.Frame) int {
+        
 			mb, _ := clientConn.fm.MarshalFrame(f)
 			
 			sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), targetAddr, clientConn.id, (uint32)(MyMsg_DATA), mb,
@@ -702,7 +707,9 @@ func (p *Client) acceptTcpConn(conn *net.TCPConn, targetAddr string, mode int, s
 				p.timeout, p.cryptoConfig)
 			p.sendPacket.Add(1)
 			p.sendPacketSize.Add(uint64(len(mb)))
-		}
+		
+        return len(mb)
+    })
 		now := common.GetNowUpdateInSecond()
 		diffclose := now.Sub(startConnectTime)
 		if diffclose > time.Second*15 {
@@ -791,12 +798,16 @@ mainLoop:
 		if sendlist.Len() > 0 {
 			hadWork = true
 			clientConn.activeSendUnixNano.Store(now.UnixNano())
-			for e := sendlist.Front(); e != nil; e = e.Next() {
-				f := e.Value.(*network.Frame)
+			frames := make([]*network.Frame,0,sendlist.Len())
+    for e := sendlist.Front(); e != nil; e = e.Next() {
+        frames=append(frames,e.Value.(*network.Frame))
+    }
+    p.tcpFairShare.emitFrames(frames,func(f *network.Frame) int {
+        
 				mb, err := clientConn.fm.MarshalFrame(f)
 				if err != nil {
 					loggo.Error("Error tcp Marshal %s %s %s", uuid, tcpsrcaddr.String(), err)
-					continue
+					return 0
 				}
 				
 				sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), targetAddr, clientConn.id, (uint32)(MyMsg_DATA), mb,
@@ -805,7 +816,9 @@ mainLoop:
 					0, p.cryptoConfig)
 				p.sendPacket.Add(1)
 				p.sendPacketSize.Add(uint64(len(mb)))
-			}
+			
+        return len(mb)
+    })
 			p.touchActivity()
 		}
 
@@ -884,8 +897,12 @@ mainLoop:
 		clientConn.fm.Update()
 
 		sendlist := clientConn.fm.GetSendList()
-		for e := sendlist.Front(); e != nil; e = e.Next() {
-			f := e.Value.(*network.Frame)
+		frames := make([]*network.Frame,0,sendlist.Len())
+    for e := sendlist.Front(); e != nil; e = e.Next() {
+        frames=append(frames,e.Value.(*network.Frame))
+    }
+    p.tcpFairShare.emitFrames(frames,func(f *network.Frame) int {
+        
 			mb, _ := clientConn.fm.MarshalFrame(f)
 			
 			sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), targetAddr, clientConn.id, (uint32)(MyMsg_DATA), mb,
@@ -894,7 +911,9 @@ mainLoop:
 				0, p.cryptoConfig)
 			p.sendPacket.Add(1)
 			p.sendPacketSize.Add(uint64(len(mb)))
-		}
+		
+        return len(mb)
+    })
 
 		nodatarecv := true
 		if clientConn.fm.GetRecvBufferSize() > 0 {
