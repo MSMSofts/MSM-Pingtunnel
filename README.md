@@ -2,7 +2,7 @@
 
 **تونل ICMP رمزنگاری‌شده برای انتقال ترافیک TCP/UDP بین یک VPS ایران و یک VPS خارج، با هستهٔ Go و مدیر Rust.**
 
-[English](README.en.md) · [نسخه پایدار: v3.4.3](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.3) · [توضیحات همه نسخه‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
+[English](README.en.md) · [نسخه پایدار: v3.4.4](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.4) · [توضیحات همه نسخه‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
 
 ## ویژگی‌ها
 
@@ -14,6 +14,14 @@
 - **قابل بازیابی:** پشتیبان‌گیری و اعتبارسنجی تنظیمات هنگام ارتقا؛ ویژگی‌های آزمایشی قطعه‌بندی و ترمیم UDP به‌طور پیش‌فرض غیرفعال‌اند.
 
 Pingtunnel **خودش سرور VPN نیست**؛ داده از Listenerهای TCP/UDP ایران با یک تونل ICMP رمزنگاری‌شده به سرویس‌های Loopback خارج منتقل می‌شود. برای راهنمای تنظیم ۱۲ سرویس و فایروال، [راهنمای Multi-Port](docs/MULTI_PORT.md) را ببینید.
+
+## نسخه 3.4.4 — تفکیک بازتاب کرنل از خطای واقعی رمزنگاری
+
+در **Manual Direct**، کرنل لینوکس سرور خارج ممکن است درخواست ICMP رمزنگاری‌شده ایران را *عیناً* Echo کند؛ این بازتاب با پاسخ واقعی برنامه متفاوت است. نسخه 3.4.3 فقط بازتاب‌های Reverse را تشخیص می‌داد. حالا **تنها پاسخ‌هایی که کل رمزمتن، Echo ID و شماره توالی‌شان با درخواست خروجی دقیقاً یکی است** قبل از رمزگشایی فیلتر می‌شوند؛ پاسخ واقعی همتا حذف نمی‌شود.
+
+دستور `sudo pingtunnel security` اکنون آمار **بازتاب‌های دقیق Direct (DATA/PING/سایر)** و تفکیک خطاهای **قالب نامعتبر / نشست اشتباه / برچسب AEAD / کنترل احراز هویت** را نشان می‌دهد. این تغییر به‌تنهایی ثابت نمی‌کند که مکث ۱ تا ۳ ثانیه‌ای اینستاگرام رفع شده است؛ آمارهای تجمعی باید هنگام مکث در بازه‌های زمانی مقایسه شوند.
+
+[جزئیات نسخه و روش آزمون](docs/RELEASE_NOTES_v3.4.4.md)
 
 ## نسخه 3.4.3 — رفع مکث UDP در Multi-Port
 
@@ -104,7 +112,7 @@ ICMP Echo Request / Echo Reply (Reverse یا Direct)
 
 ## نصب سریع
 
-> **نسخه 3.4.3:** جداسازی کامل دریافت و پردازش TCP/UDP/کنترل، حذف مکث صف مشترک و حفظ ۱۲ سرویس Multi-Port؛ هیچ پورتی در نصب تازه خودکار فعال نمی‌شود.\n
+> **نسخه 3.4.4:** تشخیص دقیق بازتاب ICMP Direct و نمایش منشأ خطای احراز اصالت، با حفظ Multi-Port دوازده‌سرویسی و Wire v4.
 ### ⚠️ بسیار مهم: حتماً ابتدا نصب و راه‌اندازی را روی سرور خارج انجام دهید
 
 > **ترتیب نصب اولیه را رعایت کنید: ۱) سرور خارج → ۲) سرور ایران.**
@@ -116,7 +124,7 @@ ICMP Echo Request / Echo Reply (Reverse یا Direct)
 ابتدا از طریق SSH به **سرور خارج** متصل شوید و نصب را اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.3/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.4/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -128,7 +136,7 @@ sudo pingtunnel setup
 **فقط پس از تکمیل مرحلهٔ خارج** به سرور ایران متصل شوید و اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.3/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.4/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~

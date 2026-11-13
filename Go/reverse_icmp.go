@@ -238,6 +238,9 @@ type reverseTransport struct {
     reflectedDataEchoes uint64
     reflectedPingEchoes uint64
     reflectedOtherEchoes uint64
+    directReflectedDataEchoes uint64
+    directReflectedPingEchoes uint64
+    directReflectedOtherEchoes uint64
     expiredEchoSignatures uint64
     capacityEvictedEchoSignatures uint64
     // The ring is chronological, bounded, and contains no ciphertext.
@@ -1095,7 +1098,17 @@ func (r *reverseTransport) cancelOutboundDataEcho(key reverseSentEchoSignature,a
 // Filter only an exact reflection of a recent foreign-origin encrypted
 // request. The current Iran->Foreign AEAD has independent direction keys;
 // real ACK frames must not be discarded based on the PTD4 prefix alone.
+// Existing tests and Reverse counters retain their legacy meaning.
 func (r *reverseTransport) filterReflectedDataEcho(id,seq int,payload []byte,now time.Time) bool {
+    return r.filterReflectedEncryptedEcho(id,seq,payload,now,false)
+}
+
+// In Direct, Iran originates encrypted Echo Requests. The Foreign Linux
+// kernel can echo them verbatim (type=0) before the application replies with
+// a different, correctly direction-encrypted frame. Filter only an exact
+// recent own-send digest + Echo ID/sequence. Separate counters prevent
+// mislabeling these as Reverse reflections.
+func (r *reverseTransport) filterReflectedEncryptedEcho(id,seq int,payload []byte,now time.Time,direct bool) bool {
     key:=reverseEchoSignature(id,seq,payload)
     r.mu.Lock()
     defer r.mu.Unlock()
@@ -1104,10 +1117,18 @@ func (r *reverseTransport) filterReflectedDataEcho(id,seq int,payload []byte,now
     if !ok || now.Before(record.at) || now.Sub(record.at)>reverseEchoTrackingWindow {
         return false
     }
-    switch record.kind {
-    case reverseEchoDATA: r.reflectedDataEchoes++
-    case reverseEchoPING: r.reflectedPingEchoes++
-    default: r.reflectedOtherEchoes++
+    if direct {
+        switch record.kind {
+        case reverseEchoDATA: r.directReflectedDataEchoes++
+        case reverseEchoPING: r.directReflectedPingEchoes++
+        default: r.directReflectedOtherEchoes++
+        }
+    } else {
+        switch record.kind {
+        case reverseEchoDATA: r.reflectedDataEchoes++
+        case reverseEchoPING: r.reflectedPingEchoes++
+        default: r.reflectedOtherEchoes++
+        }
     }
     return true
 }
@@ -1274,6 +1295,9 @@ type reverseDiagnostics struct {
     ReflectedDataEchoes uint64
     ReflectedPingEchoes uint64
     ReflectedOtherEchoes uint64
+    DirectReflectedDataEchoes uint64
+    DirectReflectedPingEchoes uint64
+    DirectReflectedOtherEchoes uint64
     OutboundEchoCacheEntries int
     ExpiredEchoSignatures uint64
     CapacityEvictedEchoSignatures uint64
@@ -1385,6 +1409,9 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
         ReflectedDataEchoes:r.reflectedDataEchoes,
         ReflectedPingEchoes:r.reflectedPingEchoes,
         ReflectedOtherEchoes:r.reflectedOtherEchoes,
+        DirectReflectedDataEchoes:r.directReflectedDataEchoes,
+        DirectReflectedPingEchoes:r.directReflectedPingEchoes,
+        DirectReflectedOtherEchoes:r.directReflectedOtherEchoes,
         OutboundEchoCacheEntries:len(r.outboundEchoes),
         ExpiredEchoSignatures:r.expiredEchoSignatures,
         CapacityEvictedEchoSignatures:r.capacityEvictedEchoSignatures,
