@@ -928,7 +928,7 @@ fn show_security_status() -> Result<()> {
         }
     }
     if let Some(drops)=report["tcp_dispatch_overflow_drops"].as_u64() {
-        println!("  Mixed TCP DATA admission drops (cumulative; bounded 2ms grace): {drops}");
+        println!("  Mixed TCP DATA admission drops (cumulative; no blocking wait): {drops}");
         if drops>0 {println!("  NOTE: TCP FrameMgr retransmission must recover dropped encrypted application frames; check RTT and TCP throughput.");}
     }
     if let (Some(udp_max),Some(tcp_max),Some(udp_slow),Some(tcp_slow))=(
