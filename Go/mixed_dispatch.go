@@ -1,6 +1,9 @@
 package pingtunnel
 
-import "sync/atomic"
+import (
+    "sync/atomic"
+    "time"
+)
 
 // v3.3.24 ran one application protocol per process. Mixed Multi-Port must
 // isolate TCP, UDP, and control through the *complete* receive/dispatch path:
@@ -8,6 +11,10 @@ import "sync/atomic"
 const mixedControlQueueCapacity = 128
 
 var tcpIngressOverflowDrops atomic.Uint64
+var mixedUDPQueueMaxDelayMs atomic.Uint64
+var mixedTCPQueueMaxDelayMs atomic.Uint64
+var mixedUDPQueueOver250ms atomic.Uint64
+var mixedTCPQueueOver250ms atomic.Uint64
 
 // Under sustained saturation, waiting even 2ms on each TCP frame can build
 // a multi-second ICMP read stall. The TCP FrameMgr already handles loss and
@@ -100,8 +107,29 @@ func runMixedDispatchLane(stop <-chan int, packets <-chan *Packet, handler func(
                 return
             }
             if packet != nil {
+                observeMixedDispatchDelay(packet)
                 handler(packet)
             }
         }
     }
+}
+
+func observeMixedDispatchDelay(packet *Packet) {
+    if packet == nil || packet.my == nil || packet.receivedAt.IsZero() {
+        return
+    }
+    age:=time.Since(packet.receivedAt)
+    if age<0 {return}
+    ms:=uint64(age/time.Millisecond)
+    if packet.my.Type!=int32(MyMsg_DATA) {return}
+    maxValue:=&mixedTCPQueueMaxDelayMs
+    slowValue:=&mixedTCPQueueOver250ms
+    if packet.my.Tcpmode==0 {
+        maxValue=&mixedUDPQueueMaxDelayMs
+        slowValue=&mixedUDPQueueOver250ms
+    }
+    for old:=maxValue.Load();ms>old;old=maxValue.Load() {
+        if maxValue.CompareAndSwap(old,ms) {break}
+    }
+    if age>250*time.Millisecond {slowValue.Add(1)}
 }
