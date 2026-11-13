@@ -51,6 +51,12 @@ const (
     // AND that its Echo Reply can reach Foreign.
     reverseDirectProbeInterval = 10 * time.Second
     directBackgroundProbeInterval = 60 * time.Second
+    // Before an authenticated session is discarded, verify that an alternate
+    // Direct ICMP path really works. Never use unauthenticated RTT alone.
+    directRecoveryProbeInterval = 10 * time.Second
+    directRecoveryStaleThreshold = 25 * time.Second
+    directVerifiedFallbackGrace = 60 * time.Second
+
     reverseProofMinInterval = 9 * time.Second
     reverseProofTTL = 25 * time.Second
     // After a failed takeover retry fresh independent proofs after a
@@ -419,7 +425,21 @@ func (r *reverseTransport) fallbackDirect(now time.Time, ready bool, lastAuthent
  if !lastAuthenticated.IsZero(){authenticatedAge=now.Sub(lastAuthenticated)}
  allowed:=false
  reason:=""
- if r.preference==ICMPAuto && r.selected==ICMPReverse && activeDemand {
+ // Accelerate recovery only when sustained user demand AND authenticated
+ // two-way silence persist, and two independent nonce-bound Direct PTC4/PDA4
+ // roundtrips have confirmed an actually working alternate path. A single
+ // ping, unsigned ICMP reply, idle session or momentary loss is insufficient.
+ if r.preference==ICMPAuto && r.selected==ICMPReverse && activeDemand &&
+    elapsed>=directVerifiedFallbackGrace &&
+    demandDuration>=directVerifiedFallbackGrace &&
+    authenticatedAge>=directVerifiedFallbackGrace &&
+    r.directProofConfirmations>=reverseRequiredProofs &&
+    !r.lastDirectProof.IsZero() && !now.Before(r.lastDirectProof) &&
+    now.Sub(r.lastDirectProof)<=reverseProofTTL {
+    allowed=true
+    reason="verified_direct_backup_reverse_feedback_stalled"
+ }
+ if !allowed && r.preference==ICMPAuto && r.selected==ICMPReverse && activeDemand {
      if ready {
          // Authenticated Reverse polls verify only Foreign -> Iran Echo
          // REQUEST delivery. They do not prove our Echo REPLIES or encrypted
@@ -672,11 +692,26 @@ func (r *reverseTransport) makeDirectProof(probe []byte) []byte {
 }
 // Low-rate, authenticated Direct reachability check; it never selects
 // Direct or resets the preferred Reverse session while healthy.
-func (r *reverseTransport) shouldProbeDirect(now time.Time,ready bool) bool {
+func (r *reverseTransport) shouldProbeDirect(now time.Time,ready bool,lastAuthenticated ...time.Time) bool {
     r.mu.Lock();defer r.mu.Unlock()
-    if (r.preference!=ICMPAuto && r.preference!=ICMPAutoDirect) || r.selected!=ICMPReverse || !ready{return false}
+    if (r.preference!=ICMPAuto && r.preference!=ICMPAutoDirect) || r.selected!=ICMPReverse{return false}
     cadence:=directBackgroundProbeInterval
     if r.preference==ICMPAutoDirect {cadence=reverseDirectProbeInterval}
+    // While existing user traffic has lost authenticated two-way feedback,
+    // use a short, rate-limited root-MACed Direct probe even if the 35s AEAD
+    // watchdog has already initiated a fresh handshake. This probe only
+    // proves reachability; fallbackDirect still requires TWO matched replies
+    // and a full 60s of uninterrupted demand/silence.
+    stalled:=false
+    if r.preference==ICMPAuto && len(lastAuthenticated)>0 &&
+        !lastAuthenticated[0].IsZero() && !now.Before(lastAuthenticated[0]) &&
+        now.Sub(lastAuthenticated[0])>=directRecoveryStaleThreshold &&
+        !r.demandSince.IsZero() && !r.lastDemand.IsZero() &&
+        !now.Before(r.lastDemand) && now.Sub(r.lastDemand)<=5*time.Second {
+        cadence=directRecoveryProbeInterval
+        stalled=true
+    }
+    if !ready && !stalled {return false}
     if !r.lastDirectProbe.IsZero() && now.Sub(r.lastDirectProbe)<cadence{return false}
     r.lastDirectProbe=now
     r.directProbeChecks++
