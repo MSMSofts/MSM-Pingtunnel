@@ -1,64 +1,107 @@
 package pingtunnel
 
-import (
-    "sync/atomic"
-    "time"
-)
+import "sync/atomic"
 
-// In mixed Multi-Port the ICMP reader is shared by TCP and UDP. A full
-// 10,000-entry TCP queue must never block the reader for the old 3-second
-// reliable-queue timeout: doing so also stalls unrelated UDP/game traffic.
-// This bounded overload policy applies ONLY to mixed TCP DATA. FrameMgr's
-// reliable TCP framing retransmits lost DATA; control messages are not dropped.
-// A short grace absorbs momentary full-queue scheduling races.
-const mixedTCPAdmissionGrace = 2 * time.Millisecond
+// v3.3.24 ran one application protocol per process. Mixed Multi-Port must
+// isolate TCP, UDP, and control through the *complete* receive/dispatch path:
+// separate channels alone do not help when one slow TCP handler is shared.
+const mixedControlQueueCapacity = 128
 
 var tcpIngressOverflowDrops atomic.Uint64
 
+// Under sustained saturation, waiting even 2ms on each TCP frame can build
+// a multi-second ICMP read stall. The TCP FrameMgr already handles loss and
+// retransmission, so shed an overflowing mixed TCP DATA frame immediately.
+// The legacy single-port reliable queue keeps its unchanged behavior.
 func enqueueMixedTCPData(queue chan<- *Packet, packet *Packet) bool {
+    select {
+    case queue <- packet:
+    default:
+        tcpIngressOverflowDrops.Add(1)
+    }
+    return true
+}
+
+// This queue is strictly for authenticated UDP DATA, never control. Replace
+// its oldest frame when full, so a stalled consumer resumes with recent
+// application packets instead of already-obsolete video/game datagrams.
+// Each evicted (or racing rejected) datagram is accounted for.
+func enqueueFreshMixedUDP(queue chan *Packet, packet *Packet) bool {
     select {
     case queue <- packet:
         return true
     default:
     }
-    timer := time.NewTimer(mixedTCPAdmissionGrace)
-    defer timer.Stop()
+    select {
+    case <-queue:
+        udpIngressOverflowDrops.Add(1)
+    default:
+        // A consumer may have drained the full queue in the meantime.
+    }
     select {
     case queue <- packet:
+    default:
+        udpIngressOverflowDrops.Add(1)
+    }
+    return true
+}
+
+// The mixed control lane and its goroutine never carry UDP data, avoiding
+// accidental eviction of a PING/KICK frame during a UDP overload. Control
+// remains reliable, with the established 3s fatal backpressure behavior
+// reserved for exceptional, fully saturated control traffic.
+func enqueueAuthenticatedPacketByTransport(
+    reliable chan<- *Packet,
+    udpRecv chan *Packet,
+    packet *Packet,
+    legacyUDP bool,
+    control ...chan<- *Packet,
+) bool {
+    if udpRecv == nil {
+        return enqueueICMPPacket(reliable, packet, legacyUDP)
+    }
+    if packet == nil || packet.my == nil {
+        return enqueueICMPPacket(reliable, packet, false)
+    }
+    if packet.my.Type == int32(MyMsg_DATA) {
+        if packet.my.Tcpmode == 0 {
+            if len(control) > 0 && control[0] != nil {
+                return enqueueFreshMixedUDP(udpRecv, packet)
+            }
+            // Compatibility with callers without a dedicated control lane:
+            // avoid evicting an uninspectable PING/KICK from this channel.
+            return enqueueICMPPacket(udpRecv, packet, true)
+        }
+        return enqueueMixedTCPData(reliable, packet)
+    }
+    if len(control) > 0 && control[0] != nil {
+        return enqueueICMPPacket(control[0], packet, false)
+    }
+    // Legacy helper compatibility: control may share the non-TCP channel,
+    // and must never be discarded during congestion.
+    select {
+    case reliable <- packet:
         return true
-    case <-timer.C:
-        tcpIngressOverflowDrops.Add(1)
-        return true
+    default:
+        return enqueueICMPPacket(udpRecv, packet, false)
     }
 }
 
-// Preserve the legacy single-port behavior. In mixed mode separate TCP and
-// UDP queues, and let control traffic bypass a full TCP queue via the short
-// UDP queue (which never silently drops authenticated control packets).
-func enqueueAuthenticatedPacketByTransport(
-    reliable chan<- *Packet,
-    udpRecv chan<- *Packet,
-    packet *Packet,
-    legacyUDP bool,
-) bool {
-    if udpRecv != nil {
-        if packet != nil && packet.my != nil {
-            if packet.my.Type == int32(MyMsg_DATA) {
-                if packet.my.Tcpmode == 0 {
-                    return enqueueICMPPacket(udpRecv,packet,true)
-                }
-                return enqueueMixedTCPData(reliable,packet)
+// Dedicated workers for all three packet classes prevent a 1s destination
+// connect, a slow TCP FrameMgr, or a congested thread-pool submission from
+// delaying UDP delivery. A closed stop channel broadcasts to every worker.
+func runMixedDispatchLane(stop <-chan int, packets <-chan *Packet, handler func(*Packet)) {
+    for {
+        select {
+        case <-stop:
+            return
+        case packet, ok := <-packets:
+            if !ok {
+                return
             }
-            // A full TCP DATA queue cannot hold back authenticated
-            // control traffic needed for session and flow recovery.
-            select {
-            case reliable <- packet:
-                return true
-            default:
-                return enqueueICMPPacket(udpRecv,packet,false)
+            if packet != nil {
+                handler(packet)
             }
         }
-        return enqueueICMPPacket(reliable,packet,false)
     }
-    return enqueueICMPPacket(reliable,packet,legacyUDP)
 }
