@@ -193,3 +193,23 @@ func TestMixedProtocolHandlersAreIndependent(t *testing.T) {
         }
     }
 }
+
+func TestMixedQueueWaitTelemetryDetectsLocalQuarterSecondDelay(t *testing.T) {
+    beforeUDP:=mixedUDPQueueOver250ms.Load()
+    beforeTCP:=mixedTCPQueueOver250ms.Load()
+    observed:=time.Now().Add(-310*time.Millisecond)
+    observeMixedDispatchDelay(&Packet{my:&MyMsg{Type:int32(MyMsg_DATA),Tcpmode:0},receivedAt:observed})
+    observeMixedDispatchDelay(&Packet{my:&MyMsg{Type:int32(MyMsg_DATA),Tcpmode:1},receivedAt:observed})
+    if mixedUDPQueueOver250ms.Load()!=beforeUDP+1 ||
+        mixedTCPQueueOver250ms.Load()!=beforeTCP+1 {
+        t.Fatal("slow UDP/TCP dispatch queue incidents were not observed")
+    }
+    if mixedUDPQueueMaxDelayMs.Load()<300 || mixedTCPQueueMaxDelayMs.Load()<300 {
+        t.Fatal("queue latency maximum did not record a 300ms backlog")
+    }
+    // Old legacy packets have no queue admission timestamp.
+    observeMixedDispatchDelay(&Packet{my:&MyMsg{Type:int32(MyMsg_DATA),Tcpmode:0}})
+    if mixedUDPQueueOver250ms.Load()!=beforeUDP+1 {
+        t.Fatal("legacy packet without timestamp generated a fake stall")
+    }
+}
