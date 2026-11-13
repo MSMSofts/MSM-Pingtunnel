@@ -176,6 +176,11 @@ jobs:
           # Also exercise legacy UDP queue policy with mixed TCP+UDP listeners.
           # Existing sizes, drop policy and scheduling remain untouched.
           sudo python3 Source/multi_port_smoke.py --binary "$PWD/dist/pingtunnel-core-linux-amd64" --modes direct reverse --queue-profile udp
+      - name: One-minute sustained mixed TCP/UDP regression
+        if: matrix.arch == 'amd64'
+        timeout-minutes: 5
+        run: |
+          sudo python3 Source/multi_port_smoke.py --binary "$PWD/dist/pingtunnel-core-linux-amd64" --modes direct --queue-profile tcp --soak-seconds 60
       - uses: actions/upload-artifact@v4
         with:
           name: go-core-${{ matrix.arch }}
