@@ -27,12 +27,12 @@ func TestVerifiedDirectBackupSpeedsRecoveryWithoutIdleSwitch(t *testing.T) {
             if !iran.acceptDirectProof(42,seq,ack,now) {t.Fatal("Direct reply failed matched proof")}
             proofs++
         }
-        if sec<60 && iran.fallbackDirect(now,ready,started) {
+        if sec<60 && iran.fallbackDirect(now,ready,started,true) {
             t.Fatalf("premature fallback at %d seconds",sec)
         }
     }
     if proofs<2 {t.Fatalf("only %d verified Direct proofs",proofs)}
-    if !iran.fallbackDirect(started.Add(61*time.Second),false,started) {
+    if !iran.fallbackDirect(started.Add(61*time.Second),false,started,true) {
         t.Fatal("confirmed Direct backup did not recover a 60s stalled Reverse")
     }
     if iran.direction()!=ICMPDirect {t.Fatal("failed to select the verified backup")}
@@ -45,8 +45,15 @@ func TestVerifiedDirectBackupRejectsMissingProofOrDemand(t *testing.T) {
         iran.noteDemand(started.Add(time.Duration(sec)*time.Second),true)
     }
     now:=started.Add(61*time.Second)
-    if iran.fallbackDirect(now,false,started) {
+    if iran.fallbackDirect(now,false,started,true) {
         t.Fatal("stalled Reverse without alternate authenticated proof switched early")
+    }
+    // Two valid path proofs alone are not enough when no new local user
+    // payload has been observed (an idle open TCP flow can stay quiet).
+    iran.directProofConfirmations=2
+    iran.lastDirectProof=now
+    if iran.fallbackDirect(now,false,started,false) {
+        t.Fatal("idle TCP flow triggered expedited failover")
     }
     idle,_:=routeTestPair(t,ICMPAuto,started)
     if idle.shouldProbeDirect(now,false,started) {
