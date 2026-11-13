@@ -23,6 +23,11 @@
 - The CI-resolved `Rust/Cargo.lock` is committed and all Rust tests/releases use `--locked`.
 - A separate opt-in sustained Linux namespace soak is provided; this does NOT substitute for real Iran/Foreign VPS gaming, latency or provider measurements.
 
+## CI acceptance (13 November 2026)
+- [GitHub Actions run 43441487148](https://github.com/MSMSofts/MSM-Pingtunnel/actions/runs/43441487148) passed Rust locked tests and amd64/arm64 builds; Go static build, unit tests, race verification and Linux namespace ICMP integration.
+- Manual Direct, AUTO Direct-first, Manual Reverse and AUTO Reverse-first each passed mixed 12-service TCP/UDP network trials. The 60-second continuous mixed workload completed 295 cycles and 1,180 successful application probes.
+- A separately defined scheduled/on-demand namespace soak allows up to 7,200 seconds of continuous testing; **that long-duration check and real Iran/Foreign field performance have not yet been established**. A successful synthetic run is not a guarantee against hour-long game latency spikes.
+
 ## Compatibility and validation
 Config schema **3** and authenticated Wire **4** are unchanged. Match the same release on both VPSs, preserve pairing keys, verify service-profile fingerprints, and measure real user traffic before assuming a performance improvement. A queue overflow is an overload signal, not a throughput guarantee. Only the dual-verified 60-second failure path is accelerated; otherwise fail-closed conservative timeouts remain. Direct/Reverse route policies, encryption, FEC, segmentation, BBR and TCP settings otherwise remain unchanged.
 
