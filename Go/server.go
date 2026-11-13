@@ -36,6 +36,9 @@ func NewServer(icmpAddr string, key int, maxconn int, maxprocessthread int, maxp
 	return s, nil
 }
 
+// Live server-side UDP parallelism for verification of legacy admission.
+var multiUDPLegacyWorkerCount atomic.Int64
+
 type Server struct {
 	exit             atomic.Bool
 	key              int
@@ -120,6 +123,7 @@ func (p *Server) Run() error {
             // parallelism (normally 100) instead of the mixed-mode 16 cap.
             // Keep UDP jobs in their own pool so concurrent TCP connects
             // cannot block these original hash-by-flow UDP worker lanes.
+            multiUDPLegacyWorkerCount.Store(int64(p.maxprocessthread))
             p.udpProcesstp=thread.NewThreadPool(p.maxprocessthread,p.maxprocessbuffer,func(v interface{}) {
                 p.processDataPacket(v.(*Packet))
             })
