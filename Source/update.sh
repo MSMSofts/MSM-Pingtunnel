@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
+# Use the installed manager's version-tag and immutable-commit verifier.
+# Never fetch and execute mutable main branch code with elevated privileges.
 set -Eeuo pipefail
-if (( EUID != 0 )); then echo "Run with sudo." >&2; exit 1; fi
-temp="$(mktemp)"
-trap 'rm -f "$temp"' EXIT
-curl -fsSL --retry 3 https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/main/Source/install.sh -o "$temp"
-bash "$temp"
+if (( EUID != 0 )); then echo "Run as root with sudo." >&2; exit 1; fi
+if [[ ! -x /usr/local/bin/pingtunnel ]]; then
+  echo "Missing Pingtunnel manager; install an explicitly tagged release first." >&2
+  exit 1
+fi
+exec /usr/local/bin/pingtunnel update
