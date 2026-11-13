@@ -24,8 +24,6 @@ const PERF_STATUS: &str = "/run/pingtunnel-performance.json";
 const SECURITY_STATUS: &str = "/run/pingtunnel-security.json";
 const UNIT: &str = "/etc/systemd/system/pingtunnel.service";
 const DROPIN: &str = "/etc/systemd/system/pingtunnel.service.d/memory.conf";
-const UPDATE_URL: &str =
-    "https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/main/Source/install.sh";
 
 fn failure(message: impl Into<String>) -> Box<dyn Error> {
     io::Error::new(io::ErrorKind::Other, message.into()).into()
@@ -371,27 +369,66 @@ fn apply_config() -> Result<()> {
     Ok(())
 }
 
+// Never execute mutable /main/Source/install.sh as root.
+// Resolve the latest published stable release to a concrete commit first.
+fn valid_release_tag(tag: &str) -> bool {
+    if tag.len() > 32 || !tag.starts_with('v') { return false; }
+    let parts: Vec<_> = tag[1..].split('.').collect();
+    parts.len()==3 && parts.iter().all(|part| !part.is_empty() &&
+        part.len()<=10 && part.bytes().all(|b| b.is_ascii_digit()))
+}
+fn valid_commit_sha(sha: &str) -> bool {
+    sha.len()==40 && sha.bytes().all(|b| b.is_ascii_hexdigit())
+}
+fn fetch_release_json(url: &str) -> Result<Value> {
+    let output=Command::new("curl").args(["--fail","--location","--silent",
+        "--show-error","--retry","3","--connect-timeout","10","--max-time","60",url]).output()?;
+    if !output.status.success() {return Err(failure(format!("GitHub metadata fetch failed: {url}")));}
+    Ok(serde_json::from_slice(&output.stdout)?)
+}
+fn latest_stable_commit() -> Result<(String,String)> {
+    const API:&str="https://api.github.com/repos/MSMSofts/MSM-Pingtunnel";
+    let release=fetch_release_json(&format!("{API}/releases/latest"))?;
+    if release["draft"].as_bool()!=Some(false) || release["prerelease"].as_bool()!=Some(false) {
+        return Err(failure("GitHub release is not published stable"));
+    }
+    let tag=release["tag_name"].as_str().ok_or_else(||failure("Release tag missing"))?;
+    if !valid_release_tag(tag) {return Err(failure("Refusing unsafe release tag"));}
+    let reference=fetch_release_json(&format!("{API}/git/ref/tags/{tag}"))?;
+    let mut object=&reference["object"];
+    let mut kind=object["type"].as_str().unwrap_or("");
+    let tagged;
+    if kind=="tag" {
+        let tag_sha=object["sha"].as_str().unwrap_or("");
+        if !valid_commit_sha(tag_sha) {return Err(failure("Invalid annotated tag hash"));}
+        tagged=fetch_release_json(&format!("{API}/git/tags/{tag_sha}"))?;
+        object=&tagged["object"];
+        kind=object["type"].as_str().unwrap_or("");
+    }
+    let sha=object["sha"].as_str().unwrap_or("");
+    if kind!="commit" || !valid_commit_sha(sha) {return Err(failure("Release ref is not a valid commit"));}
+    Ok((tag.to_owned(),sha.to_owned()))
+}
 fn update() -> Result<()> {
     root_required()?;
-    // mktemp creates a unique, root-owned file (avoids predictable /tmp names).
-    let created = Command::new("mktemp").output()?;
-    if !created.status.success() {
-        return Err(failure("mktemp failed."));
+    let (tag,commit)=latest_stable_commit()?;
+    println!("Stable release {tag}; source pinned to commit {commit}");
+    let created=Command::new("mktemp").output()?;
+    if !created.status.success(){return Err(failure("mktemp failed"));}
+    let temp=PathBuf::from(String::from_utf8(created.stdout)?.trim());
+    let pinned=format!("https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/{commit}/Source/install.sh");
+    let fetched=Command::new("curl").args(["--fail","--location","--silent",
+        "--show-error","--retry","3","--connect-timeout","10","--max-time","60",
+        &pinned,"-o"]).arg(&temp).status()?;
+    if !fetched.success(){
+        let _=fs::remove_file(&temp);
+        return Err(failure("Cannot download commit-pinned release installer"));
     }
-    let temp = PathBuf::from(String::from_utf8(created.stdout)?.trim());
-    let status = Command::new("curl")
-        .args(["--fail", "--location", "--silent", "--show-error", "--retry", "3", UPDATE_URL, "-o"])
-        .arg(&temp)
-        .status()?;
-    if !status.success() {
-        let _ = fs::remove_file(&temp);
-        return Err(failure("Failed to download update installer."));
-    }
-    let result = Command::new("bash").arg(&temp).status();
-    let _ = fs::remove_file(&temp);
-    if !result?.success() {
-        return Err(failure("Update installer failed."));
-    }
+    // Installer validates release manifest, both binary SHA256s, and core
+    // identity; it rolls back on failed process health verification.
+    let installed=Command::new("bash").arg(&temp).status();
+    let _=fs::remove_file(&temp);
+    if !installed?.success(){return Err(failure("Stable release installer failed"));}
     Ok(())
 }
 
@@ -1147,6 +1184,16 @@ fn main() {
 #[cfg(test)]
 mod tests{
     use super::*;
+
+    #[test]
+    fn updater_ref_input_validation() {
+        assert!(valid_release_tag("v3.4.2"));
+        for x in ["main","v3.4.2/../../main","v3.4.2-rc1","v3.4","v3.a.2"] {
+            assert!(!valid_release_tag(x));
+        }
+        assert!(valid_commit_sha("d8a338dc3503912992eb8268d3574c5912b37091"));
+        assert!(!valid_commit_sha("main"));
+    }
 
     #[test]
     fn uninstall_helpers_remove_files_and_directories_idempotently() {
