@@ -2,7 +2,7 @@
 
 [README فارسی](../README.md) · [English README](../README.en.md) · [Security policy](../SECURITY.md)
 
-**Version:** Manager 3.4.5 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
+**Version:** Manager 3.4.6 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
 
 **خلاصه:** Pingtunnel Manager فقط دو VPS دارد. کاربر به پورت TCP/UDP سرور ایران وصل می‌شود؛ هسته Go ترافیک را در ICMP رمزنگاری‌شده به VPS خارج می‌رساند و سرور خارج آن را به پورت سرویس محلی خودش تحویل می‌دهد. Rust تنها کارهای راه‌اندازی، ذخیره تنظیمات و کنترل systemd را انجام می‌دهد.
 
@@ -66,6 +66,14 @@ On Iran, encrypted frames are held in a FIFO queue bounded by **256 frames, 2 Mi
 For predominantly Iran→Foreign flows, Foreign sends an encrypted delivery receipt at most every eight seconds **only** while genuine authenticated incoming DATA has arrived within the previous ten seconds. Iran validates it using the existing session AEAD, which is useful evidence that Foreign received data and helps avoid an accidental reverse-to-direct switch during one-way traffic. Unsigned Echo Replies are not delivery evidence.
 
 Runtime JSON at `/run/pingtunnel-security.json` now reports `reverse_queue_packets`, `reverse_queue_bytes`, `reverse_queue_peak`, `reverse_queue_drops`, `reverse_write_failures`, `reverse_poll_interval_ms` and `reverse_last_data_age_seconds` along with the existing handshake and replay data. Do not treat incoming HMAC-verified polls alone as proof of a functioning reverse return path.
+
+## Restoring pre-Multi-Port UDP admission and processing (v3.4.6)
+
+The v3.3.24 codebase already used `packetQueueCapacity(true)==256` and `enqueueICMPPacket(queue, packet, true)` for authenticated UDP DATA. When saturated it **drops the newly arriving datagram** and retains the existing FIFO order; control frames wait rather than being deliberately evicted. v3.4.3's Multi-Port-specific `enqueueFreshMixedUDP` reversed this admission policy by evicting the **oldest accepted DATA** to admit the newest. That speculative change is removed: mixed UDP DATA now directly calls the identical legacy helper as single-service UDP.
+
+In the same pre-Multi-Port source, UDP-only server dispatch used the configured `maxprocessthread` worker pool (typically 100); mixed Multi-Port had capped the independent UDP pool at 16. The separate UDP pool now uses the **full configured worker count** to restore original per-flow hash worker parallelism while avoiding unrelated TCP connection dials. This is not an unbounded queue and does not change the 256 UDP queue capacity or port mappings.
+
+The 12-service mixed sender still shares a single ICMP socket and authenticated session, so exactly reproducing pre-Multi-Port per-process socket isolation requires a separate single-service deployment. Retain independent TCP/control receive lanes and the Wire v4 authentication, anti-replay and Echo reflection filters. No production-vs-previous throughput improvement is claimed without field A/B comparisons.
 
 ## Upstream fair TCP underlay and raw tail diagnosis (v3.4.5)
 
@@ -240,7 +248,7 @@ cargo test --locked --manifest-path Rust/Cargo.toml
 cargo build --locked --release --manifest-path Rust/Cargo.toml
 ~~~
 
-Release builds are verified with SHA256 and a release manifest specifying **manager 3.4.5 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The versioned release is [v3.4.5](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.5); rolling assets may also exist for compatibility.
+Release builds are verified with SHA256 and a release manifest specifying **manager 3.4.6 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The versioned release is [v3.4.6](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.6); rolling assets may also exist for compatibility.
 
 ## 8. Compatibility contract and limitations
 
