@@ -411,7 +411,7 @@ func (r *reverseTransport) acceptReverseSwitchProof(id,seq int,reply []byte,now 
 // *local user demand* and independently observed reverse-path failure.
 // The authenticated reverse polls are important: an idle AEAD session can
 // legitimately have no DATA for many minutes while the route stays healthy.
-func (r *reverseTransport) fallbackDirect(now time.Time, ready bool, lastAuthenticated time.Time) bool {
+func (r *reverseTransport) fallbackDirect(now time.Time, ready bool, lastAuthenticated time.Time, recentApplicationTraffic ...bool) bool {
  r.mu.Lock()
  reference:=r.started
  if !r.lastSwitch.IsZero(){reference=r.lastSwitch}
@@ -429,7 +429,10 @@ func (r *reverseTransport) fallbackDirect(now time.Time, ready bool, lastAuthent
  // two-way silence persist, and two independent nonce-bound Direct PTC4/PDA4
  // roundtrips have confirmed an actually working alternate path. A single
  // ping, unsigned ICMP reply, idle session or momentary loss is insufficient.
- if r.preference==ICMPAuto && r.selected==ICMPReverse && activeDemand &&
+ // An open but idle TCP socket is not proof of current application demand.
+ // The expedited path additionally requires genuinely recent local payload.
+ freshPayload:=len(recentApplicationTraffic)>0 && recentApplicationTraffic[0]
+ if r.preference==ICMPAuto && r.selected==ICMPReverse && activeDemand && freshPayload &&
     elapsed>=directVerifiedFallbackGrace &&
     demandDuration>=directVerifiedFallbackGrace &&
     authenticatedAge>=directVerifiedFallbackGrace &&
