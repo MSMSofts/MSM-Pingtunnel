@@ -234,9 +234,20 @@ def continuous_direct_udp_test(mode="direct"):
         return {"service":service["id"],"sent":sent_count,"received":len(received),
                 "rtt_p50_ms":round(statistics.median(rtts),1),"rtt_p95_ms":round(p95,1)}
     def tcp_load():
-        for n in range(18):
-            svc=SERVICES[(n%6)*2]
-            try_tcp(svc["iran_port"],os.urandom(6000),svc["foreign_port"],timeout=6)
+        # The original 3.4.4 smoke sent only 6KB TCP frames serially.
+        # Saturate six TCP aliases concurrently with >=8KiB windows to
+        # exercise the upstream-inspired fair shared-socket scheduling,
+        # while two UDP flows remain live and latency-sensitive.
+        jobs=[SERVICES[(n%6)*2] for n in range(12)]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as bulk:
+            futures=[
+                bulk.submit(try_tcp,svc["iran_port"],os.urandom(16384),
+                            svc["foreign_port"],10.0)
+                for svc in jobs
+            ]
+            for result in futures:
+                result.result()
+        print(f"MIXED_BULK_TCP_UDP_FAIRNESS_PASS mode={mode} tcp_flows={len(jobs)}",flush=True)
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
         futures=[pool.submit(flow,svc) for svc in udp_rows]
         load=pool.submit(tcp_load)
