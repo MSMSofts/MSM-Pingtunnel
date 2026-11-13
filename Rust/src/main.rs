@@ -947,6 +947,15 @@ fn show_security_status() -> Result<()> {
         println!("  Mixed TCP DATA admission drops (cumulative; no blocking wait): {drops}");
         if drops>0 {println!("  NOTE: TCP FrameMgr retransmission must recover dropped encrypted application frames; check RTT and TCP throughput.");}
     }
+    if let (Some(turns),Some(contended),Some(max_wait))=(
+        report["tcp_icmp_fair_turns"].as_u64(),
+        report["tcp_icmp_fair_contended"].as_u64(),
+        report["tcp_icmp_fair_max_wait_ms"].as_u64()) {
+        println!("  Fair TCP ICMP scheduling: {turns} bounded turns, {contended} contended waits, max handoff {max_wait} ms");
+        if max_wait>250 {
+            println!("  NOTE: TCP shared-ICMP scheduling exceeded 250ms; inspect bulk load and kernel ICMP pressure.");
+        }
+    }
     if let (Some(udp_max),Some(tcp_max),Some(udp_slow),Some(tcp_slow))=(
         report["udp_dispatch_queue_max_delay_ms"].as_u64(),
         report["tcp_dispatch_queue_max_delay_ms"].as_u64(),
