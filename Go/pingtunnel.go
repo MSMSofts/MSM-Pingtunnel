@@ -495,7 +495,8 @@ func recvICMPWithMixedUDP(workResultLock *sync.WaitGroup, exit *atomic.Bool, con
         }
         packet := &Packet{my: my,
             src: icmpSrcToIPAddr(srcaddr),
-            echoId: echoId, echoSeq: echoSeq}
+            echoId: echoId, echoSeq: echoSeq,
+            receivedAt: time.Now()}
         // TCP preserves the established fail-safe dispatcher behavior.
         // On UDP, forwarding seconds-old backlogged game/QUIC packets
         // increases latency. Bound the pending queue and drop ONLY UDP DATA
@@ -514,6 +515,7 @@ type Packet struct {
 	echoId    int
 	echoSeq   int
 	serviceID string // authenticated Multi-Port service identity, derived from Target alias
+    receivedAt time.Time // local authenticated enqueue timestamp for queue-delay metrics
 }
 
 const (
