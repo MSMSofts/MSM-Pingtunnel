@@ -2,7 +2,7 @@
 
 **تونل ICMP رمزنگاری‌شده برای انتقال ترافیک TCP/UDP بین یک VPS ایران و یک VPS خارج، با هستهٔ Go و مدیر Rust.**
 
-[English](README.en.md) · [نسخه پایدار: v3.4.4](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.4) · [توضیحات همه نسخه‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
+[English](README.en.md) · [نسخه پایدار: v3.4.5](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.5) · [توضیحات همه نسخه‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
 
 ## ویژگی‌ها
 
@@ -14,6 +14,19 @@
 - **قابل بازیابی:** پشتیبان‌گیری و اعتبارسنجی تنظیمات هنگام ارتقا؛ ویژگی‌های آزمایشی قطعه‌بندی و ترمیم UDP به‌طور پیش‌فرض غیرفعال‌اند.
 
 Pingtunnel **خودش سرور VPN نیست**؛ داده از Listenerهای TCP/UDP ایران با یک تونل ICMP رمزنگاری‌شده به سرویس‌های Loopback خارج منتقل می‌شود. برای راهنمای تنظیم ۱۲ سرویس و فایروال، [راهنمای Multi-Port](docs/MULTI_PORT.md) را ببینید.
+
+## نسخه 3.4.5 — عدالت ارسال ICMP بر اساس نسخه اصلی Pingtunnel
+
+منطق ارسال TCP را با [Pingtunnel اصلی](https://github.com/esrrhs/pingtunnel/tree/a557d2169ff8b13ca64f227b0549bbd6f1f84587) مقایسه کردیم. در 3.4.4 صف‌های دریافت TCP/UDP جدا بودند، اما اتصال TCP پرحجم می‌توانست تمام فریم‌های آماده را پشت‌سرهم به بافر ICMP بفرستد. نسخه 3.4.5 در هر دو VPS و در **تمام مراحل شروع اتصال، انتقال و پایان**، فریم‌های TCP را در نوبت‌های منصفانه **۸ کیلوبایتی** میان اتصال‌ها تقسیم می‌کند.
+
+- **UDP و پیام‌های کنترلی مستقل می‌مانند** و پشت نوبت‌دهی TCP قرار نمی‌گیرند؛ Multi-Port با حداکثر ۱۲ سرویس حفظ می‌شود.
+- **صف‌ها بی‌دلیل بزرگ نشده‌اند:** TCP همان ۱۰٬۰۰۰، UDP همان ۲۵۶ و کنترل همان ۱۲۸ باقی می‌ماند. الگوریتم ارسال مجدد و رمزنگاری تغییر نکرده است.
+- **بهینه‌سازی سربار:** تایمرهای حلقه TCP بازاستفاده می‌شوند و تخصیص مکرر `time.After` حذف شده است.
+- **تشخیص مکث واقعی:** `sudo pingtunnel performance` حالا صدک‌های **خام P50/P95/P99**، حداکثر RTT و جهش‌های بالای **۲۵۰ و ۱۰۰۰ میلی‌ثانیه** را در پنجره ۱۲۰ثانیه‌ای نشان می‌دهد. `security` هم تعداد نوبت‌های TCP، رقابت نوبت و بیشترین زمان انتظار را ثبت می‌کند.
+
+[توضیح فنی، تست‌ها و محدودیت‌ها](docs/RELEASE_NOTES_v3.4.5.md)
+
+**محدودیت:** این اصلاح، عدالت ارسال روی ICMP را بهتر می‌کند؛ رفع کامل مکث‌های اینستاگرام روی مسیر واقعی ایران/خارج هنوز باید با آزمایش عملی تأیید شود.
 
 ## نسخه 3.4.4 — تفکیک بازتاب کرنل از خطای واقعی رمزنگاری
 
@@ -112,7 +125,7 @@ ICMP Echo Request / Echo Reply (Reverse یا Direct)
 
 ## نصب سریع
 
-> **نسخه 3.4.4:** تشخیص دقیق بازتاب ICMP Direct و نمایش منشأ خطای احراز اصالت، با حفظ Multi-Port دوازده‌سرویسی و Wire v4.
+> **نسخه 3.4.5:** عدالت ارسال ICMP میان TCPها، نوبت‌های ۸KiB، حفظ جداسازی UDP و ثبت P99 خام RTT.
 ### ⚠️ بسیار مهم: حتماً ابتدا نصب و راه‌اندازی را روی سرور خارج انجام دهید
 
 > **ترتیب نصب اولیه را رعایت کنید: ۱) سرور خارج → ۲) سرور ایران.**
@@ -124,7 +137,7 @@ ICMP Echo Request / Echo Reply (Reverse یا Direct)
 ابتدا از طریق SSH به **سرور خارج** متصل شوید و نصب را اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.4/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.5/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -136,7 +149,7 @@ sudo pingtunnel setup
 **فقط پس از تکمیل مرحلهٔ خارج** به سرور ایران متصل شوید و اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.4/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.5/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
