@@ -19,7 +19,7 @@ Pingtunnel **is not a VPN server**. It forwards traffic from multiple Iran-side 
 
 In **Manual Direct**, the Foreign Linux kernel can echo Iran's outbound encrypted ICMP request *unchanged*, separately from the userspace application's legitimately re-encrypted reply. v3.4.3 only filtered exact Reverse-origin reflections. The Direct receiver now rejects **only an exact recent own ciphertext + ICMP Echo ID + sequence match**, after peer-IP pinning and before AEAD, without dropping the actual peer's independently authenticated ACK/DATA.
 
-`sudo pingtunnel security` now reports exact **Direct kernel Echo reflections (DATA/PING/other)** and distinguishes **invalid framing / wrong session / AEAD tag** failures. Cumulative counts alone do not establish the cause of Instagram buffering: measure timestamped deltas during a real pause.
+`sudo pingtunnel security` now reports exact **Direct kernel Echo reflections (DATA/PING/other)** and distinguishes **invalid framing / wrong session / AEAD tag / handshake MAC** failures. Cumulative counts alone do not establish the cause of Instagram buffering: measure timestamped deltas during a real pause.
 
 [Detailed release explanation and tests](docs/RELEASE_NOTES_v3.4.4.md)
 
