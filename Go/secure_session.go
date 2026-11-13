@@ -115,6 +115,7 @@ type secureSession struct{
  invalidFormatErrors uint64
  wrongSessionErrors uint64
  aeadTagErrors uint64
+ controlAuthErrors uint64
  replays uint64
  recoveries uint64
  // A verified new handshake is staged separately from the established
@@ -295,7 +296,7 @@ func (s *secureSession) handle(frame []byte,now time.Time)([]byte,error){
  if s.region=="foreign" && s.state==4 {
   if typ==helloClient {
    if len(body)!=5+16+32 || !verifyMAC(s.authenticationKey(),body,tag) {
-    s.errors++
+    s.errors++;s.controlAuthErrors++
     return nil,errors.New("unauthenticated reconnect hello")
    }
    var cid [16]byte
@@ -318,7 +319,7 @@ func (s *secureSession) handle(frame []byte,now time.Time)([]byte,error){
   }
   if typ==helloFinish && s.pending!=nil {
    result,err:=s.pending.handle(frame,now)
-   if err!=nil{s.errors++;s.aeadTagErrors++;return nil,err}
+   if err!=nil{s.errors++;s.controlAuthErrors++;return nil,err}
    if s.pending.state==4 {
     // Keep only a bounded recent-ID memory; old HMACed hellos are rejected
     // without allocating a candidate or disturbing the active data path.
@@ -350,7 +351,7 @@ func (s *secureSession) handle(frame []byte,now time.Time)([]byte,error){
  if typ==helloClient{
   if s.region!="foreign"||len(body)!=5+16+32{return nil,errors.New("invalid client hello")}
   var cid [16]byte;copy(cid[:],body[5:21])
-  if !verifyMAC(s.authenticationKey(),body,tag){s.errors++;return nil,errors.New("unauthenticated client hello")}
+  if !verifyMAC(s.authenticationKey(),body,tag){s.errors++;s.controlAuthErrors++;return nil,errors.New("unauthenticated client hello")}
   if s.state==4 && now.Sub(s.lastValid)<20*time.Second{return nil,nil}
   if s.state==3 && cid==s.clientID {
    reply:=controlBody(helloServer,s.clientID,s.serverID,s.serverPublic)
@@ -373,7 +374,7 @@ func (s *secureSession) handle(frame []byte,now time.Time)([]byte,error){
  if typ==helloServer{
   if s.region!="iran"||s.state!=1||len(body)!=5+16+16+32{return nil,errors.New("unexpected server hello")}
   if !bytes.Equal(body[5:21],s.clientID[:]) || !verifyMAC(s.authenticationKey(),body,tag){
-   s.errors++
+   s.errors++;s.controlAuthErrors++
    return nil,errors.New("untrusted server hello")
   }
   copy(s.serverID[:],body[21:37])
@@ -386,7 +387,7 @@ func (s *secureSession) handle(frame []byte,now time.Time)([]byte,error){
  if typ==helloFinish{
   if s.region!="foreign"||(s.state!=3&&s.state!=4)||len(body)!=5+16+16{return nil,errors.New("unexpected client finish")}
   if !bytes.Equal(body[5:21],s.clientID[:])||!bytes.Equal(body[21:37],s.serverID[:])||!verifyMAC(s.confirmKey,body,tag){
-   s.errors++
+   s.errors++;s.controlAuthErrors++
    return nil,errors.New("invalid client finish")
   }
   s.state=4;s.lastValid=now
@@ -396,7 +397,7 @@ func (s *secureSession) handle(frame []byte,now time.Time)([]byte,error){
  if typ==helloAck{
   if s.region!="iran"||s.state!=2||len(body)!=5+16+16{return nil,errors.New("unexpected server ack")}
   if !bytes.Equal(body[5:21],s.clientID[:])||!bytes.Equal(body[21:37],s.serverID[:])||!verifyMAC(s.confirmKey,body,tag){
-   s.errors++
+   s.errors++;s.controlAuthErrors++
    return nil,errors.New("untrusted server ack")
   }
   s.state=4;s.lastValid=now
@@ -486,7 +487,7 @@ func (s *secureSession) decrypt(frame []byte)([]byte,error){
  if s.state!=4||s.keys!=k {
   return nil,ErrSecureNegotiation
  }
- if err!=nil{s.errors++;return nil,err}
+ if err!=nil{s.errors++;s.aeadTagErrors++;return nil,err}
  if !k.replay.accept(seq){s.replays++;return nil,errors.New("replay or out-of-window sequence")}
  s.lastValid=time.Now()
  return plaintext,nil
@@ -662,6 +663,7 @@ type secureStatus struct{
  AuthInvalidFormat uint64 `json:"authentication_invalid_frame_failures"`
  AuthWrongSession uint64 `json:"authentication_wrong_session_failures"`
  AuthTagFailures uint64 `json:"authentication_aead_tag_failures"`
+ AuthControlFailures uint64 `json:"authentication_control_failures"`
  Recoveries uint64 `json:"recoveries"`
  PendingPackets uint64 `json:"pending_packets"`
  ExpiredOrOverflowPackets uint64 `json:"expired_or_overflow_packets"`
@@ -678,7 +680,7 @@ func (s *secureSession) status()secureStatus{
   LastValidAgeSeconds:age,PendingRekey:s.pending!=nil,
   ReplayDrops:s.replays,AuthFailures:s.errors,
   AuthInvalidFormat:s.invalidFormatErrors,AuthWrongSession:s.wrongSessionErrors,
-  AuthTagFailures:s.aeadTagErrors,
+  AuthTagFailures:s.aeadTagErrors,AuthControlFailures:s.controlAuthErrors,
   Recoveries:s.recoveries,PendingPackets:uint64(len(s.queued)),
   ExpiredOrOverflowPackets:s.queueDrops,
  }
