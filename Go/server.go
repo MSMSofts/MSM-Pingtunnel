@@ -479,6 +479,7 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
 	loggo.Info("start wait remote connect tcp %s %s", conn.id, conn.tcpaddrTarget.String())
 	startConnectTime := common.GetNowUpdateInSecond()
 	connectWait := newAdaptiveLoopWait(2*time.Millisecond, 80*time.Millisecond)
+    defer connectWait.stop()
 	for !p.exit.Load() && !conn.exit.Load() {
 		if conn.fm.IsConnected() {
 			break
@@ -519,7 +520,7 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
 		select {
 		case <-conn.activity:
 			connectWait.hit()
-		case <-time.After(wait):
+		case <-connectWait.arm(wait):
 		}
 	}
 
@@ -539,6 +540,7 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
 		defer common.CrashLog()
 
 		readWait := newAdaptiveLoopWait(2*time.Millisecond, 80*time.Millisecond)
+    defer readWait.stop()
 		for !p.exit.Load() && !conn.exit.Load() {
 			left := common.MinOfInt(conn.fm.GetSendBufferLeft(), len(bytes))
 			if left <= 0 {
@@ -549,7 +551,7 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
 				case <-conn.activity:
 					readWait.hit()
 					continue
-				case <-time.After(wait):
+				case <-readWait.arm(wait):
 					continue
 				}
 			}
@@ -579,6 +581,7 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
 	}()
 
 	loopWait := newAdaptiveLoopWait(2*time.Millisecond, 250*time.Millisecond)
+    defer loopWait.stop()
 
 mainLoop:
 	for !p.exit.Load() && !conn.exit.Load() {
@@ -671,7 +674,7 @@ mainLoop:
 					conn.fm.Close()
 					break mainLoop
 				}
-			case <-time.After(wait):
+			case <-loopWait.arm(wait):
 			}
 		} else {
 			loopWait.hit()
