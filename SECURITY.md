@@ -10,7 +10,7 @@
 
 | نسخه | وضعیت |
 | --- | --- |
-| **3.4.2** | نسخهٔ پیشنهادی پس از CI؛ کنترل اشباع صف TCP/UDP و دریافت آپدیت از Commit تغییرناپذیر انتشار پایدار |
+| **3.4.2** | نسخهٔ جدید پس از موفقیت CI؛ کنترل اشباع صف TCP/UDP و دریافت آپدیت از Commit تغییرناپذیر انتشار پایدار |
 | **3.4.1** | نسخه پایدار پیشین؛ جداسازی صف‌های TCP و UDP در Multi-Port |
 | **3.3.24** | نسخهٔ پایدار قبلی؛ اجرای اجباری AEAD در CLI، محدودسازی pprof به Loopback، صحت‌سنجی ارتباط همتا و کاهش رقابت قفل رمزنگاری |
 | **3.3.23** | نسخهٔ پایدار قبلی؛ بازیابی Direct و تست واقعی ICMP |
@@ -73,7 +73,7 @@
 
 ## English security notes
 
-Pingtunnel Manager uses a **custom authenticated ICMP transport**. Version **3.4.2** is the proposed release pending full CI and deployment checks. This project has **not been independently audited**, and encryption does **not** guarantee resistance to traffic analysis, ICMP blocking, denial of service, or endpoint compromise.
+Pingtunnel Manager uses a **custom authenticated ICMP transport**. Version **3.4.2** passed the repository's Rust, Go, race, namespace ICMP and short mixed-load CI. Real two-VPS field testing and an independent cryptographic audit are still outstanding. This project has **not been independently audited**, and encryption does **not** guarantee resistance to traffic analysis, ICMP blocking, denial of service, or endpoint compromise.
 
 **Supported security properties:** a random 256-bit pairing root, PSK-authenticated ephemeral X25519 agreement, HKDF-SHA256 directional session keys, auto-selected AES-256-GCM/XChaCha20-Poly1305, authenticated 64-bit sequence numbers, a 1,024-packet replay window, and an overseas server policy restricting ingress peer IPv4 and the forwarding target to local loopback.
 
