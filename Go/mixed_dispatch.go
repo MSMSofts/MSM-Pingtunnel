@@ -29,30 +29,11 @@ func enqueueMixedTCPData(queue chan<- *Packet, packet *Packet) bool {
     return true
 }
 
-// This queue is strictly for authenticated UDP DATA, never control. Replace
-// its oldest frame when full, so a stalled consumer resumes with recent
-// application packets instead of already-obsolete video/game datagrams.
-// Each evicted (or racing rejected) datagram is accounted for.
-func enqueueFreshMixedUDP(queue chan *Packet, packet *Packet) bool {
-    select {
-    case queue <- packet:
-        return true
-    default:
-    }
-    select {
-    case <-queue:
-        udpIngressOverflowDrops.Add(1)
-    default:
-        // A consumer may have drained the full queue in the meantime.
-    }
-    select {
-    case queue <- packet:
-    default:
-        udpIngressOverflowDrops.Add(1)
-    }
-    return true
-}
-
+// v3.3.24 UDP admission is strict FIFO with drop-INCOMING-DATA when full.
+ // The receiver does not evict an earlier accepted datagram to make room for
+ // a newer one; that speculative policy was introduced only after Multi-Port.
+ // The legacy helper is shared by single-port and mixed-port UDP lanes.
+ // Control messages continue on the independent reliable lane.
 // The mixed control lane and its goroutine never carry UDP data, avoiding
 // accidental eviction of a PING/KICK frame during a UDP overload. Control
 // remains reliable, with the established 3s fatal backpressure behavior
@@ -72,11 +53,10 @@ func enqueueAuthenticatedPacketByTransport(
     }
     if packet.my.Type == int32(MyMsg_DATA) {
         if packet.my.Tcpmode == 0 {
-            if len(control) > 0 && control[0] != nil {
-                return enqueueFreshMixedUDP(udpRecv, packet)
-            }
-            // Compatibility with callers without a dedicated control lane:
-            // avoid evicting an uninspectable PING/KICK from this channel.
+            // Exact v3.3.24 UDP DATA FIFO admission: never evict a queued
+            // packet; an overflowing incoming datagram is counted and dropped.
+            // Keeping the independent UDP dispatch lane prevents unrelated
+            // TCP connect/FrameMgr work from blocking this legacy path.
             return enqueueICMPPacket(udpRecv, packet, true)
         }
         return enqueueMixedTCPData(reliable, packet)
