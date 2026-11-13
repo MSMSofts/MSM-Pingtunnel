@@ -582,6 +582,10 @@ type secureStatus struct{
  ICMPCurrentPPS uint64 `json:"icmp_userspace_pps"`
  UDPQueueOverflowDrops uint64 `json:"udp_dispatch_overflow_drops"`
  TCPQueueOverflowDrops uint64 `json:"tcp_dispatch_overflow_drops"`
+ UDPQueueMaxDelayMs uint64 `json:"udp_dispatch_queue_max_delay_ms"`
+ TCPQueueMaxDelayMs uint64 `json:"tcp_dispatch_queue_max_delay_ms"`
+ UDPQueueDelayedOver250ms uint64 `json:"udp_dispatch_delayed_over_250ms"`
+ TCPQueueDelayedOver250ms uint64 `json:"tcp_dispatch_delayed_over_250ms"`
  UDPTruncatedDatagrams uint64 `json:"udp_truncated_datagrams"`
  ICMPPeakPPS uint64 `json:"icmp_userspace_peak_pps"`
  ReversePathProofs uint64 `json:"reverse_path_proofs"`
@@ -685,6 +689,10 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.ICMPUserspaceReplies=icmpRepliesSent.Load()
  report.UDPQueueOverflowDrops=udpIngressOverflowDrops.Load()
  report.TCPQueueOverflowDrops=tcpIngressOverflowDrops.Load()
+ report.UDPQueueMaxDelayMs=mixedUDPQueueMaxDelayMs.Load()
+ report.TCPQueueMaxDelayMs=mixedTCPQueueMaxDelayMs.Load()
+ report.UDPQueueDelayedOver250ms=mixedUDPQueueOver250ms.Load()
+ report.TCPQueueDelayedOver250ms=mixedTCPQueueOver250ms.Load()
  report.UDPTruncatedDatagrams=udpTruncatedDatagrams.Load()
  report.ICMPCurrentPPS,report.ICMPPeakPPS=icmpSentRate(time.Now())
  report.ReversePathProofs=diag.ReverseProofs

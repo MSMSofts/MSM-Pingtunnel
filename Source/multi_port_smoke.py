@@ -181,7 +181,7 @@ def shared_udp_source_test():
     print("MULTI_PORT_SAME_UDP_SOURCE_ISOLATION_PASS",flush=True)
 
 
-def continuous_direct_udp_test():
+def continuous_direct_udp_test(mode="direct"):
     """Sustained video-like UDP + concurrent TCP in manual Direct mode.
 
     Loopback namespace checks latency/loss under local CPU contention; not an
@@ -234,8 +234,8 @@ def continuous_direct_udp_test():
         return {"service":service["id"],"sent":sent_count,"received":len(received),
                 "rtt_p50_ms":round(statistics.median(rtts),1),"rtt_p95_ms":round(p95,1)}
     def tcp_load():
-        for n in range(8):
-            svc=SERVICES[0]
+        for n in range(18):
+            svc=SERVICES[(n%6)*2]
             try_tcp(svc["iran_port"],os.urandom(6000),svc["foreign_port"],timeout=6)
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
         futures=[pool.submit(flow,svc) for svc in udp_rows]
@@ -243,8 +243,9 @@ def continuous_direct_udp_test():
         for f in futures: reports.append(f.result())
         load.result()
     for report in reports:
-        print("MANUAL_DIRECT_UDP_CONTINUOUS "+json.dumps(report,sort_keys=True),flush=True)
-    print("MANUAL_DIRECT_TCP_UDP_CONCURRENT_STREAM_PASS",flush=True)
+        print(f"MIXED_UDP_CONTINUOUS mode={mode} "+json.dumps(report,sort_keys=True),flush=True)
+    print(f"MIXED_TCP_UDP_CONCURRENT_STREAM_PASS mode={mode}",flush=True)
+    if mode=="direct": print("MANUAL_DIRECT_TCP_UDP_CONCURRENT_STREAM_PASS",flush=True)
 
 def probe_all(mode):
     # Run a UDP warmup so the authenticated handshake is exercised before
@@ -264,8 +265,9 @@ def probe_all(mode):
         for future in concurrent.futures.as_completed(futures):
             print(json.dumps(future.result(),sort_keys=True),flush=True)
     shared_udp_source_test()
-    if mode=="direct":
-        continuous_direct_udp_test()
+    # Exercise continuous UDP video-style traffic against TCP traffic on
+    # all 6 TCP service aliases in each of the four route policies.
+    continuous_direct_udp_test(mode)
     print(f"{mode}: TWELVE_MIXED_TCP_UDP_SERVICES_PASS",flush=True)
 
 def soak_mixed(mode, seconds):

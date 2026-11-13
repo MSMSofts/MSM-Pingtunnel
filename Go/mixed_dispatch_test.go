@@ -1,6 +1,7 @@
 package pingtunnel
 
 import (
+    "sync"
     "testing"
     "time"
 )
@@ -98,5 +99,117 @@ func TestMixedTCPBurstBelowCapacityIsLossless(t *testing.T) {
     }
     if len(tcp)!=256 || tcpIngressOverflowDrops.Load()!=before {
         t.Fatal("normal TCP burst must not drop")
+    }
+}
+
+func TestMixedDropsOldUDPNotNewestWhenControlLaneIsolated(t *testing.T) {
+    reliable:=make(chan *Packet,1)
+    udp:=make(chan *Packet,3)
+    control:=make(chan *Packet,1)
+    for _,id:=range []string{"old-A","old-B","old-C","fresh-D"} {
+        packet:=&Packet{my:&MyMsg{Type:int32(MyMsg_DATA),Tcpmode:0,Id:id}}
+        if !enqueueAuthenticatedPacketByTransport(reliable,udp,packet,false,control) {
+            t.Fatal("UDP overflow must not stall the ICMP receiver")
+        }
+    }
+    got:=[]string{(<-udp).my.Id,(<-udp).my.Id,(<-udp).my.Id}
+    for i,id:=range []string{"old-B","old-C","fresh-D"} {
+        if got[i]!=id {t.Fatalf("expected fresh-only bounded queue, got %v",got)}
+    }
+    // Control is never enqueued in the evicting UDP lane.
+    ping:=&Packet{my:&MyMsg{Type:int32(MyMsg_PING)}}
+    if !enqueueAuthenticatedPacketByTransport(reliable,udp,ping,false,control) {
+        t.Fatal("authenticated control must not drop")
+    }
+    if got:=<-control;got!=ping {t.Fatal("control did not use dedicated lane")}
+    if len(reliable)!=0 {t.Fatal("control unexpectedly occupied the TCP lane")}
+}
+
+func TestMixedTCPSaturationNeverSpendsTwoMillisecondsPerPacket(t *testing.T) {
+    tcp:=make(chan *Packet,1)
+    udp:=make(chan *Packet,1)
+    control:=make(chan *Packet,1)
+    tcp<-&Packet{my:&MyMsg{Type:int32(MyMsg_DATA),Tcpmode:1}}
+    packet:=&Packet{my:&MyMsg{Type:int32(MyMsg_DATA),Tcpmode:1}}
+    start:=time.Now()
+    for i:=0;i<1000;i++{
+        if !enqueueAuthenticatedPacketByTransport(tcp,udp,packet,false,control) {
+            t.Fatal("mixed TCP overflow must be bounded and counted")
+        }
+    }
+    if time.Since(start)>400*time.Millisecond {
+        t.Fatal("1000 saturated TCP frames stalled the raw ICMP reader")
+    }
+    if len(udp)!=0 || len(control)!=0 {
+        t.Fatal("TCP overload contaminated UDP/control")
+    }
+}
+
+func TestMixedProtocolHandlersAreIndependent(t *testing.T) {
+    tcp:=make(chan *Packet,1)
+    udp:=make(chan *Packet,1)
+    control:=make(chan *Packet,1)
+    done:=make(chan int)
+    tcpEntered:=make(chan struct{})
+    releaseTCP:=make(chan struct{})
+    udpDelivered:=make(chan struct{})
+    controlDelivered:=make(chan struct{})
+    var wg sync.WaitGroup
+    wg.Add(3)
+    go func() {defer wg.Done();runMixedDispatchLane(done,tcp,func(*Packet) {
+        close(tcpEntered)
+        <-releaseTCP // simulate a 1s foreign TCP connect delay
+    })}()
+    go func() {defer wg.Done();runMixedDispatchLane(done,udp,func(*Packet) {
+        close(udpDelivered)
+    })}()
+    go func() {defer wg.Done();runMixedDispatchLane(done,control,func(*Packet) {
+        close(controlDelivered)
+    })}()
+    defer func(){close(releaseTCP);close(done);wg.Wait()}()
+    if !enqueueAuthenticatedPacketByTransport(tcp,udp,
+        &Packet{my:&MyMsg{Type:int32(MyMsg_DATA),Tcpmode:1}},false,control) {
+        t.Fatal("TCP enqueue")
+    }
+    select {
+    case <-tcpEntered:
+    case <-time.After(time.Second):t.Fatal("TCP worker not scheduled")
+    }
+    if !enqueueAuthenticatedPacketByTransport(tcp,udp,
+        &Packet{my:&MyMsg{Type:int32(MyMsg_DATA),Tcpmode:0}},false,control) {
+        t.Fatal("UDP enqueue")
+    }
+    if !enqueueAuthenticatedPacketByTransport(tcp,udp,
+        &Packet{my:&MyMsg{Type:int32(MyMsg_PING)}},false,control) {
+        t.Fatal("control enqueue")
+    }
+    timeout:=time.NewTimer(400*time.Millisecond)
+    defer timeout.Stop()
+    for udpDelivered!=nil || controlDelivered!=nil {
+        select {
+        case <-udpDelivered:udpDelivered=nil
+        case <-controlDelivered:controlDelivered=nil
+        case <-timeout.C:t.Fatal("blocked TCP prevented UDP or control delivery")
+        }
+    }
+}
+
+func TestMixedQueueWaitTelemetryDetectsLocalQuarterSecondDelay(t *testing.T) {
+    beforeUDP:=mixedUDPQueueOver250ms.Load()
+    beforeTCP:=mixedTCPQueueOver250ms.Load()
+    observed:=time.Now().Add(-310*time.Millisecond)
+    observeMixedDispatchDelay(&Packet{my:&MyMsg{Type:int32(MyMsg_DATA),Tcpmode:0},receivedAt:observed})
+    observeMixedDispatchDelay(&Packet{my:&MyMsg{Type:int32(MyMsg_DATA),Tcpmode:1},receivedAt:observed})
+    if mixedUDPQueueOver250ms.Load()!=beforeUDP+1 ||
+        mixedTCPQueueOver250ms.Load()!=beforeTCP+1 {
+        t.Fatal("slow UDP/TCP dispatch queue incidents were not observed")
+    }
+    if mixedUDPQueueMaxDelayMs.Load()<300 || mixedTCPQueueMaxDelayMs.Load()<300 {
+        t.Fatal("queue latency maximum did not record a 300ms backlog")
+    }
+    // Old legacy packets have no queue admission timestamp.
+    observeMixedDispatchDelay(&Packet{my:&MyMsg{Type:int32(MyMsg_DATA),Tcpmode:0}})
+    if mixedUDPQueueOver250ms.Load()!=beforeUDP+1 {
+        t.Fatal("legacy packet without timestamp generated a fake stall")
     }
 }

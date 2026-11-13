@@ -2,7 +2,7 @@
 
 **An authenticated, encrypted ICMP tunnel for forwarding TCP/UDP traffic between two Linux VPSs, with a Go transport core and a Rust control menu.**
 
-[فارسی](README.md) · [Stable release: v3.4.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.2) · [All release notes](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0](LICENSE)
+[فارسی](README.md) · [Stable release: v3.4.3](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.3) · [All release notes](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0](LICENSE)
 
 ## Features
 
@@ -15,16 +15,19 @@
 
 Pingtunnel **is not a VPN server**. It forwards traffic from multiple Iran-side TCP/UDP listeners over one encrypted ICMP tunnel to Foreign VPS loopback services. See the [Multi-Port setup guide](docs/MULTI_PORT.en.md) for port mapping, firewall and profile import/export.
 
-## What's new in v3.4.2 — latency and stability
+## v3.4.3 — Resolve mixed Multi-Port UDP head-of-line blocking
 
-- **Protect UDP under TCP overload:** In mixed Multi-Port, a full TCP queue cannot hold the shared ICMP receiver for the old 3-second timeout. TCP DATA admission has a bounded 2ms grace; excess frames are counted and dropped for the existing reliable TCP layer to recover. Queue capacities remain unchanged.
-- **Verified, guarded recovery:** AUTO Reverse-first can fail over at 60 seconds **only** after sustained real application traffic, missing authenticated feedback and two independent authenticated Direct path proofs. Idle TCP connections, unsigned pings and transient jitter cannot trigger this path.
-- **Pinned stable updates:** The Rust manager resolves the latest published stable release tag to its exact commit before fetching the installer. It no longer executes a mutable `main` installer as root.
-- **Reproducible builds and live ICMP CI:** Rust Cargo.lock, Go unit/race tests, namespace ICMP tests and 12 mixed services are included. The [60-second regression](https://github.com/MSMSofts/MSM-Pingtunnel/actions/runs/43441487148) completed 1,180 operations with no application errors; optional synthetic two-hour soak is available.
+**Why v3.3.24 felt smoother:** It effectively handled one application protocol per process. v3.4.3 added separate TCP/UDP receive channels but still had **one sequential packet processor and a shared Foreign worker pool**. A slow TCP destination dial or frame-processing task could therefore delay unrelated UDP/QUIC video packets.
 
-**What CI does not prove:** These are isolated Linux namespace tests, not real Iran/Overseas VPS game RTT or two-hour field reliability. Inspect `sudo pingtunnel security` and `Source/long_session_probe.py` on both VPSs. `tcp_dispatch_overflow_drops` and `udp_dispatch_overflow_drops` should remain near zero under ordinary demand.
+- **End-to-end protocol isolation:** TCP, UDP and authenticated control have separate dispatch workers on both peers. Foreign UDP also has a bounded dedicated keyed worker pool, separate from blocking TCP dial processing.
+- **Fresh UDP under saturation:** The unchanged 256-packet UDP queue now evicts the oldest UDP DATA on overflow to keep newer video/QUIC traffic; authenticated control has a separate reliable 128-packet lane and cannot be evicted as UDP.
+- **Immediate saturated TCP admission:** The 10,000-packet mixed TCP queue is unchanged; repeated 2ms waits when completely full are eliminated. Excess TCP DATA is counted and left to existing TCP FrameMgr retransmission.
+- **Operational evidence:** `sudo pingtunnel security` now shows maximum UDP/TCP local dispatch queue delay and counts of DATA frames waiting over 250ms. If those stay flat during app stalls, investigate ICMP shaping, upstream link loss, reverse polling and the application.
+- **Compatibility:** Four route policies, secure Wire 4, config schema 3, same pairing keys and up to 12 mixed services. Single-port legacy handling remains intact.
 
-[Complete v3.4.2 release notes](docs/RELEASE_NOTES_v3.4.2.md) · [Build and test checks](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
+[Full explanation and limitations](docs/RELEASE_NOTES_v3.4.3.md) · [CI and testing](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
+
+**Scope:** This targets one evidenced source of head-of-line stalls; it is not a guarantee of real-world Instagram or game performance on a particular two-VPS path.
 
 ## Choose a route policy
 
@@ -101,8 +104,7 @@ Session and replay checks → decryption → data delivery
 
 ## Quick installation
 
-> **v3.4.2:** protects the shared ICMP reader from mixed TCP saturation with bounded 2ms admission, counted TCP DATA drops and existing TCP reliability; keeps per-protocol queue capacities; new setups enable no ports implicitly and TCP 443 is not a suggestion.
-
+> **v3.4.3:** fully isolated TCP/UDP/control application lanes, preserved Multi-Port capacities and no implicit enabled service ports.\n
 ### ⚠️ Important: install and set up the OVERSEAS VPS first
 
 > **Required first-time setup order: 1) Overseas VPS → 2) Iran VPS.**
@@ -114,7 +116,7 @@ Session and replay checks → decryption → data delivery
 Connect to the **overseas VPS** via SSH and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.2/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.3/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -126,7 +128,7 @@ Select **Foreign**, enter the Iran VPS public IPv4 address, choose **TCP or UDP*
 **Only after finishing overseas setup**, connect to the Iran VPS and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.2/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.3/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~

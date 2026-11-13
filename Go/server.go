@@ -67,6 +67,7 @@ type Server struct {
 	reverseSequence atomic.Uint32
 
 	processtp   *thread.ThreadPool
+    udpProcesstp *thread.ThreadPool // independent of slow TCP connect workers
 	recvcontrol chan int
 }
 
@@ -108,15 +109,27 @@ func (p *Server) Run() error {
 
 	recv := make(chan *Packet, packetQueueCapacity(p.forwardProtocol == 0))
     var recvUDP chan *Packet
+    var recvControl chan *Packet
     if len(p.forwardServices) > 0 {
         recv = make(chan *Packet, packetQueueCapacity(false))
         recvUDP = make(chan *Packet, packetQueueCapacity(true))
+        recvControl = make(chan *Packet, mixedControlQueueCapacity)
+        if p.maxprocessthread > 0 {
+            // Hash-by-flow ordering remains, but UDP uses a bounded,
+            // independent worker pool so 1s TCP dial timeouts and slow
+            // TCP frame handlers cannot monopolize the UDP work queue.
+            udpThreads:=p.maxprocessthread
+            if udpThreads>16 {udpThreads=16}
+            p.udpProcesstp=thread.NewThreadPool(udpThreads,p.maxprocessbuffer,func(v interface{}) {
+                p.processDataPacket(v.(*Packet))
+            })
+        }
     }
 	p.recvcontrol = make(chan int, 1)
 	go func(){
         defer failOnUnexpectedWorkerExit("ICMP receiver",&p.exit)
         if recvUDP != nil {
-            recvICMPWithMixedUDP(&p.workResultLock,&p.exit,*p.conn,recv,recvUDP,p.cryptoConfig,false)
+            recvICMPWithMixedUDP(&p.workResultLock,&p.exit,*p.conn,recv,recvUDP,recvControl,p.cryptoConfig,false)
         } else {
             recvICMP(&p.workResultLock,&p.exit,*p.conn,recv,p.cryptoConfig,p.forwardProtocol == 0)
         }
@@ -138,6 +151,22 @@ func (p *Server) Run() error {
 		}
 	}()
 
+    if recvUDP != nil {
+        p.workResultLock.Add(2)
+        go func() {
+            defer p.workResultLock.Done()
+            defer common.CrashLog()
+            defer failOnUnexpectedWorkerExit("UDP ICMP dispatcher",&p.exit)
+            runMixedDispatchLane(p.recvcontrol,recvUDP,p.processPacket)
+        }()
+        go func() {
+            defer p.workResultLock.Done()
+            defer common.CrashLog()
+            defer failOnUnexpectedWorkerExit("control ICMP dispatcher",&p.exit)
+            runMixedDispatchLane(p.recvcontrol,recvControl,p.processPacket)
+        }()
+    }
+
 	go func() {
         defer common.CrashLog()
         defer failOnUnexpectedWorkerExit("ICMP dispatcher",&p.exit)
@@ -147,15 +176,8 @@ func (p *Server) Run() error {
 
 		for !p.exit.Load() {
             if recvUDP != nil {
-                select {
-                case <-p.recvcontrol:
-                    return
-                case r := <-recv:
-                    p.processPacket(r)
-                case r := <-recvUDP:
-                    p.processPacket(r)
-                }
-                continue
+                runMixedDispatchLane(p.recvcontrol,recv,p.processPacket)
+                return
             }
 			select {
 			case <-p.recvcontrol:
@@ -170,11 +192,12 @@ func (p *Server) Run() error {
 }
 
 func (p *Server) Stop() {
-	p.exit.Store(true)
-	p.recvcontrol <- 1
-	p.workResultLock.Wait()
-	p.processtp.Stop()
-	p.conn.Close()
+    if !p.exit.CompareAndSwap(false,true) { return }
+    close(p.recvcontrol) // broadcast to all three dispatch workers
+    p.workResultLock.Wait()
+    if p.udpProcesstp!=nil {p.udpProcesstp.Stop()}
+    if p.processtp!=nil {p.processtp.Stop()}
+    p.conn.Close()
 }
 
 func (p *Server) processPacket(packet *Packet) {
@@ -223,7 +246,12 @@ func (p *Server) processPacket(packet *Packet) {
 	}
 
 	if p.maxprocessthread > 0 {
-		p.processtp.AddJob((int)(common.HashString(packet.my.Id)), packet)
+        pool:=p.processtp
+        if packet.my.Type==int32(MyMsg_DATA) && packet.my.Tcpmode==0 &&
+            p.udpProcesstp!=nil {
+            pool=p.udpProcesstp
+        }
+		pool.AddJob((int)(common.HashString(packet.my.Id)), packet)
 	} else {
 		p.processDataPacket(packet)
 	}

@@ -367,15 +367,17 @@ func (p *Client) Run() error {
 
 	recv := make(chan *Packet, packetQueueCapacity(p.tcpmode == 0))
     var recvUDP chan *Packet
+    var recvControl chan *Packet
     if len(p.services) > 0 {
         recv = make(chan *Packet, packetQueueCapacity(false))
         recvUDP = make(chan *Packet, packetQueueCapacity(true))
+        recvControl = make(chan *Packet, mixedControlQueueCapacity)
     }
 	p.recvcontrol = make(chan int, 1)
 	go func(){
         defer failOnUnexpectedWorkerExit("ICMP receiver",&p.exit)
         if recvUDP != nil {
-            recvICMPWithMixedUDP(&p.workResultLock,&p.exit,*p.conn,recv,recvUDP,p.cryptoConfig,false)
+            recvICMPWithMixedUDP(&p.workResultLock,&p.exit,*p.conn,recv,recvUDP,recvControl,p.cryptoConfig,false)
         } else {
             recvICMP(&p.workResultLock,&p.exit,*p.conn,recv,p.cryptoConfig,p.tcpmode == 0)
         }
@@ -534,6 +536,24 @@ func (p *Client) Run() error {
 		}
 	}()
 
+    if recvUDP != nil {
+        // In v3.3.24, one process handled a single protocol. In Multi-Port
+        // a slow TCP handler must not block the UDP or control worker.
+        p.workResultLock.Add(2)
+        go func() {
+            defer p.workResultLock.Done()
+            defer common.CrashLog()
+            defer failOnUnexpectedWorkerExit("UDP ICMP dispatcher",&p.exit)
+            runMixedDispatchLane(p.recvcontrol,recvUDP,p.processPacket)
+        }()
+        go func() {
+            defer p.workResultLock.Done()
+            defer common.CrashLog()
+            defer failOnUnexpectedWorkerExit("control ICMP dispatcher",&p.exit)
+            runMixedDispatchLane(p.recvcontrol,recvControl,p.processPacket)
+        }()
+    }
+
 	go func() {
         defer common.CrashLog()
         defer failOnUnexpectedWorkerExit("ICMP dispatcher",&p.exit)
@@ -543,17 +563,8 @@ func (p *Client) Run() error {
 
 		for !p.exit.Load() {
             if recvUDP != nil {
-                // Go selects fairly among ready queues; no UDP packet can
-                // accumulate behind the TCP backlog inside one shared FIFO.
-                select {
-                case <-p.recvcontrol:
-                    return
-                case r := <-recv:
-                    p.processPacket(r)
-                case r := <-recvUDP:
-                    p.processPacket(r)
-                }
-                continue
+                runMixedDispatchLane(p.recvcontrol,recv,p.processPacket)
+                return
             }
 			select {
 			case <-p.recvcontrol:
@@ -568,12 +579,12 @@ func (p *Client) Run() error {
 }
 
 func (p *Client) Stop() {
-	p.exit.Store(true)
+    if !p.exit.CompareAndSwap(false,true) { return }
     // Multi-Port listeners exit immediately instead of blocking the shutdown
     // WaitGroup until their accept/read deadlines expire.
     for _, listener := range p.multiTCPListeners { _ = listener.Close() }
     for _, listener := range p.multiUDPListeners { _ = listener.Close() }
-	p.recvcontrol <- 1
+	close(p.recvcontrol) // broadcast to TCP, UDP and control dispatch workers
 	p.workResultLock.Wait()
 	p.conn.Close()
 	if p.tcplistenConn != nil {
