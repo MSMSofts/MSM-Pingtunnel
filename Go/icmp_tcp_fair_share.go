@@ -17,6 +17,10 @@ import (
 // a large TCP transfer must not delay latency-sensitive UDP traffic.
 const icmpTCPShareQuantum = 8 * 1024
 
+var tcpICMPFairTurns atomic.Uint64
+var tcpICMPFairContended atomic.Uint64
+var tcpICMPFairMaxWaitMs atomic.Uint64
+
 // The TCP fairness gate is per VPS core instance, not per service/port.
 // It covers connection-open, active stream, AND close/drain loops.
 type icmpTCPFairShare struct {
@@ -40,11 +44,15 @@ func (s *icmpTCPFairShare) lock() {
     waiter:=make(chan struct{})
     s.waiters=append(s.waiters,waiter)
     s.contended.Add(1)
+    tcpICMPFairContended.Add(1)
     s.mu.Unlock()
     <-waiter
     waited:=uint64(time.Since(start)/time.Millisecond)
     for old:=s.maxWaitMs.Load();waited>old;old=s.maxWaitMs.Load() {
         if s.maxWaitMs.CompareAndSwap(old,waited) {break}
+    }
+    for old:=tcpICMPFairMaxWaitMs.Load();waited>old;old=tcpICMPFairMaxWaitMs.Load() {
+        if tcpICMPFairMaxWaitMs.CompareAndSwap(old,waited) {break}
     }
 }
 
@@ -85,16 +93,8 @@ func (s *icmpTCPFairShare) emitFrames(frames []*network.Frame, send func(*networ
                 i++
             }
             s.turns.Add(1)
+            tcpICMPFairTurns.Add(1)
         }()
     }
 }
 
-// Collect the already-admitted FrameMgr frames without changing their order,
-// congestion window, or retransmission decisions. No FrameMgr lock is held
-// while a flow waits for its turn.
-func collectFairFrames(n int, next func(func(*network.Frame))) []*network.Frame {
-    if n<=0{return nil}
-    result:=make([]*network.Frame,0,n)
-    next(func(f *network.Frame) {result=append(result,f)})
-    return result
-}
