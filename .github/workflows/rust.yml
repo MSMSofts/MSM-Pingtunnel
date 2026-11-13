@@ -39,18 +39,11 @@ jobs:
         run: bash -n Source/*.sh
       - name: Verify Release notes migration script syntax
         run: python3 -m py_compile Source/publish_release_history.py
-      - name: Rust unit tests and dependency lock candidate
-        run: |
-          cargo test --manifest-path Rust/Cargo.toml
-          # The generated dependency resolution is included as a Base64 log
-          # artifact to allow pinning Cargo.lock in the next review commit.
-          echo CARGO_LOCK_BASE64_BEGIN
-          base64 -w0 Rust/Cargo.lock
-          echo
-          echo CARGO_LOCK_BASE64_END
+      - name: Rust reproducible dependency and unit tests
+        run: cargo test --locked --manifest-path Rust/Cargo.toml
       - name: Verify Auto Tune is not exposed through the CLI
         run: |
-          cargo run --quiet --manifest-path Rust/Cargo.toml -- --help > /tmp/pingtunnel-help
+          cargo run --locked --quiet --manifest-path Rust/Cargo.toml -- --help > /tmp/pingtunnel-help
           if grep -iq 'auto-tune' /tmp/pingtunnel-help; then
             echo "Auto Tune remains in CLI help" >&2
             exit 1
@@ -81,7 +74,7 @@ jobs:
       - name: Install musl compiler
         run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: Build
-        run: cargo build --release --manifest-path Rust/Cargo.toml --target "${{ matrix.target }}"
+        run: cargo build --locked --release --manifest-path Rust/Cargo.toml --target "${{ matrix.target }}"
       - name: Create checksum and asset
         run: |
           mkdir -p dist
