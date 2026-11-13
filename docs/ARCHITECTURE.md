@@ -2,7 +2,7 @@
 
 [README فارسی](../README.md) · [English README](../README.en.md) · [Security policy](../SECURITY.md)
 
-**Version:** Manager 3.4.2 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
+**Version:** Manager 3.4.3 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
 
 **خلاصه:** Pingtunnel Manager فقط دو VPS دارد. کاربر به پورت TCP/UDP سرور ایران وصل می‌شود؛ هسته Go ترافیک را در ICMP رمزنگاری‌شده به VPS خارج می‌رساند و سرور خارج آن را به پورت سرویس محلی خودش تحویل می‌دهد. Rust تنها کارهای راه‌اندازی، ذخیره تنظیمات و کنترل systemd را انجام می‌دهد.
 
@@ -66,6 +66,14 @@ On Iran, encrypted frames are held in a FIFO queue bounded by **256 frames, 2 Mi
 For predominantly Iran→Foreign flows, Foreign sends an encrypted delivery receipt at most every eight seconds **only** while genuine authenticated incoming DATA has arrived within the previous ten seconds. Iran validates it using the existing session AEAD, which is useful evidence that Foreign received data and helps avoid an accidental reverse-to-direct switch during one-way traffic. Unsigned Echo Replies are not delivery evidence.
 
 Runtime JSON at `/run/pingtunnel-security.json` now reports `reverse_queue_packets`, `reverse_queue_bytes`, `reverse_queue_peak`, `reverse_queue_drops`, `reverse_write_failures`, `reverse_poll_interval_ms` and `reverse_last_data_age_seconds` along with the existing handshake and replay data. Do not treat incoming HMAC-verified polls alone as proof of a functioning reverse return path.
+
+## Multi-Port latency isolation (v3.4.3 compared with v3.3.24)
+
+The 3.3.24 tunnel processed a single TCP **or** UDP ingress protocol per process. v3.4.1–3.4.2 allowed 12 mixed services and had two receive queues, but dispatched both through one sequential goroutine and Foreign's shared hash-sharded thread pool. Slow TCP connection setup (up to 1s per target) and frame processing could therefore cause UDP head-of-line blocking even with independent receive channel capacities.
+
+v3.4.3 separates **TCP DATA**, **UDP DATA**, and authenticated **PING/KICK control** into three packet processing goroutines on each peer. Foreign additionally routes UDP DATA to an independent 16-worker-maximum hash-by-flow thread pool, so a delayed TCP dial cannot monopolize a UDP worker. Under UDP receive overload the bounded 256-frame UDP queue evicts only the oldest UDP DATA, never an authenticated control frame. Control has a dedicated reliable queue of 128. TCP's unchanged 10,000-frame queue uses immediate overflow shedding in Multi-Port rather than multiplying 2ms waits; its reliable FrameMgr retransmits missing TCP frames. The original single-port dispatch behavior is unaffected.
+
+Queue troubleshooting: `pingtunnel security` exposes `udp_dispatch_queue_max_delay_ms` / `tcp_dispatch_queue_max_delay_ms` and counts exceeding 250ms. These measure **local post-authentication dispatch delay**, not IP/ICMP roundtrip time, remote service delay, or application buffering. Long-duration real two-VPS evidence is still required.
 
 ## 1. Responsibilities and boundaries
 
@@ -218,7 +226,7 @@ cargo test --locked --manifest-path Rust/Cargo.toml
 cargo build --locked --release --manifest-path Rust/Cargo.toml
 ~~~
 
-Release builds are verified with SHA256 and a release manifest specifying **manager 3.4.2 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The versioned release is [v3.4.2](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.2); rolling assets may also exist for compatibility.
+Release builds are verified with SHA256 and a release manifest specifying **manager 3.4.3 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The versioned release is [v3.4.3](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.3); rolling assets may also exist for compatibility.
 
 ## 8. Compatibility contract and limitations
 
