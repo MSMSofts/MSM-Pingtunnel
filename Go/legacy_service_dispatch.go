@@ -108,3 +108,25 @@ func (d *legacyServiceDispatch) start(stop <-chan int, wg *sync.WaitGroup,
         }()
     }
 }
+
+// Multi-Port Foreign replies in v3.4.6 encode MyMsg.Tcpmode=0 for BOTH
+// TCP and UDP responses. Prior to Multi-Port that was harmless because
+// the receiving process only ran one protocol. Resolve reply traffic
+// against the actual registered local connection instead of trusting the
+// legacy reply flag. This also permits a safe rolling upgrade of both VPSs.
+func (p *Client) routeAuthenticatedServiceReply(packet *Packet) *legacyServiceDispatchLane {
+    if p==nil || packet==nil || packet.my==nil || p.serviceIngress==nil {return nil}
+    conn:=p.getClientConnById(packet.my.Id)
+    if conn==nil {return nil}
+    return p.serviceIngress.lane(conn.serviceID,int32(conn.tcpmode))
+}
+
+// In the Foreign inbound direction, the client explicitly sets Tcpmode and
+// the authenticated opaque service target, and the pinned allowlist matches
+// those fields. Demux from the configured target, not an arbitrary host.
+func (p *Server) routeAuthenticatedServiceRequest(packet *Packet) *legacyServiceDispatchLane {
+    if p==nil || packet==nil || packet.my==nil || p.serviceIngress==nil {return nil}
+    target,ok:=p.forwardServices[packet.my.Target]
+    if !ok || int32(target.tcpMode)!=packet.my.Tcpmode {return nil}
+    return p.serviceIngress.lane(target.id,packet.my.Tcpmode)
+}
