@@ -72,6 +72,7 @@ type Server struct {
 
 	processtp   *thread.ThreadPool
     udpProcesstp *thread.ThreadPool // independent of slow TCP connect workers
+    serviceIngress *legacyServiceDispatch // private v3.3.24-sized queue per service
 	recvcontrol chan int
 }
 
@@ -118,6 +119,15 @@ func (p *Server) Run() error {
         recv = make(chan *Packet, packetQueueCapacity(false))
         recvUDP = make(chan *Packet, packetQueueCapacity(true))
         recvControl = make(chan *Packet, mixedControlQueueCapacity)
+        // Pre-Multi-Port: one TCP/UDP process had its own fixed-capacity
+        // dispatch queue. Recreate that isolation for EACH active service.
+        // The authenticated ICMP receiver remains unique for replay/AEAD.
+        protocols:=make(map[string]int,len(p.forwardServices))
+        for _,target:=range p.forwardServices {
+            protocols[target.id]=target.tcpMode
+        }
+        p.serviceIngress=newLegacyServiceDispatch(protocols)
+        activeServiceDispatch.Store(p.serviceIngress)
         if p.maxprocessthread > 0 {
             // Restore pre-Multi-Port v3.3.24's configured UDP worker
             // parallelism (normally 100) instead of the mixed-mode 16 cap.
@@ -133,7 +143,11 @@ func (p *Server) Run() error {
 	go func(){
         defer failOnUnexpectedWorkerExit("ICMP receiver",&p.exit)
         if recvUDP != nil {
-            recvICMPWithMixedUDP(&p.workResultLock,&p.exit,*p.conn,recv,recvUDP,recvControl,p.cryptoConfig,false)
+            // Foreign is authoritative for the authenticated, allowlisted
+            // service alias in the incoming DATA frame. A wrong protocol
+            // never obtains a service lane and fails normal policy checks.
+            route:=p.routeAuthenticatedServiceRequest
+            recvICMPWithServiceDispatch(&p.workResultLock,&p.exit,*p.conn,recv,recvUDP,recvControl,p.cryptoConfig,route,false)
         } else {
             recvICMP(&p.workResultLock,&p.exit,*p.conn,recv,p.cryptoConfig,p.forwardProtocol == 0)
         }
@@ -155,6 +169,9 @@ func (p *Server) Run() error {
 		}
 	}()
 
+    if p.serviceIngress!=nil {
+        p.serviceIngress.start(p.recvcontrol,&p.workResultLock,p.processPacket,&p.exit)
+    }
     if recvUDP != nil {
         p.workResultLock.Add(2)
         go func() {
@@ -197,8 +214,11 @@ func (p *Server) Run() error {
 
 func (p *Server) Stop() {
     if !p.exit.CompareAndSwap(false,true) { return }
-    close(p.recvcontrol) // broadcast to all three dispatch workers
+    close(p.recvcontrol) // broadcast to all per-service and fallback workers
     p.workResultLock.Wait()
+    if p.serviceIngress!=nil {
+        activeServiceDispatch.CompareAndSwap(p.serviceIngress,nil)
+    }
     if p.udpProcesstp!=nil {p.udpProcesstp.Stop()}
     if p.processtp!=nil {p.processtp.Stop()}
     p.conn.Close()
@@ -499,7 +519,7 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
 			mb, _ := conn.fm.MarshalFrame(f)
 			echoID,echoSeq:=p.applicationEchoIdentity(int(conn.echoId.Load()),int(conn.echoSeq.Load()))
             sendICMP(echoID, echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
-				conn.rproto, -1, p.key, 0,
+				conn.rproto, -1, p.key, conn.tcpmode,
 				0, 0, 0, 0, 0,
 				0, p.cryptoConfig)
 			p.sendPacket.Add(1)
@@ -610,7 +630,7 @@ mainLoop:
 				}
 				echoID,echoSeq:=p.applicationEchoIdentity(int(conn.echoId.Load()),int(conn.echoSeq.Load()))
             sendICMP(echoID, echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
-					conn.rproto, -1, p.key, 0,
+					conn.rproto, -1, p.key, conn.tcpmode,
 					0, 0, 0, 0, 0,
 					0, p.cryptoConfig)
 				p.sendPacket.Add(1)
@@ -703,7 +723,7 @@ mainLoop:
 			mb, _ := conn.fm.MarshalFrame(f)
 			echoID,echoSeq:=p.applicationEchoIdentity(int(conn.echoId.Load()),int(conn.echoSeq.Load()))
             sendICMP(echoID, echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
-				conn.rproto, -1, p.key, 0,
+				conn.rproto, -1, p.key, conn.tcpmode,
 				0, 0, 0, 0, 0,
 				0, p.cryptoConfig)
 			p.sendPacket.Add(1)
@@ -793,7 +813,7 @@ func (p *Server) Recv(conn *ServerConn, id string, src *net.IPAddr) {
 
 		echoID,echoSeq:=p.applicationEchoIdentity(int(conn.echoId.Load()),int(conn.echoSeq.Load()))
             sendICMP(echoID, echoSeq, *p.conn, src, targetAddr, id, (uint32)(MyMsg_DATA), payload,
-			conn.rproto, -1, p.key, 0,
+			conn.rproto, -1, p.key, conn.tcpmode,
 			0, 0, 0, 0, 0,
 			0, p.cryptoConfig)
 

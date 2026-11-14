@@ -108,6 +108,7 @@ type Client struct {
 	congestion   string
 	adaptive     *AdaptivePerformance
     tcpFairShare icmpTCPFairShare // per-core fair scheduling across all TCP Multi-Port flows
+    serviceIngress *legacyServiceDispatch // private v3.3.24-sized queue per service
 
 	ipaddr  *net.UDPAddr
 	tcpaddr *net.TCPAddr
@@ -373,12 +374,26 @@ func (p *Client) Run() error {
         recv = make(chan *Packet, packetQueueCapacity(false))
         recvUDP = make(chan *Packet, packetQueueCapacity(true))
         recvControl = make(chan *Packet, mixedControlQueueCapacity)
+        protocols:=make(map[string]int,len(p.services))
+        for _,service:=range p.services {
+            if !service.Enabled {continue}
+            mode:=0
+            if service.Protocol=="tcp" {mode=1}
+            protocols[service.ID]=mode
+        }
+        p.serviceIngress=newLegacyServiceDispatch(protocols)
+        activeServiceDispatch.Store(p.serviceIngress)
     }
 	p.recvcontrol = make(chan int, 1)
 	go func(){
         defer failOnUnexpectedWorkerExit("ICMP receiver",&p.exit)
         if recvUDP != nil {
-            recvICMPWithMixedUDP(&p.workResultLock,&p.exit,*p.conn,recv,recvUDP,recvControl,p.cryptoConfig,false)
+            // Before Multi-Port this process knew its one protocol.
+            // Foreign previously tagged ALL DATA replies as tcpmode=0,
+            // even real TCP frames; classify by the registered local
+            // connection, never the remote, potentially legacy mode byte.
+            route:=p.routeAuthenticatedServiceReply
+            recvICMPWithServiceDispatch(&p.workResultLock,&p.exit,*p.conn,recv,recvUDP,recvControl,p.cryptoConfig,route,false)
         } else {
             recvICMP(&p.workResultLock,&p.exit,*p.conn,recv,p.cryptoConfig,p.tcpmode == 0)
         }
@@ -537,6 +552,9 @@ func (p *Client) Run() error {
 		}
 	}()
 
+    if p.serviceIngress!=nil {
+        p.serviceIngress.start(p.recvcontrol,&p.workResultLock,p.processPacket,&p.exit)
+    }
     if recvUDP != nil {
         // In v3.3.24, one process handled a single protocol. In Multi-Port
         // a slow TCP handler must not block the UDP or control worker.
@@ -585,8 +603,11 @@ func (p *Client) Stop() {
     // WaitGroup until their accept/read deadlines expire.
     for _, listener := range p.multiTCPListeners { _ = listener.Close() }
     for _, listener := range p.multiUDPListeners { _ = listener.Close() }
-	close(p.recvcontrol) // broadcast to TCP, UDP and control dispatch workers
+	close(p.recvcontrol) // broadcast to all per-service and fallback workers
 	p.workResultLock.Wait()
+    if p.serviceIngress!=nil {
+        activeServiceDispatch.CompareAndSwap(p.serviceIngress,nil)
+    }
 	p.conn.Close()
 	if p.tcplistenConn != nil {
 		p.tcplistenConn.Close()

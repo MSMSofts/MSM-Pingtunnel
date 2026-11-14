@@ -937,6 +937,21 @@ fn show_security_status() -> Result<()> {
     if let Some(oversize)=report["reverse_oversized_drops"].as_u64() {
         println!("  Reverse encrypted frames rejected (>10,240 bytes): {oversize}");
     }
+    if let Some(lanes)=report["per_service_dispatch_lanes"].as_object() {
+        println!("  Isolated pre-Multi-Port service queues (TCP: 10000 / UDP: 256):");
+        let mut names:Vec<&String>=lanes.keys().collect();
+        names.sort();
+        for id in names {
+            let lane=&lanes[id];
+            println!("    {} {}: {}/{} pending, {} admission drops",
+                id,
+                lane["protocol"].as_str().unwrap_or("?"),
+                lane["queued"].as_u64().unwrap_or(0),
+                lane["capacity"].as_u64().unwrap_or(0),
+                lane["drops"].as_u64().unwrap_or(0));
+        }
+        println!("  NOTE: service queues are separate; the physical authenticated ICMP socket remains shared.");
+    }
     if let Some(policy)=report["udp_dispatch_policy"].as_str() {
         println!("  UDP forwarding admission: {policy}");
         println!("  Legacy v3.3.24 UDP: FIFO, 256 pending datagrams, drop incoming DATA when full; no oldest-frame eviction.");

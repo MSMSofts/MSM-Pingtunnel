@@ -258,9 +258,18 @@ func recvICMP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.Packe
     recvICMPWithMixedUDP(workResultLock,exit,conn,recv,nil,nil,cryptoConfig,udpMode...)
 }
 
-// Multi-Port retains the original short UDP DATA queue independently of TCP
-// and dedicates a bounded third lane to authenticated control traffic.
+// The historical helper remains for single-port and existing tests. Multi-
+// Port installs per-service lanes through recvICMPWithServiceDispatch below.
 func recvICMPWithMixedUDP(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.PacketConn, recv chan<- *Packet, udpRecv chan *Packet, controlRecv chan<- *Packet, cryptoConfig *CryptoConfig, udpMode ...bool) {
+    recvICMPWithServiceDispatch(workResultLock,exit,conn,recv,udpRecv,controlRecv,cryptoConfig,nil,udpMode...)
+}
+
+// Exactly one authenticated ICMP reader owns the socket, replay window and
+// fragment reassembler. Only AFTER authentication and complete reassembly
+// may a packet be classified into its dedicated per-service dispatch lane.
+// This avoids replicating the unsafe multi-raw-socket interpretation of the
+// pre-Multi-Port design, and keeps control on its reliable independent lane.
+func recvICMPWithServiceDispatch(workResultLock *sync.WaitGroup, exit *atomic.Bool, conn icmp.PacketConn, recv chan<- *Packet, udpRecv chan *Packet, controlRecv chan<- *Packet, cryptoConfig *CryptoConfig, route func(*Packet)*legacyServiceDispatchLane, udpMode ...bool) {
 
 	defer common.CrashLog()
 
@@ -518,6 +527,17 @@ func recvICMPWithMixedUDP(workResultLock *sync.WaitGroup, exit *atomic.Bool, con
         // increases latency. Bound the pending queue and drop ONLY UDP DATA
         // immediately on overflow; keep control messages on the safe path.
         latencySensitiveUDP := len(udpMode) > 0 && udpMode[0]
+        // The pre-Multi-Port process had a private TCP or UDP queue.
+        // Route authenticated DATA by its service alias/connection ID so
+        // S02 cannot consume S04's UDP buffer, nor S01 consume S03's TCP.
+        // Unknown/invalid aliases follow the existing fallback path where
+        // the pinned peer/allowed-target policy rejects them.
+        if packet.my.Type==int32(MyMsg_DATA) && route!=nil {
+            if lane:=route(packet);lane!=nil {
+                lane.admit(packet)
+                continue
+            }
+        }
         if !enqueueAuthenticatedPacketByTransport(recv,udpRecv,packet,latencySensitiveUDP,controlRecv) {
             loggo.Error("ICMP dispatcher blocked for 3s; restarting receiver")
             return

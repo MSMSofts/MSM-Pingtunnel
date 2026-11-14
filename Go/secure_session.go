@@ -587,6 +587,7 @@ type secureStatus struct{
  ICMPUserspaceReplies uint64 `json:"icmp_userspace_echo_replies"`
  ICMPCurrentPPS uint64 `json:"icmp_userspace_pps"`
  UDPDispatchPolicy string `json:"udp_dispatch_policy"`
+ ServiceDispatchLanes map[string]serviceDispatchLaneStatus `json:"per_service_dispatch_lanes,omitempty"`
  UDPLegacyServerWorkers int64 `json:"udp_legacy_server_workers,omitempty"`
  UDPQueueOverflowDrops uint64 `json:"udp_dispatch_overflow_drops"`
  TCPQueueOverflowDrops uint64 `json:"tcp_dispatch_overflow_drops"`
@@ -708,6 +709,9 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.ICMPUserspaceRequests=icmpRequestsSent.Load()
  report.ICMPUserspaceReplies=icmpRepliesSent.Load()
  report.UDPDispatchPolicy="v3.3.24-fifo-drop-new"
+ if lanes:=activeServiceDispatch.Load();lanes!=nil {
+     report.ServiceDispatchLanes=lanes.snapshot()
+ }
  report.UDPLegacyServerWorkers=multiUDPLegacyWorkerCount.Load()
  report.UDPQueueOverflowDrops=udpIngressOverflowDrops.Load()
  report.TCPQueueOverflowDrops=tcpIngressOverflowDrops.Load()

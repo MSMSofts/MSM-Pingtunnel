@@ -2,7 +2,7 @@
 
 [README فارسی](../README.md) · [English README](../README.en.md) · [Security policy](../SECURITY.md)
 
-**Version:** Manager 3.4.6 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
+**Version:** Manager 3.4.7 · **persistent config schema:** 3 · **secure wire:** 4 · **topology:** exactly one Iran VPS and one overseas VPS.
 
 **خلاصه:** Pingtunnel Manager فقط دو VPS دارد. کاربر به پورت TCP/UDP سرور ایران وصل می‌شود؛ هسته Go ترافیک را در ICMP رمزنگاری‌شده به VPS خارج می‌رساند و سرور خارج آن را به پورت سرویس محلی خودش تحویل می‌دهد. Rust تنها کارهای راه‌اندازی، ذخیره تنظیمات و کنترل systemd را انجام می‌دهد.
 
@@ -66,6 +66,16 @@ On Iran, encrypted frames are held in a FIFO queue bounded by **256 frames, 2 Mi
 For predominantly Iran→Foreign flows, Foreign sends an encrypted delivery receipt at most every eight seconds **only** while genuine authenticated incoming DATA has arrived within the previous ten seconds. Iran validates it using the existing session AEAD, which is useful evidence that Foreign received data and helps avoid an accidental reverse-to-direct switch during one-way traffic. Unsigned Echo Replies are not delivery evidence.
 
 Runtime JSON at `/run/pingtunnel-security.json` now reports `reverse_queue_packets`, `reverse_queue_bytes`, `reverse_queue_peak`, `reverse_queue_drops`, `reverse_write_failures`, `reverse_poll_interval_ms` and `reverse_last_data_age_seconds` along with the existing handshake and replay data. Do not treat incoming HMAC-verified polls alone as proof of a functioning reverse return path.
+
+## Per-service v3.3.24 dispatch and TCP reply protocol fix (v3.4.7)
+
+After v3.4.3, Multi-Port received every encrypted TCP/UDP response on one shared ICMP socket and selected a *shared protocol queue* by `MyMsg.Tcpmode`. **All four Foreign DATA reply calls passed literal `0`** even for established TCP connections, a legacy artifact from the old single-protocol version. This caused TCP response frames to be admitted into the **UDP** dispatcher, sharing its 256-frame queue and loss policy with game/QUIC/video traffic.
+
+The corrected Foreign sender uses `conn.tcpmode` for all DATA replies. Iran additionally consults the authenticated **connection ID mapped to its own registered `ClientConn.tcpmode`** to route return frames robustly, even during rolling upgrade from a legacy mislabeled Foreign peer. The Foreign incoming direction uses the pinned, authenticated service alias and the explicitly supplied protocol as before, rejecting mismatches.
+
+Each enabled TCP or UDP service gets an independent dispatch goroutine and **10,000-frame TCP or 256-datagram UDP FIFO**, matching the original v3.3.24 per-process queue capacity. FIFO UDP drops newly arriving DATA when saturated and preserves already accepted frames. TCP saturation is shed per-service for FrameMgr retransmission rather than waiting for the original 3-second single-protocol TCP reader timeout (which would block all UDP over today's shared ICMP socket). The same authenticated ICMP receiver, AEAD/replay state, pinned peer and independent PING/KICK/control lane are kept. The security status adds a per-service queue occupancy/capacity/drop map for both VPSs.
+
+**Limitation:** service queue independence does NOT create independent kernel ICMP sockets, physical path bandwidth, or isolated secure sessions. Real two-VPS performance claims require measured before/after A/B tests.
 
 ## Restoring pre-Multi-Port UDP admission and processing (v3.4.6)
 
@@ -248,7 +258,7 @@ cargo test --locked --manifest-path Rust/Cargo.toml
 cargo build --locked --release --manifest-path Rust/Cargo.toml
 ~~~
 
-Release builds are verified with SHA256 and a release manifest specifying **manager 3.4.6 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The versioned release is [v3.4.6](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.6); rolling assets may also exist for compatibility.
+Release builds are verified with SHA256 and a release manifest specifying **manager 3.4.7 / config schema 3 / wire 4**. The installer rejects unexpected core identity before changing installed binaries. The versioned release is [v3.4.7](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.7); rolling assets may also exist for compatibility.
 
 ## 8. Compatibility contract and limitations
 
