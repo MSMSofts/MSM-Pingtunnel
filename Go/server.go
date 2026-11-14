@@ -146,11 +146,7 @@ func (p *Server) Run() error {
             // Foreign is authoritative for the authenticated, allowlisted
             // service alias in the incoming DATA frame. A wrong protocol
             // never obtains a service lane and fails normal policy checks.
-            route:=func(packet *Packet)*legacyServiceDispatchLane {
-                target,ok:=p.forwardServices[packet.my.Target]
-                if !ok || int32(target.tcpMode)!=packet.my.Tcpmode {return nil}
-                return p.serviceIngress.lane(target.id,packet.my.Tcpmode)
-            }
+            route:=p.routeAuthenticatedServiceRequest
             recvICMPWithServiceDispatch(&p.workResultLock,&p.exit,*p.conn,recv,recvUDP,recvControl,p.cryptoConfig,route,false)
         } else {
             recvICMP(&p.workResultLock,&p.exit,*p.conn,recv,p.cryptoConfig,p.forwardProtocol == 0)
