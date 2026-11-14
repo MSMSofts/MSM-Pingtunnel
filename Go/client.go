@@ -392,11 +392,7 @@ func (p *Client) Run() error {
             // Foreign previously tagged ALL DATA replies as tcpmode=0,
             // even real TCP frames; classify by the registered local
             // connection, never the remote, potentially legacy mode byte.
-            route:=func(packet *Packet)*legacyServiceDispatchLane {
-                conn:=p.getClientConnById(packet.my.Id)
-                if conn==nil {return nil}
-                return p.serviceIngress.lane(conn.serviceID,int32(conn.tcpmode))
-            }
+            route:=p.routeAuthenticatedServiceReply
             recvICMPWithServiceDispatch(&p.workResultLock,&p.exit,*p.conn,recv,recvUDP,recvControl,p.cryptoConfig,route,false)
         } else {
             recvICMP(&p.workResultLock,&p.exit,*p.conn,recv,p.cryptoConfig,p.tcpmode == 0)
