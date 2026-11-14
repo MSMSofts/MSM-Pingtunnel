@@ -187,7 +187,11 @@ def continuous_direct_udp_test(mode="direct"):
     Loopback namespace checks latency/loss under local CPU contention; not an
     estimate for a real Iran/Foreign Internet path. Keep production defaults.
     """
-    udp_rows=[SERVICES[1],SERVICES[3]]
+    # Run all six UDP services simultaneously: before v3.4.7 these shared
+    # one 256-packet queue even though v3.3.24 had one queue per process.
+    # TCP responses also carried the incorrect tcpmode=0 reply bit and
+    # could consume the old shared UDP queue. This exercises both bugs.
+    udp_rows=[svc for svc in SERVICES if svc["protocol"]=="udp"]
     sent_count=90
     packet_bytes=850
     reports=[]
@@ -237,7 +241,7 @@ def continuous_direct_udp_test(mode="direct"):
         # The original 3.4.4 smoke sent only 6KB TCP frames serially.
         # Saturate six TCP aliases concurrently with >=8KiB windows to
         # exercise the upstream-inspired fair shared-socket scheduling,
-        # while two UDP flows remain live and latency-sensitive.
+        # while all six UDP services remain live and latency-sensitive.
         jobs=[SERVICES[(n%6)*2] for n in range(12)]
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as bulk:
             futures=[
@@ -248,14 +252,14 @@ def continuous_direct_udp_test(mode="direct"):
             for result in futures:
                 result.result()
         print(f"MIXED_BULK_TCP_UDP_FAIRNESS_PASS mode={mode} tcp_flows={len(jobs)}",flush=True)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(udp_rows)+1) as pool:
         futures=[pool.submit(flow,svc) for svc in udp_rows]
         load=pool.submit(tcp_load)
         for f in futures: reports.append(f.result())
         load.result()
     for report in reports:
         print(f"MIXED_UDP_CONTINUOUS mode={mode} "+json.dumps(report,sort_keys=True),flush=True)
-    print(f"MIXED_TCP_UDP_CONCURRENT_STREAM_PASS mode={mode}",flush=True)
+    print(f"MIXED_TCP_UDP_CONCURRENT_STREAM_PASS mode={mode} isolated_udp_services={len(udp_rows)}",flush=True)
     if mode=="direct": print("MANUAL_DIRECT_TCP_UDP_CONCURRENT_STREAM_PASS",flush=True)
 
 def probe_all(mode):
