@@ -2,7 +2,7 @@
 
 **تونل ICMP رمزنگاری‌شده برای انتقال ترافیک TCP/UDP بین یک VPS ایران و یک VPS خارج، با هستهٔ Go و مدیر Rust.**
 
-[English](README.en.md) · [نسخه پایدار: v3.4.6](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.6) · [توضیحات همه نسخه‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
+[English](README.en.md) · [نسخه پایدار: v3.4.7](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.7) · [توضیحات همه نسخه‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
 
 ## ویژگی‌ها
 
@@ -14,6 +14,20 @@
 - **قابل بازیابی:** پشتیبان‌گیری و اعتبارسنجی تنظیمات هنگام ارتقا؛ ویژگی‌های آزمایشی قطعه‌بندی و ترمیم UDP به‌طور پیش‌فرض غیرفعال‌اند.
 
 Pingtunnel **خودش سرور VPN نیست**؛ داده از Listenerهای TCP/UDP ایران با یک تونل ICMP رمزنگاری‌شده به سرویس‌های Loopback خارج منتقل می‌شود. برای راهنمای تنظیم ۱۲ سرویس و فایروال، [راهنمای Multi-Port](docs/MULTI_PORT.md) را ببینید.
+
+## نسخه 3.4.7 — بازگشت واقعی صف‌ها و تفکیک اتصال‌ها به مدل قبل از Multi-Port
+
+در بررسی کد نسخه 3.3.24 یک ایراد مهم پیدا شد: **سرور خارج، پاسخ TCP را با نشانگر UDP ارسال می‌کرد**. چون Multi-Port برای تشخیص ترافیک از همین نشانگر استفاده می‌کرد، فریم‌های TCP ممکن بود وارد صف کوتاه UDP شوند و ترافیک بازی/ویدئو را مختل کنند.
+
+این نسخه در کنار اصلاح برچسب پروتکل، برای **هر سرویس فعال TCP و UDP یک صف جداگانه** می‌سازد:
+- برای هر TCP: ظرفیت **۱۰٬۰۰۰ فریم**؛ برای هر UDP: **۲۵۶ بسته FIFO** مثل نسخه 3.3.24.
+- شش پورت UDP دیگر با هم در یک صف ۲۵۶بسته‌ای رقابت نمی‌کنند. فریم‌های برگشتی TCP هم بر اساس نوع واقعی اتصال محلی شناسایی می‌شوند.
+- هسته هنوز **یک گیرنده رمزنگاری‌شده ICMP** دارد و کنترل‌های امنیتی Wire v4، مسیرهای Direct/Reverse و حداکثر ۱۲ سرویس حفظ شده‌اند.
+- در `sudo pingtunnel security` ظرفیت، عمق و حذف بسته‌های هر سرویس جداگانه دیده می‌شود.
+
+**مرز فنی:** هر سرویس صف مستقل دارد، اما همه هنوز از یک سوکت و مسیر ICMP عبور می‌کنند؛ در نتیجه این نسخه ادعای جداسازی کامل فیزیکی یا رفع قطعی تأخیر شبکه را ندارد. رفتار خطرناک انتظار ۳ثانیه‌ای TCP هنگام پرشدن صف، به گیرنده ICMP مشترک برگردانده نشده است.
+
+[علت اصلی، مقایسه و روش آزمون](docs/RELEASE_NOTES_v3.4.7.md)
 
 ## نسخه 3.4.6 — بازگشت منطق UDP به قبل از Multi-Port
 
@@ -138,7 +152,7 @@ ICMP Echo Request / Echo Reply (Reverse یا Direct)
 
 ## نصب سریع
 
-> **نسخه 3.4.6:** بازگشت صف UDP به FIFO نسخه 3.3.24 و حذف سقف ۱۶ worker پس از Multi-Port؛ بدون تغییر Wire 4.
+> **نسخه 3.4.7:** برچسب‌گذاری درست پاسخ TCP، صف مستقل برای هر سرویس و جلوگیری از ورود فریم‌های TCP به صف UDP.
 ### ⚠️ بسیار مهم: حتماً ابتدا نصب و راه‌اندازی را روی سرور خارج انجام دهید
 
 > **ترتیب نصب اولیه را رعایت کنید: ۱) سرور خارج → ۲) سرور ایران.**
@@ -150,7 +164,7 @@ ICMP Echo Request / Echo Reply (Reverse یا Direct)
 ابتدا از طریق SSH به **سرور خارج** متصل شوید و نصب را اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.6/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.7/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -162,7 +176,7 @@ sudo pingtunnel setup
 **فقط پس از تکمیل مرحلهٔ خارج** به سرور ایران متصل شوید و اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.6/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.7/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
