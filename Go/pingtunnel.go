@@ -45,7 +45,7 @@ func sendAuthenticatedParts(id, sequence int, conn icmp.PacketConn, peer *net.IP
     for _, plain := range parts {
         encrypted, err := crypto.Encrypt(plain)
         if err != nil { return err }
-        sendEncryptedICMP(id,sequence,conn,peer,proto,encrypted,crypto,msgType,metadata...)
+        if !sendEncryptedICMP(id,sequence,conn,peer,proto,encrypted,crypto,msgType,metadata...) {return errors.New("ICMP fragment transmission failed")}
     }
     if len(parts) > 1 { icmpFragmentedDatagrams.Add(1) }
     return nil
@@ -54,7 +54,7 @@ func sendAuthenticatedParts(id, sequence int, conn icmp.PacketConn, peer *net.IP
 func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, target string,
 	connId string, msgType uint32, data []byte, sproto int, rproto int, key int,
 	tcpmode int, tcpmode_buffer_size int, tcpmode_maxwin int, tcpmode_resend_time int, tcpmode_compress int, tcpmode_stat int,
-	timeout int, cryptoConfig *CryptoConfig) {
+	timeout int, cryptoConfig *CryptoConfig) bool {
 
 	m := &MyMsg{
 		Id:                  connId,
@@ -75,8 +75,8 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
 
 	mb, err := proto.Marshal(m)
 	if err != nil {
-		loggo.Error("sendICMP Marshal MyMsg error %s %s", server.String(), err)
-		return
+		loggo.Error("sendICMP Marshal MyMsg error: %s", err)
+        return false
 	}
 
     // The queue scheduler uses authenticated local metadata only; no on-wire
@@ -95,39 +95,37 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
         len(mb) > icmpMaxSecurePlaintext {
         if err := sendAuthenticatedParts(id,sequence,conn,server,sproto,mb,cryptoConfig,msgType,tcpmode==0,reverseMeta); err != nil {
             if errors.Is(err,ErrSecureNegotiation) && msgType==uint32(MyMsg_DATA) {
-                cryptoConfig.sec.queuePacket(pendingICMP{raw:mb,peer:server,id:id,seq:sequence,proto:sproto,meta:reverseMeta})
-            } else {
-                loggo.Error("sendICMP fragment error: %s",err)
+                return cryptoConfig.sec.queuePacket(pendingICMP{raw:mb,peer:server,id:id,seq:sequence,proto:sproto,meta:reverseMeta})
             }
+            loggo.Error("sendICMP fragment error: %s",err)
+            return false
         }
-        return
+        return true
     }
 
 	// Encrypt the marshaled data if encryption is enabled
 	if cryptoConfig != nil {
         ciphertext, encryptErr := cryptoConfig.Encrypt(mb)
         if errors.Is(encryptErr,ErrSecureNegotiation) {
+            admitted:=false
             if msgType==uint32(MyMsg_DATA) && cryptoConfig.sec!=nil {
-                cryptoConfig.sec.queuePacket(pendingICMP{raw:mb,peer:server,id:id,seq:sequence,proto:sproto,meta:reverseMeta})
+                admitted=cryptoConfig.sec.queuePacket(pendingICMP{raw:mb,peer:server,id:id,seq:sequence,proto:sproto,meta:reverseMeta})
             }
-            // The reverse leg has to respond to a real peer Echo Request.
-            // Do NOT consume retransmission state on a local ticker and drop
-            // the resulting Hello; that can starve the entire handshake.
-            if useReverse(cryptoConfig)&&cryptoConfig.sec.region=="iran"{return}
+            if useReverse(cryptoConfig)&&cryptoConfig.sec.region=="iran"{return admitted}
             control,e:=cryptoConfig.SecureControl(time.Now())
             if e==nil&&len(control)>0 {
-                 sendSecureControl(id,sequence,conn,server,sproto,control,cryptoConfig)
-             }
-            return
+                sendSecureControl(id,sequence,conn,server,sproto,control,cryptoConfig)
+            }
+            return admitted
         }
 		if encryptErr != nil {
-			loggo.Error("sendICMP Encrypt error %s %s", server.String(), encryptErr)
-			return
+			loggo.Error("sendICMP Encrypt error: %s", encryptErr)
+            return false
 		}
         mb=ciphertext
 	}
 
-	sendEncryptedICMP(id,sequence,conn,server,sproto,mb,cryptoConfig,msgType,reverseMeta)
+	return sendEncryptedICMP(id,sequence,conn,server,sproto,mb,cryptoConfig,msgType,reverseMeta)
 }
 
 // isReflectedReversePoll detects a Linux Echo Reply that copies the 36-byte
@@ -185,8 +183,8 @@ func shouldWakeReverseFromMessage(msgType uint32) bool {
 
 // Send an already-encrypted payload without re-wrapping MyMsg or allocating
 // a second session sequence. Used for draining authenticated pending packets.
-func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr, proto int, encrypted []byte, crypto *CryptoConfig, msgType uint32, metadata ...reverseFrameMeta) {
- if peer==nil||len(encrypted)==0{return}
+func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr, proto int, encrypted []byte, crypto *CryptoConfig, msgType uint32, metadata ...reverseFrameMeta) bool {
+ if peer==nil||len(encrypted)==0{return false}
  if useReverse(crypto) {
   if crypto.sec.region=="iran" {
    now:=time.Now()
@@ -202,7 +200,7 @@ func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr,
            }
        }
    }
-   return
+   return queued
   }
   proto=8
  }
@@ -227,9 +225,12 @@ func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr,
     if tracked && msgType==uint32(MyMsg_DATA) {
         crypto.reverse.noteOutboundFrame(time.Now())
     }
- } else if tracked {
+    return true
+ }
+ if tracked {
     crypto.reverse.cancelOutboundDataEcho(signature,registeredAt)
  }
+ return false
 }
 
 // Flush only when both peers finished their authenticated ephemeral exchange.
