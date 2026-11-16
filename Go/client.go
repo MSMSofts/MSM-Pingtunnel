@@ -84,6 +84,7 @@ type Client struct {
 	exit           atomic.Bool
 	rttNanos       atomic.Int64
 	workResultLock sync.WaitGroup
+    workerRegistrationMu sync.Mutex
 	maxconn        int
 
 	id       int
@@ -403,8 +404,8 @@ func (p *Client) Run() error {
         defer common.CrashLog()
         defer failOnUnexpectedWorkerExit("health ticker",&p.exit)
 
-		p.workResultLock.Add(1)
-		defer p.workResultLock.Done()
+        if !p.beginWorker() {return}
+        defer p.workResultLock.Done()
 
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
@@ -577,8 +578,8 @@ func (p *Client) Run() error {
         defer common.CrashLog()
         defer failOnUnexpectedWorkerExit("ICMP dispatcher",&p.exit)
 
-		p.workResultLock.Add(1)
-		defer p.workResultLock.Done()
+        if !p.beginWorker() {return}
+        defer p.workResultLock.Done()
 
 		for !p.exit.Load() {
             if recvUDP != nil {
@@ -598,7 +599,7 @@ func (p *Client) Run() error {
 }
 
 func (p *Client) Stop() {
-    if !p.exit.CompareAndSwap(false,true) { return }
+    if !beginCoreShutdown(&p.exit,&p.workerRegistrationMu) { return }
     // Multi-Port listeners exit immediately instead of blocking the shutdown
     // WaitGroup until their accept/read deadlines expire.
     for _, listener := range p.multiTCPListeners { _ = listener.Close() }
@@ -621,7 +622,7 @@ func (p *Client) AcceptTcp() error {
 
 	defer common.CrashLog()
 
-	p.workResultLock.Add(1)
+    if !p.beginWorker() {return nil}
 	defer p.workResultLock.Done()
 
 	loggo.Info("client waiting local accept tcp")
@@ -656,7 +657,7 @@ func (p *Client) AcceptTcpConn(conn *net.TCPConn, targetAddr string) {
 func (p *Client) acceptTcpConn(conn *net.TCPConn, targetAddr string, mode int, serviceID string) {
 	defer common.CrashLog()
 
-	p.workResultLock.Add(1)
+    if !p.beginWorker() {_=conn.Close();return}
 	defer p.workResultLock.Done()
 
 	tcpsrcaddr := conn.RemoteAddr().(*net.TCPAddr)
@@ -974,7 +975,7 @@ func (p *Client) Accept() error {
 
 	defer common.CrashLog()
 
-	p.workResultLock.Add(1)
+    if !p.beginWorker() {return nil}
 	defer p.workResultLock.Done()
 
 	loggo.Info("client waiting local accept udp")
@@ -1212,7 +1213,7 @@ func (p *Client) AcceptSock5Conn(conn *net.TCPConn) {
 
 	defer common.CrashLog()
 
-	p.workResultLock.Add(1)
+    if !p.beginWorker() {_=conn.Close();return}
 	defer p.workResultLock.Done()
 
 	var err error = nil
@@ -1320,7 +1321,7 @@ func (p *Client) recvSock5UDP(relayConn *net.UDPConn, expectedIP net.IP, expecte
 
 	defer common.CrashLog()
 
-	p.workResultLock.Add(1)
+    if !p.beginWorker() {return}
 	defer p.workResultLock.Done()
 
 	bytes := make([]byte, udpMaxDatagramBytes)
