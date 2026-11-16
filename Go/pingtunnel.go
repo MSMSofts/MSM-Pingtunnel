@@ -21,7 +21,7 @@ func sendSecureControl(id,sequence int,conn icmp.PacketConn,peer *net.IPAddr,spr
  if peer==nil||len(body)==0{return}
  if useReverse(crypto) {
   if crypto.sec.region=="iran" && sproto==8 {
-   crypto.reverse.enqueue(body,time.Now())
+   crypto.reverse.enqueue(body,time.Now(),reverseFrameMeta{class:reverseTrafficControl})
    return
   }
   // A Direct-mode client Hello still needs an Echo Reply even when
@@ -35,7 +35,8 @@ func sendSecureControl(id,sequence int,conn icmp.PacketConn,peer *net.IPAddr,spr
 // packet remains <=1200 bytes without relying on kernel IP fragmentation.
 // A complete MyMsg is reconstructed and authenticated at the far receiver.
 func sendAuthenticatedParts(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr,
-    proto int, data []byte, crypto *CryptoConfig, msgType uint32, udpData bool) error {
+    proto int, data []byte, crypto *CryptoConfig, msgType uint32, udpData bool,
+    metadata ...reverseFrameMeta) error {
     parts, err := splitAuthenticatedMessage(data)
     if err != nil { return err }
     if udpData && crypto.UDPParity && msgType == uint32(MyMsg_DATA) {
@@ -44,7 +45,7 @@ func sendAuthenticatedParts(id, sequence int, conn icmp.PacketConn, peer *net.IP
     for _, plain := range parts {
         encrypted, err := crypto.Encrypt(plain)
         if err != nil { return err }
-        sendEncryptedICMP(id,sequence,conn,peer,proto,encrypted,crypto,msgType)
+        sendEncryptedICMP(id,sequence,conn,peer,proto,encrypted,crypto,msgType,metadata...)
     }
     if len(parts) > 1 { icmpFragmentedDatagrams.Add(1) }
     return nil
@@ -78,6 +79,13 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
 		return
 	}
 
+    // The queue scheduler uses authenticated local metadata only; no on-wire
+    // protocol changes or encryption-key changes are required.
+    reverseMeta:=reverseFrameMeta{class:reverseTrafficTCP}
+    if msgType!=uint32(MyMsg_DATA) {reverseMeta.class=reverseTrafficControl
+    } else if tcpmode==0 {reverseMeta.class=reverseTrafficUDP}
+    if service,ok:=ParseServiceAlias(target);ok {reverseMeta.service=service}
+
     // A fully authenticated session may segment before encryption, avoiding
     // an oversized ciphertext and kernel IP fragmentation. While negotiating,
     // retain the existing whole-message pending queue; FlushPendingICMP will
@@ -85,9 +93,9 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
     if cryptoConfig != nil && cryptoConfig.sec != nil &&
         cryptoConfig.ICMPSegmentation && cryptoConfig.SecureReady() &&
         len(mb) > icmpMaxSecurePlaintext {
-        if err := sendAuthenticatedParts(id,sequence,conn,server,sproto,mb,cryptoConfig,msgType,tcpmode==0); err != nil {
+        if err := sendAuthenticatedParts(id,sequence,conn,server,sproto,mb,cryptoConfig,msgType,tcpmode==0,reverseMeta); err != nil {
             if errors.Is(err,ErrSecureNegotiation) && msgType==uint32(MyMsg_DATA) {
-                cryptoConfig.sec.queuePacket(pendingICMP{raw:mb,peer:server,id:id,seq:sequence,proto:sproto})
+                cryptoConfig.sec.queuePacket(pendingICMP{raw:mb,peer:server,id:id,seq:sequence,proto:sproto,meta:reverseMeta})
             } else {
                 loggo.Error("sendICMP fragment error: %s",err)
             }
@@ -100,7 +108,7 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
         ciphertext, encryptErr := cryptoConfig.Encrypt(mb)
         if errors.Is(encryptErr,ErrSecureNegotiation) {
             if msgType==uint32(MyMsg_DATA) && cryptoConfig.sec!=nil {
-                cryptoConfig.sec.queuePacket(pendingICMP{raw:mb,peer:server,id:id,seq:sequence,proto:sproto})
+                cryptoConfig.sec.queuePacket(pendingICMP{raw:mb,peer:server,id:id,seq:sequence,proto:sproto,meta:reverseMeta})
             }
             // The reverse leg has to respond to a real peer Echo Request.
             // Do NOT consume retransmission state on a local ticker and drop
@@ -119,7 +127,7 @@ func sendICMP(id int, sequence int, conn icmp.PacketConn, server *net.IPAddr, ta
         mb=ciphertext
 	}
 
-	sendEncryptedICMP(id,sequence,conn,server,sproto,mb,cryptoConfig,msgType)
+	sendEncryptedICMP(id,sequence,conn,server,sproto,mb,cryptoConfig,msgType,reverseMeta)
 }
 
 // isReflectedReversePoll detects a Linux Echo Reply that copies the 36-byte
@@ -177,12 +185,12 @@ func shouldWakeReverseFromMessage(msgType uint32) bool {
 
 // Send an already-encrypted payload without re-wrapping MyMsg or allocating
 // a second session sequence. Used for draining authenticated pending packets.
-func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr, proto int, encrypted []byte, crypto *CryptoConfig, msgType uint32) {
+func sendEncryptedICMP(id, sequence int, conn icmp.PacketConn, peer *net.IPAddr, proto int, encrypted []byte, crypto *CryptoConfig, msgType uint32, metadata ...reverseFrameMeta) {
  if peer==nil||len(encrypted)==0{return}
  if useReverse(crypto) {
   if crypto.sec.region=="iran" {
    now:=time.Now()
-   queued:=crypto.reverse.enqueue(encrypted,now)
+   queued:=crypto.reverse.enqueue(encrypted,now,metadata...)
    if queued && shouldWakeReverseFromMessage(msgType) &&
        crypto.SecureReady() && crypto.reverse.allowBacklogWake(now) {
        // This single signed hint is generated only for genuine queued
@@ -231,7 +239,7 @@ func FlushPendingICMP(conn icmp.PacketConn, crypto *CryptoConfig) {
  packets:=crypto.sec.drainPending(time.Now())
  for i,p:=range packets{
   if crypto.ICMPSegmentation && len(p.raw)>icmpMaxSecurePlaintext {
-   if err:=sendAuthenticatedParts(p.id,p.seq,conn,p.peer,p.proto,p.raw,crypto,uint32(MyMsg_DATA),false);err!=nil {
+   if err:=sendAuthenticatedParts(p.id,p.seq,conn,p.peer,p.proto,p.raw,crypto,uint32(MyMsg_DATA),p.meta.class==reverseTrafficUDP,p.meta);err!=nil {
     for _,unsent:=range packets[i:] {crypto.sec.pushBack(unsent)}
     return
    }
@@ -244,7 +252,7 @@ func FlushPendingICMP(conn icmp.PacketConn, crypto *CryptoConfig) {
    for _,unsent:=range packets[i:] {crypto.sec.pushBack(unsent)}
    return
   }
-  sendEncryptedICMP(p.id,p.seq,conn,p.peer,p.proto,encrypted,crypto,uint32(MyMsg_DATA))
+  sendEncryptedICMP(p.id,p.seq,conn,p.peer,p.proto,encrypted,crypto,uint32(MyMsg_DATA),p.meta)
  }
 }
 
