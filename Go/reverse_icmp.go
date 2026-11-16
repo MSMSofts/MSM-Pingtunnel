@@ -1400,6 +1400,15 @@ type reverseDiagnostics struct {
     PendingBytes int
     QueuePeak int
     QueueDrops uint64
+    PriorityTCPDrops uint64
+    PriorityUDPDrops uint64
+    PriorityControlDrops uint64
+    PriorityUDPDequeues uint64
+    PriorityTCPDequeues uint64
+    PriorityControlDequeues uint64
+    PendingUDP int
+    PendingTCP int
+    PendingControl int
     OversizedDrops uint64
     FailedReplies uint64
     ReflectedPolls uint64
@@ -1514,7 +1523,20 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
     if r.queueHintAt.IsZero() || now.Sub(r.queueHintAt)>reverseWakeBurst {
         reportedDepth,reportedOldest,reportedBytes=0,0,0
     }
+    pendingTCP,pendingUDP,pendingControl:=0,0,0
+    for _,f:=range r.pending {
+        switch f.meta.class {
+        case reverseTrafficUDP:pendingUDP++
+        case reverseTrafficControl:pendingControl++
+        default:pendingTCP++
+        }
+    }
     return reverseDiagnostics{Pending:len(r.pending),PendingBytes:r.pendingBytes,
+        PriorityTCPDrops:r.priorityTCPDrops,PriorityUDPDrops:r.priorityUDPDrops,
+        PriorityControlDrops:r.priorityControlDrops,
+        PriorityUDPDequeues:r.priorityUDPDequeues,PriorityTCPDequeues:r.priorityTCPDequeues,
+        PriorityControlDequeues:r.priorityControlDequeues,
+        PendingTCP:pendingTCP,PendingUDP:pendingUDP,PendingControl:pendingControl,
         QueuePeak:r.queuePeak,QueueDrops:r.drops,OversizedDrops:r.oversizedDrops,FailedReplies:r.failedReplies,
         ReflectedPolls:r.reflectedPolls,
         ReflectedDataEchoes:r.reflectedDataEchoes,
