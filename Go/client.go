@@ -724,12 +724,13 @@ func (p *Client) acceptTcpConn(conn *net.TCPConn, targetAddr string, mode int, s
         
 			mb, _ := clientConn.fm.MarshalFrame(f)
 			
-			sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), targetAddr, clientConn.id, (uint32)(MyMsg_DATA), mb,
+			if sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), targetAddr, clientConn.id, (uint32)(MyMsg_DATA), mb,
 				SEND_PROTO, RECV_PROTO, p.key,
 				mode, perf.BufferBytes, perf.Window, perf.ResendMs, p.tcpmode_compress, p.tcpmode_stat,
-				p.timeout, p.cryptoConfig)
+				p.timeout, p.cryptoConfig) {
 			p.sendPacket.Add(1)
 			p.sendPacketSize.Add(uint64(len(mb)))
+            }
 		
         return len(mb)
     })
@@ -835,12 +836,13 @@ mainLoop:
 					return 0
 				}
 				
-				sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), targetAddr, clientConn.id, (uint32)(MyMsg_DATA), mb,
+				if sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), targetAddr, clientConn.id, (uint32)(MyMsg_DATA), mb,
 					SEND_PROTO, RECV_PROTO, p.key,
 					mode, 0, 0, 0, 0, 0,
-					0, p.cryptoConfig)
+					0, p.cryptoConfig) {
 				p.sendPacket.Add(1)
 				p.sendPacketSize.Add(uint64(len(mb)))
+            }
 			
         return len(mb)
     })
@@ -930,12 +932,13 @@ mainLoop:
         
 			mb, _ := clientConn.fm.MarshalFrame(f)
 			
-			sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), targetAddr, clientConn.id, (uint32)(MyMsg_DATA), mb,
+			if sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), targetAddr, clientConn.id, (uint32)(MyMsg_DATA), mb,
 				SEND_PROTO, RECV_PROTO, p.key,
 				mode, 0, 0, 0, 0, 0,
-				0, p.cryptoConfig)
+				0, p.cryptoConfig) {
 			p.sendPacket.Add(1)
 			p.sendPacketSize.Add(uint64(len(mb)))
+            }
 		
         return len(mb)
     })
@@ -1011,18 +1014,19 @@ func (p *Client) Accept() error {
 		}
 
 		clientConn.activeSendUnixNano.Store(now.UnixNano())
-		sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), p.targetAddr, clientConn.id, (uint32)(MyMsg_DATA), bytes[:n],
+		if sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), p.targetAddr, clientConn.id, (uint32)(MyMsg_DATA), bytes[:n],
 			SEND_PROTO, RECV_PROTO, p.key,
             // Reuse the existing framing buffer field only when tcpmode=0
             // as an authenticated preference for the foreign UDP socket.
             // Wire v4 layout is unchanged; older peers safely ignore it.
 			clientConn.tcpmode, p.udpSocketBuffer, 0, 0, 0, 0,
-			p.timeout, p.cryptoConfig)
+			p.timeout, p.cryptoConfig) {
 
 		
 
 		p.sendPacket.Add(1)
 		p.sendPacketSize.Add(uint64(n))
+            }
 		p.touchActivity()
 	}
 	return nil
@@ -1378,14 +1382,15 @@ func (p *Client) recvSock5UDP(relayConn *net.UDPConn, expectedIP net.IP, expecte
 
 		clientConn.activeSendUnixNano.Store(now.UnixNano())
 
-		sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), targetAddr, clientConn.id, (uint32)(MyMsg_DATA), payload,
+		if sendICMP(p.id, p.nextSequence(), *p.conn, p.serverIP.Load(), targetAddr, clientConn.id, (uint32)(MyMsg_DATA), payload,
 			SEND_PROTO, RECV_PROTO, p.key,
 			0, 0, 0, 0, 0, 0,
-			p.timeout, p.cryptoConfig)
+			p.timeout, p.cryptoConfig) {
 
 		
 		p.sendPacket.Add(1)
 		p.sendPacketSize.Add(uint64(len(payload)))
+            }
 		p.touchActivity()
 	}
 }
