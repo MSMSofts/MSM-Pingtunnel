@@ -519,12 +519,13 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
         
 			mb, _ := conn.fm.MarshalFrame(f)
 			echoID,echoSeq:=p.applicationEchoIdentity(int(conn.echoId.Load()),int(conn.echoSeq.Load()))
-            sendICMP(echoID, echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
+            if sendICMP(echoID, echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
 				conn.rproto, -1, p.key, conn.tcpmode,
 				0, 0, 0, 0, 0,
-				0, p.cryptoConfig)
+				0, p.cryptoConfig) {
 			p.sendPacket.Add(1)
 			p.sendPacketSize.Add(uint64(len(mb)))
+            }
 		
         return len(mb)
     })
@@ -630,12 +631,13 @@ mainLoop:
 					return 0
 				}
 				echoID,echoSeq:=p.applicationEchoIdentity(int(conn.echoId.Load()),int(conn.echoSeq.Load()))
-            sendICMP(echoID, echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
+            if sendICMP(echoID, echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
 					conn.rproto, -1, p.key, conn.tcpmode,
 					0, 0, 0, 0, 0,
-					0, p.cryptoConfig)
+					0, p.cryptoConfig) {
 				p.sendPacket.Add(1)
 				p.sendPacketSize.Add(uint64(len(mb)))
+            }
 			
         return len(mb)
     })
@@ -723,12 +725,13 @@ mainLoop:
         
 			mb, _ := conn.fm.MarshalFrame(f)
 			echoID,echoSeq:=p.applicationEchoIdentity(int(conn.echoId.Load()),int(conn.echoSeq.Load()))
-            sendICMP(echoID, echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
+            if sendICMP(echoID, echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
 				conn.rproto, -1, p.key, conn.tcpmode,
 				0, 0, 0, 0, 0,
-				0, p.cryptoConfig)
+				0, p.cryptoConfig) {
 			p.sendPacket.Add(1)
 			p.sendPacketSize.Add(uint64(len(mb)))
+            }
 		
         return len(mb)
     })
@@ -813,13 +816,14 @@ func (p *Server) Recv(conn *ServerConn, id string, src *net.IPAddr) {
 		}
 
 		echoID,echoSeq:=p.applicationEchoIdentity(int(conn.echoId.Load()),int(conn.echoSeq.Load()))
-            sendICMP(echoID, echoSeq, *p.conn, src, targetAddr, id, (uint32)(MyMsg_DATA), payload,
+            if sendICMP(echoID, echoSeq, *p.conn, src, targetAddr, id, (uint32)(MyMsg_DATA), payload,
 			conn.rproto, -1, p.key, conn.tcpmode,
 			0, 0, 0, 0, 0,
-			0, p.cryptoConfig)
+			0, p.cryptoConfig) {
 
 		p.sendPacket.Add(1)
 		p.sendPacketSize.Add(uint64(len(payload)))
+            }
 	}
 }
 
