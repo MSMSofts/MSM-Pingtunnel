@@ -580,6 +580,15 @@ type secureStatus struct{
  ReverseQueueBytes int `json:"reverse_queue_bytes"`
  ReverseQueuePeak int `json:"reverse_queue_peak"`
  ReverseQueueDrops uint64 `json:"reverse_queue_drops"`
+ ReversePriorityTCPDrops uint64 `json:"reverse_priority_tcp_drops"`
+ ReversePriorityUDPDrops uint64 `json:"reverse_priority_udp_drops"`
+ ReversePriorityControlDrops uint64 `json:"reverse_priority_control_drops"`
+ ReverseScheduledTCP uint64 `json:"reverse_scheduled_tcp"`
+ ReverseScheduledUDP uint64 `json:"reverse_scheduled_udp"`
+ ReverseScheduledControl uint64 `json:"reverse_scheduled_control"`
+ ReversePendingTCP int `json:"reverse_pending_tcp"`
+ ReversePendingUDP int `json:"reverse_pending_udp"`
+ ReversePendingControl int `json:"reverse_pending_control"`
     ReverseOversizedDrops uint64 `json:"reverse_oversized_drops"`
  ReverseWriteFailures uint64 `json:"reverse_write_failures"`
  ICMPWriteFailures uint64 `json:"icmp_write_failures"`
@@ -703,6 +712,15 @@ func (s *secureSession) writeStatusWithDirection(path string,direction string,re
  report.ReverseQueueBytes=diag.PendingBytes
  report.ReverseQueuePeak=diag.QueuePeak
  report.ReverseQueueDrops=diag.QueueDrops
+ report.ReversePriorityTCPDrops=diag.PriorityTCPDrops
+ report.ReversePriorityUDPDrops=diag.PriorityUDPDrops
+ report.ReversePriorityControlDrops=diag.PriorityControlDrops
+ report.ReverseScheduledTCP=diag.PriorityTCPDequeues
+ report.ReverseScheduledUDP=diag.PriorityUDPDequeues
+ report.ReverseScheduledControl=diag.PriorityControlDequeues
+ report.ReversePendingTCP=diag.PendingTCP
+ report.ReversePendingUDP=diag.PendingUDP
+ report.ReversePendingControl=diag.PendingControl
  report.ReverseOversizedDrops=diag.OversizedDrops
  report.ReverseWriteFailures=diag.FailedReplies
  report.ICMPWriteFailures=icmpWriteErrors.Load()
