@@ -523,10 +523,10 @@ const (
  pendingMaxBytes = 2 * 1024 * 1024
  pendingLifetime = 12 * time.Second
 )
-func (s *secureSession) queuePacket(msg pendingICMP) {
+func (s *secureSession) queuePacket(msg pendingICMP) bool {
  s.mu.Lock()
  defer s.mu.Unlock()
- if len(msg.raw)==0 || len(msg.raw)>10240 {s.queueDrops++;return}
+ if len(msg.raw)==0 || len(msg.raw)>10240 {s.queueDrops++;return false}
  msg.raw=append([]byte(nil),msg.raw...)
  if msg.peer!=nil {
   ip:=append(net.IP(nil),msg.peer.IP...)
@@ -541,6 +541,7 @@ func (s *secureSession) queuePacket(msg pendingICMP) {
  }
  s.queueBytes+=len(msg.raw)
  s.queued=append(s.queued,msg)
+  return true
 }
 func (s *secureSession) drainPending(now time.Time)[]pendingICMP{
  s.mu.Lock()
