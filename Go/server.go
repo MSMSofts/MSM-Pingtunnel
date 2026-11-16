@@ -43,6 +43,7 @@ type Server struct {
 	exit             atomic.Bool
 	key              int
 	workResultLock   sync.WaitGroup
+    workerRegistrationMu sync.Mutex
 	maxconn          int
 	maxprocessthread int
 	maxprocessbuffer int
@@ -157,8 +158,8 @@ func (p *Server) Run() error {
         defer common.CrashLog()
         defer failOnUnexpectedWorkerExit("health ticker",&p.exit)
 
-		p.workResultLock.Add(1)
-		defer p.workResultLock.Done()
+        if !p.beginWorker() {return}
+        defer p.workResultLock.Done()
 
 		for !p.exit.Load() {
 			p.checkTimeoutConn()
@@ -192,8 +193,8 @@ func (p *Server) Run() error {
         defer common.CrashLog()
         defer failOnUnexpectedWorkerExit("ICMP dispatcher",&p.exit)
 
-		p.workResultLock.Add(1)
-		defer p.workResultLock.Done()
+        if !p.beginWorker() {return}
+        defer p.workResultLock.Done()
 
 		for !p.exit.Load() {
             if recvUDP != nil {
@@ -213,7 +214,7 @@ func (p *Server) Run() error {
 }
 
 func (p *Server) Stop() {
-    if !p.exit.CompareAndSwap(false,true) { return }
+    if !beginCoreShutdown(&p.exit,&p.workerRegistrationMu) { return }
     close(p.recvcontrol) // broadcast to all per-service and fallback workers
     p.workResultLock.Wait()
     if p.serviceIngress!=nil {
@@ -494,7 +495,7 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
 
 	defer common.CrashLog()
 
-	p.workResultLock.Add(1)
+    if !p.beginWorker() {p.close(conn);return}
 	defer p.workResultLock.Done()
 
 	loggo.Info("server waiting target response %s -> %s %s", conn.tcpaddrTarget.String(), conn.id, conn.tcpconn.LocalAddr().String())
@@ -518,12 +519,13 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
         
 			mb, _ := conn.fm.MarshalFrame(f)
 			echoID,echoSeq:=p.applicationEchoIdentity(int(conn.echoId.Load()),int(conn.echoSeq.Load()))
-            sendICMP(echoID, echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
+            if sendICMP(echoID, echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
 				conn.rproto, -1, p.key, conn.tcpmode,
 				0, 0, 0, 0, 0,
-				0, p.cryptoConfig)
+				0, p.cryptoConfig) {
 			p.sendPacket.Add(1)
 			p.sendPacketSize.Add(uint64(len(mb)))
+            }
 		
         return len(mb)
     })
@@ -629,12 +631,13 @@ mainLoop:
 					return 0
 				}
 				echoID,echoSeq:=p.applicationEchoIdentity(int(conn.echoId.Load()),int(conn.echoSeq.Load()))
-            sendICMP(echoID, echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
+            if sendICMP(echoID, echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
 					conn.rproto, -1, p.key, conn.tcpmode,
 					0, 0, 0, 0, 0,
-					0, p.cryptoConfig)
+					0, p.cryptoConfig) {
 				p.sendPacket.Add(1)
 				p.sendPacketSize.Add(uint64(len(mb)))
+            }
 			
         return len(mb)
     })
@@ -722,12 +725,13 @@ mainLoop:
         
 			mb, _ := conn.fm.MarshalFrame(f)
 			echoID,echoSeq:=p.applicationEchoIdentity(int(conn.echoId.Load()),int(conn.echoSeq.Load()))
-            sendICMP(echoID, echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
+            if sendICMP(echoID, echoSeq, *p.conn, src, "", id, (uint32)(MyMsg_DATA), mb,
 				conn.rproto, -1, p.key, conn.tcpmode,
 				0, 0, 0, 0, 0,
-				0, p.cryptoConfig)
+				0, p.cryptoConfig) {
 			p.sendPacket.Add(1)
 			p.sendPacketSize.Add(uint64(len(mb)))
+            }
 		
         return len(mb)
     })
@@ -768,7 +772,7 @@ func (p *Server) Recv(conn *ServerConn, id string, src *net.IPAddr) {
 
 	defer common.CrashLog()
 
-	p.workResultLock.Add(1)
+    if !p.beginWorker() {p.close(conn);return}
 	defer p.workResultLock.Done()
 
 	loggo.Info("server waiting target response %s -> %s %s", conn.udpTargetString(), conn.id, conn.conn.LocalAddr().String())
@@ -812,13 +816,14 @@ func (p *Server) Recv(conn *ServerConn, id string, src *net.IPAddr) {
 		}
 
 		echoID,echoSeq:=p.applicationEchoIdentity(int(conn.echoId.Load()),int(conn.echoSeq.Load()))
-            sendICMP(echoID, echoSeq, *p.conn, src, targetAddr, id, (uint32)(MyMsg_DATA), payload,
+            if sendICMP(echoID, echoSeq, *p.conn, src, targetAddr, id, (uint32)(MyMsg_DATA), payload,
 			conn.rproto, -1, p.key, conn.tcpmode,
 			0, 0, 0, 0, 0,
-			0, p.cryptoConfig)
+			0, p.cryptoConfig) {
 
 		p.sendPacket.Add(1)
 		p.sendPacketSize.Add(uint64(len(payload)))
+            }
 	}
 }
 

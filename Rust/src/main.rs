@@ -934,6 +934,27 @@ fn show_security_status() -> Result<()> {
     if let Some(oversize)=report["icmp_write_emsgsize"].as_u64() {
         println!("  ICMP EMSGSIZE / message-too-long errors: {oversize}");
     }
+    if let (Some(tcp),Some(udp),Some(control))=(
+        report["reverse_pending_tcp"].as_u64(),
+        report["reverse_pending_udp"].as_u64(),
+        report["reverse_pending_control"].as_u64()) {
+        println!("  Reverse egress pending (TCP / UDP / control): {tcp} / {udp} / {control}");
+    }
+    if let (Some(tcp),Some(udp),Some(control))=(
+        report["reverse_priority_tcp_drops"].as_u64(),
+        report["reverse_priority_udp_drops"].as_u64(),
+        report["reverse_priority_control_drops"].as_u64()) {
+        println!("  Reverse priority egress drops (TCP / UDP / control): {tcp} / {udp} / {control}");
+        if udp>0 {println!("  NOTE: Reverse game/QUIC data suffered admission or expiry loss; inspect link bottlenecks.");}
+        if control>0 {println!("  WARNING: Reverse encrypted control frames were dropped; inspect prolonged outages.");}
+    }
+    if let (Some(tcp),Some(udp),Some(control))=(
+        report["reverse_scheduled_tcp"].as_u64(),
+        report["reverse_scheduled_udp"].as_u64(),
+        report["reverse_scheduled_control"].as_u64()) {
+        println!("  Reverse scheduler dequeues (TCP / UDP / control): {tcp} / {udp} / {control}");
+        println!("  Policy: control first, UDP:TCP data 4:1 under contention, per-service FIFO.");
+    }
     if let Some(oversize)=report["reverse_oversized_drops"].as_u64() {
         println!("  Reverse encrypted frames rejected (>10,240 bytes): {oversize}");
     }

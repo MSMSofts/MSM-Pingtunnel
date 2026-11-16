@@ -2,7 +2,7 @@
 
 **An authenticated, encrypted ICMP tunnel for forwarding TCP/UDP traffic between two Linux VPSs, with a Go transport core and a Rust control menu.**
 
-[فارسی](README.md) · [Stable release: v3.4.7](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.7) · [All release notes](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0](LICENSE)
+[فارسی](README.md) · [Stable release: v3.4.8](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.8) · [All release notes](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0](LICENSE)
 
 ## Features
 
@@ -14,6 +14,17 @@
 - **Conservative compatibility:** config schema 3 and Wire v4, installation checks/rollback, experimental segmentation and UDP repair opt-in only.
 
 Pingtunnel **is not a VPN server**. It forwards traffic from multiple Iran-side TCP/UDP listeners over one encrypted ICMP tunnel to Foreign VPS loopback services. See the [Multi-Port setup guide](docs/MULTI_PORT.en.md) for port mapping, firewall and profile import/export.
+
+## v3.4.8 — Reverse egress prioritization and safer worker shutdown
+
+This release addresses the remaining **shared Reverse outbound FIFO contention**. Encrypted control frames go first; interactive UDP/QUIC receives latency-focused scheduling, while TCP retains an explicit 4:1 UDP/TCP service opportunity ratio under contention. FIFO order within each service is preserved. Bulk TCP can no longer evict queued UDP/control from Reverse egress. The existing 256-frame/2-MiB bound, Wire v4, config schema 3 and ingress policies remain unchanged.
+
+- Serialize dynamic TCP/SOCKS/UDP worker registration with shutdown to avoid late WaitGroup Add calls.
+- Count application DATA only when admitted into the authenticated queue or successfully written to the ICMP socket; these are **not** end-to-end delivery acknowledgments.
+- `pingtunnel security` displays Reverse TCP/UDP/control queue depths, admission/expiry drops and scheduler activity.
+- Tighten local UDP delivery and p95/p99/max latency gates in CI. Real two-VPS A/B performance is still unverified.
+
+[Technical changes, compatibility and limitations](docs/RELEASE_NOTES_v3.4.8.md)
 
 ## v3.4.7 — restore pre-Multi-Port per-service TCP/UDP queues and reply classification
 
@@ -160,7 +171,7 @@ Session and replay checks → decryption → data delivery
 Connect to the **overseas VPS** via SSH and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.7/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.8/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -172,7 +183,7 @@ Select **Foreign**, enter the Iran VPS public IPv4 address, choose **TCP or UDP*
 **Only after finishing overseas setup**, connect to the Iran VPS and run:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.7/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.8/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~

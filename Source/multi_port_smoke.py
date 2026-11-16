@@ -229,14 +229,20 @@ def continuous_direct_udp_test(mode="direct"):
             finally:
                 stop.set()
                 reader.join(timeout=1)
-        if len(received)<round(sent_count*0.75):
+        # Production targets are harder than a passing echo smoke:
+        # fewer than 95% delivered or p95 >250ms is a visible game/video
+        # regression, even if all cryptographic and connection tests pass.
+        if len(received)<round(sent_count*0.95):
             raise RuntimeError(f"UDP continuous delivery low on {service['id']}: {len(received)}/{sent_count}")
         rtts=sorted(n*1000 for n in received.values())
         p95=rtts[min(len(rtts)-1,int(len(rtts)*0.95))]
-        if p95>800:
-            raise RuntimeError(f"UDP continuous p95 latency excessive on {service['id']}: {p95:.1f} ms")
+        p99=rtts[min(len(rtts)-1,int(len(rtts)*0.99))]
+        if p95>250 or p99>500 or rtts[-1]>1000:
+            raise RuntimeError(f"UDP interactive latency excessive on {service['id']}: p95={p95:.1f}, p99={p99:.1f}, max={rtts[-1]:.1f} ms")
         return {"service":service["id"],"sent":sent_count,"received":len(received),
-                "rtt_p50_ms":round(statistics.median(rtts),1),"rtt_p95_ms":round(p95,1)}
+                "rtt_p50_ms":round(statistics.median(rtts),1),
+                "rtt_p95_ms":round(p95,1),"rtt_p99_ms":round(p99,1),
+                "rtt_max_ms":round(rtts[-1],1)}
     def tcp_load():
         # The original 3.4.4 smoke sent only 6KB TCP frames serially.
         # Saturate six TCP aliases concurrently with >=8KiB windows to

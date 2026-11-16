@@ -114,9 +114,22 @@ type reverseProbeChallenge struct {
     sentAt time.Time
 }
 
+// Classification is local scheduling metadata, never a Wire-v4 field.
+// Zero value preserves legacy FIFO behavior for existing single-service callers.
+type reverseTrafficClass uint8
+const (
+    reverseTrafficTCP reverseTrafficClass = iota
+    reverseTrafficUDP
+    reverseTrafficControl
+)
+type reverseFrameMeta struct {
+    class reverseTrafficClass
+    service string // authenticated local service alias, not a network target
+}
 type reverseQueuedFrame struct {
     data []byte
     created time.Time
+    meta reverseFrameMeta
 }
 
 // A reflected ICMP Echo Reply copies the entire encrypted request payload.
@@ -162,6 +175,17 @@ type reverseTransport struct {
     secret [32]byte
     pending []reverseQueuedFrame
     pendingBytes int
+    // The physical Reverse Echo-Reply underlay is shared, but one bulk
+    // TCP stream must not monopolize the bounded application egress FIFO.
+    udpScheduledBurst int
+    lastUDPService string
+    lastTCPService string
+    priorityTCPDrops uint64
+    priorityUDPDrops uint64
+    priorityControlDrops uint64
+    priorityUDPDequeues uint64
+    priorityTCPDequeues uint64
+    priorityControlDequeues uint64
     drops uint64
     oversizedDrops uint64
     recent map[[8]byte]time.Time
@@ -943,38 +967,119 @@ func (r *reverseTransport) recentOutboundData(now time.Time) bool {
 }
 
 
-func (r *reverseTransport) enqueue(frame []byte,now time.Time) bool {
+// A single socket is still responsible for decryption/replay, but egress
+// admission never allows a TCP bulk burst to evict pending UDP/control.
+// Control is dispatched first; UDP and TCP share opportunities at a bounded
+// 4:1 ratio while preserving FIFO order within each individual service.
+// All selection/eviction work is capped at 256 entries and holds no lock
+// during actual ICMP socket writes.
+func (r *reverseTransport) queueEvictionIndexLocked(incoming reverseTrafficClass) int {
+    // Drop the oldest frame in the lowest-priority eligible class.
+    // TCP cannot evict UDP/control; UDP cannot evict control.
+    classes := []reverseTrafficClass{reverseTrafficTCP}
+    if incoming>=reverseTrafficUDP {classes=append(classes,reverseTrafficUDP)}
+    if incoming>=reverseTrafficControl {classes=append(classes,reverseTrafficControl)}
+    for _,class:=range classes {
+        for i,frame:=range r.pending {
+            if frame.meta.class==class {return i}
+        }
+    }
+    return -1
+}
+func (r *reverseTransport) countPriorityDropLocked(class reverseTrafficClass) {
+    r.drops++
+    switch class {
+    case reverseTrafficUDP:r.priorityUDPDrops++
+    case reverseTrafficControl:r.priorityControlDrops++
+    default:r.priorityTCPDrops++
+    }
+}
+func (r *reverseTransport) removeQueuedIndexLocked(index int) reverseQueuedFrame {
+    frame:=r.pending[index]
+    r.pendingBytes-=len(frame.data)
+    copy(r.pending[index:],r.pending[index+1:])
+    last:=len(r.pending)-1
+    r.pending[last]=reverseQueuedFrame{} // release backing-array references
+    r.pending=r.pending[:last]
+    return frame
+}
+func (r *reverseTransport) enqueue(frame []byte,now time.Time, metadata ...reverseFrameMeta) bool {
     if len(frame)==0{return false}
+    meta:=reverseFrameMeta{}
+    if len(metadata)>0 {meta=metadata[0]}
+    if meta.class>reverseTrafficControl {return false}
     r.mu.Lock();defer r.mu.Unlock()
-    // Without negotiated fragmentation, oversize encrypted frames cannot
-    // enter the bounded Reverse FIFO. Count this loss explicitly so a
-    // healthy heartbeat does not conceal missing large UDP datagrams.
-    if len(frame)>10240 {
-        r.drops++
+    if len(frame)>10240 || len(frame)>reverseQueueMaxBytes {
+        r.countPriorityDropLocked(meta.class)
         r.oversizedDrops++
         return false
     }
-    for len(r.pending)>0 && (len(r.pending)>=reverseQueueMaxFrames || r.pendingBytes+len(frame)>reverseQueueMaxBytes){
-        r.pendingBytes-=len(r.pending[0].data)
-        r.pending[0]=reverseQueuedFrame{}
-        r.pending=r.pending[1:]
-        r.drops++
+    for len(r.pending)>=reverseQueueMaxFrames || r.pendingBytes+len(frame)>reverseQueueMaxBytes {
+        victim:=r.queueEvictionIndexLocked(meta.class)
+        if victim<0 {
+            r.countPriorityDropLocked(meta.class)
+            return false
+        }
+        removed:=r.removeQueuedIndexLocked(victim)
+        r.countPriorityDropLocked(removed.meta.class)
     }
-    r.pending=append(r.pending,reverseQueuedFrame{data:append([]byte(nil),frame...),created:now})
+    r.pending=append(r.pending,reverseQueuedFrame{
+        data:append([]byte(nil),frame...),created:now,meta:meta,
+    })
     r.pendingBytes+=len(frame)
     if len(r.pending)>r.queuePeak{r.queuePeak=len(r.pending)}
     return true
 }
-
+func (r *reverseTransport) chooseFrameIndexLocked() int {
+    control,udp,tcp:=-1,-1,-1
+    for i,f:=range r.pending {
+        switch f.meta.class {
+        case reverseTrafficControl:if control<0{control=i}
+        case reverseTrafficUDP:if udp<0{udp=i}
+        default:if tcp<0{tcp=i}
+        }
+    }
+    if control>=0{return control}
+    class:=reverseTrafficTCP
+    if udp>=0 && (tcp<0 || r.udpScheduledBurst<4){class=reverseTrafficUDP}
+    chosen:=tcp
+    previous:=r.lastTCPService
+    if class==reverseTrafficUDP {chosen=udp;previous=r.lastUDPService}
+    // A second active service can take a turn rather than waiting behind
+    // one busy service's full FIFO. Never reorder within a service.
+    if previous!="" {
+        for i,f:=range r.pending {
+            if f.meta.class==class && f.meta.service!="" && f.meta.service!=previous {
+                chosen=i
+                break
+            }
+        }
+    }
+    return chosen
+}
 func (r *reverseTransport) takeFrame(now time.Time) (reverseQueuedFrame,bool) {
     r.mu.Lock();defer r.mu.Unlock()
-    for len(r.pending)>0{
-        f:=r.pending[0]
-        r.pending[0]=reverseQueuedFrame{}
-        r.pending=r.pending[1:]
-        r.pendingBytes-=len(f.data)
-        if now.Sub(f.created)>reverseFrameTTL{r.drops++;continue}
-        return f,true
+    for len(r.pending)>0 {
+        index:=r.chooseFrameIndexLocked()
+        if index<0 {return reverseQueuedFrame{},false}
+        frame:=r.removeQueuedIndexLocked(index)
+        if now.Sub(frame.created)>reverseFrameTTL || now.Before(frame.created) {
+            r.countPriorityDropLocked(frame.meta.class)
+            continue
+        }
+        switch frame.meta.class {
+        case reverseTrafficControl:
+            r.priorityControlDequeues++
+        case reverseTrafficUDP:
+            r.priorityUDPDequeues++
+            r.lastUDPService=frame.meta.service
+            r.udpScheduledBurst++
+        default:
+            r.priorityTCPDequeues++
+            r.lastTCPService=frame.meta.service
+            r.udpScheduledBurst=0
+        }
+        return frame,true
     }
     return reverseQueuedFrame{},false
 }
@@ -983,19 +1088,25 @@ func (r *reverseTransport) take(now time.Time) []byte {
     if !ok{return nil}
     return f.data
 }
-// Roll a failed socket write back to the head of the queue. Preserve the
-// original enqueue timestamp so repeated failures never extend its lifetime.
+// On an ICMP write failure, reinsert the same encrypted frame at the head,
+// keeping its original age/class and not creating a second ciphertext.
+// Prefer shedding TCP, never discard UDP/control just to restore a TCP frame.
 func (r *reverseTransport) restoreFront(f reverseQueuedFrame,now time.Time) {
     if len(f.data)==0{return}
     r.mu.Lock();defer r.mu.Unlock()
-    if now.Sub(f.created)>reverseFrameTTL{r.drops++;return}
-    for len(r.pending)>0 && (len(r.pending)>=reverseQueueMaxFrames ||
-        r.pendingBytes+len(f.data)>reverseQueueMaxBytes){
-        last:=len(r.pending)-1
-        r.pendingBytes-=len(r.pending[last].data)
-        r.pending[last]=reverseQueuedFrame{}
-        r.pending=r.pending[:last]
-        r.drops++
+    if now.Sub(f.created)>reverseFrameTTL || now.Before(f.created) {
+        r.countPriorityDropLocked(f.meta.class)
+        return
+    }
+    for len(r.pending)>=reverseQueueMaxFrames || r.pendingBytes+len(f.data)>reverseQueueMaxBytes {
+        victim:=r.queueEvictionIndexLocked(f.meta.class)
+        if victim<0 {
+            r.countPriorityDropLocked(f.meta.class)
+            r.failedReplies++
+            return
+        }
+        removed:=r.removeQueuedIndexLocked(victim)
+        r.countPriorityDropLocked(removed.meta.class)
     }
     r.pending=append(r.pending,reverseQueuedFrame{})
     copy(r.pending[1:],r.pending[:len(r.pending)-1])
@@ -1289,6 +1400,15 @@ type reverseDiagnostics struct {
     PendingBytes int
     QueuePeak int
     QueueDrops uint64
+    PriorityTCPDrops uint64
+    PriorityUDPDrops uint64
+    PriorityControlDrops uint64
+    PriorityUDPDequeues uint64
+    PriorityTCPDequeues uint64
+    PriorityControlDequeues uint64
+    PendingUDP int
+    PendingTCP int
+    PendingControl int
     OversizedDrops uint64
     FailedReplies uint64
     ReflectedPolls uint64
@@ -1403,7 +1523,20 @@ func (r *reverseTransport) diagnostics(now time.Time)reverseDiagnostics {
     if r.queueHintAt.IsZero() || now.Sub(r.queueHintAt)>reverseWakeBurst {
         reportedDepth,reportedOldest,reportedBytes=0,0,0
     }
+    pendingTCP,pendingUDP,pendingControl:=0,0,0
+    for _,f:=range r.pending {
+        switch f.meta.class {
+        case reverseTrafficUDP:pendingUDP++
+        case reverseTrafficControl:pendingControl++
+        default:pendingTCP++
+        }
+    }
     return reverseDiagnostics{Pending:len(r.pending),PendingBytes:r.pendingBytes,
+        PriorityTCPDrops:r.priorityTCPDrops,PriorityUDPDrops:r.priorityUDPDrops,
+        PriorityControlDrops:r.priorityControlDrops,
+        PriorityUDPDequeues:r.priorityUDPDequeues,PriorityTCPDequeues:r.priorityTCPDequeues,
+        PriorityControlDequeues:r.priorityControlDequeues,
+        PendingTCP:pendingTCP,PendingUDP:pendingUDP,PendingControl:pendingControl,
         QueuePeak:r.queuePeak,QueueDrops:r.drops,OversizedDrops:r.oversizedDrops,FailedReplies:r.failedReplies,
         ReflectedPolls:r.reflectedPolls,
         ReflectedDataEchoes:r.reflectedDataEchoes,

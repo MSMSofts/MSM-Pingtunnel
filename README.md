@@ -2,7 +2,7 @@
 
 **تونل ICMP رمزنگاری‌شده برای انتقال ترافیک TCP/UDP بین یک VPS ایران و یک VPS خارج، با هستهٔ Go و مدیر Rust.**
 
-[English](README.en.md) · [نسخه پایدار: v3.4.7](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.7) · [توضیحات همه نسخه‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
+[English](README.en.md) · [نسخه پایدار: v3.4.8](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.8) · [توضیحات همه نسخه‌ها](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [مجوز Apache 2.0](LICENSE)
 
 ## ویژگی‌ها
 
@@ -14,6 +14,17 @@
 - **قابل بازیابی:** پشتیبان‌گیری و اعتبارسنجی تنظیمات هنگام ارتقا؛ ویژگی‌های آزمایشی قطعه‌بندی و ترمیم UDP به‌طور پیش‌فرض غیرفعال‌اند.
 
 Pingtunnel **خودش سرور VPN نیست**؛ داده از Listenerهای TCP/UDP ایران با یک تونل ICMP رمزنگاری‌شده به سرویس‌های Loopback خارج منتقل می‌شود. برای راهنمای تنظیم ۱۲ سرویس و فایروال، [راهنمای Multi-Port](docs/MULTI_PORT.md) را ببینید.
+
+## نسخه 3.4.8 — اولویت‌بندی خروجی Reverse و ایمنی خاموش‌سازی
+
+این نسخه گلوگاه تأییدشده در **صف خروجی مشترک Reverse** را اصلاح می‌کند: پیام‌های کنترلی اولویت دارند؛ بسته‌های UDP/QUIC در شرایط ازدحام سریع‌تر ارسال می‌شوند و TCP با سهم منصفانه ۴ به ۱ و بدون گرسنگی ادامه می‌یابد. ترتیب FIFO در هر سرویس حفظ می‌شود و ترافیک حجیم TCP دیگر نمی‌تواند بسته‌های UDP و کنترل را از صف خروجی بیرون کند. صف محدود ۲۵۶ فریم/۲ مگابایت، رمزنگاری Wire 4 و پروفایل‌های قدیمی دست‌نخورده‌اند.
+
+- ثبت workerهای پویا پیش از توقف به‌صورت همگام انجام می‌شود تا رقابت ثبت/انتظار در shutdown کاهش یابد.
+- شمارنده‌های ارسال برنامه فقط بعد از پذیرش واقعی در صف امن یا موفقیت نوشتن روی سوکت افزایش می‌یابند؛ این معیار همچنان **تحویل نهایی به مقصد** نیست.
+- `sudo pingtunnel security` اکنون حذف‌ها، تعداد فریم‌های منتظر و نوبت‌های خروجی Reverse را برای TCP/UDP/Control جدا گزارش می‌کند.
+- تست محلی UDP در CI سخت‌گیرانه‌تر است؛ تست واقعی دو VPS ایران و خارج و مقایسه A/B هنوز لازم است.
+
+[توضیحات فنی و محدودیت‌های نسخه](docs/RELEASE_NOTES_v3.4.8.md)
 
 ## نسخه 3.4.7 — بازگشت واقعی صف‌ها و تفکیک اتصال‌ها به مدل قبل از Multi-Port
 
@@ -164,7 +175,7 @@ ICMP Echo Request / Echo Reply (Reverse یا Direct)
 ابتدا از طریق SSH به **سرور خارج** متصل شوید و نصب را اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.7/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.8/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
@@ -176,7 +187,7 @@ sudo pingtunnel setup
 **فقط پس از تکمیل مرحلهٔ خارج** به سرور ایران متصل شوید و اجرا کنید:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.7/Source/install.sh -o /tmp/pingtunnel-install.sh
+curl -fsSL https://raw.githubusercontent.com/MSMSofts/MSM-Pingtunnel/v3.4.8/Source/install.sh -o /tmp/pingtunnel-install.sh
 sudo bash /tmp/pingtunnel-install.sh
 sudo pingtunnel setup
 ~~~
