@@ -43,6 +43,7 @@ type Server struct {
 	exit             atomic.Bool
 	key              int
 	workResultLock   sync.WaitGroup
+    workerRegistrationMu sync.Mutex
 	maxconn          int
 	maxprocessthread int
 	maxprocessbuffer int
@@ -157,8 +158,8 @@ func (p *Server) Run() error {
         defer common.CrashLog()
         defer failOnUnexpectedWorkerExit("health ticker",&p.exit)
 
-		p.workResultLock.Add(1)
-		defer p.workResultLock.Done()
+        if !p.beginWorker() {return}
+        defer p.workResultLock.Done()
 
 		for !p.exit.Load() {
 			p.checkTimeoutConn()
@@ -192,8 +193,8 @@ func (p *Server) Run() error {
         defer common.CrashLog()
         defer failOnUnexpectedWorkerExit("ICMP dispatcher",&p.exit)
 
-		p.workResultLock.Add(1)
-		defer p.workResultLock.Done()
+        if !p.beginWorker() {return}
+        defer p.workResultLock.Done()
 
 		for !p.exit.Load() {
             if recvUDP != nil {
@@ -213,7 +214,7 @@ func (p *Server) Run() error {
 }
 
 func (p *Server) Stop() {
-    if !p.exit.CompareAndSwap(false,true) { return }
+    if !beginCoreShutdown(&p.exit,&p.workerRegistrationMu) { return }
     close(p.recvcontrol) // broadcast to all per-service and fallback workers
     p.workResultLock.Wait()
     if p.serviceIngress!=nil {
@@ -494,7 +495,7 @@ func (p *Server) RecvTCP(conn *ServerConn, id string, src *net.IPAddr) {
 
 	defer common.CrashLog()
 
-	p.workResultLock.Add(1)
+    if !p.beginWorker() {p.close(conn);return}
 	defer p.workResultLock.Done()
 
 	loggo.Info("server waiting target response %s -> %s %s", conn.tcpaddrTarget.String(), conn.id, conn.tcpconn.LocalAddr().String())
@@ -768,7 +769,7 @@ func (p *Server) Recv(conn *ServerConn, id string, src *net.IPAddr) {
 
 	defer common.CrashLog()
 
-	p.workResultLock.Add(1)
+    if !p.beginWorker() {p.close(conn);return}
 	defer p.workResultLock.Done()
 
 	loggo.Info("server waiting target response %s -> %s %s", conn.udpTargetString(), conn.id, conn.conn.LocalAddr().String())
