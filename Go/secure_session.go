@@ -515,6 +515,7 @@ type pendingICMP struct{
  raw []byte
  peer *net.IPAddr
  id,seq,proto int
+ meta reverseFrameMeta // local priority/service; kept across secure rekey buffering
  arrival time.Time
 }
 const (
