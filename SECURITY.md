@@ -4,41 +4,13 @@
 
 ## سیاست امنیتی
 
-**Pingtunnel Manager 3.4.7** یک پروتکل انتقال ICMP با رمزنگاری احرازشده و توافق کلید موقت دارد. این پیاده‌سازی **ممیزی رمزنگاری مستقل عمومی نشده است** و ادعای ناشناس‌بودن ICMP، عبور قطعی از فیلترینگ یا مقاومت کامل در برابر حملات حجمی ندارد.
+**Pingtunnel Manager** یک پروتکل انتقال ICMP با رمزنگاری احرازشده و توافق کلید موقت دارد. این پیاده‌سازی **ممیزی رمزنگاری مستقل عمومی نشده است** و ادعای ناشناس‌بودن ICMP، عبور قطعی از فیلترینگ یا مقاومت کامل در برابر حملات حجمی ندارد.
 
-### نسخه‌های پشتیبانی‌شده
+### انتشارها و سازگاری
 
-| نسخه | وضعیت |
-| --- | --- |
-| **3.4.7** | اصلاح طبقه‌بندی اشتباه TCP به UDP در پاسخ خارجی؛ صف‌های مستقل ۱۰٬۰۰۰ TCP و ۲۵۶ UDP برای هر سرویس؛ همان Wire 4 و peer pinning |
-| **3.4.6** | بازگشت سیاست صف UDP به FIFO/drop-new نسخه 3.3.24 و تعداد workerهای UDP تنظیم‌شده؛ رمزنگاری Wire 4، Multi-Port و بازتاب ICMP بدون تغییر |
-| **3.4.5** | عدالت نوبت‌دهی ارسال ICMP در اتصال‌های TCP و کاهش سربار تایمر، با حفظ صف‌های مستقل UDP/کنترل و امنیت Wire v4 |
-| **3.4.4** | فیلتر بازتاب ICMP رمزنگاری‌شدهٔ Direct تنها با تطبیق کامل رمزمتن و شناسه/توالی؛ تفکیک خطاهای AEAD، قالب و نشست |
-| **3.4.3** | نسخهٔ جداسازی پردازش TCP/UDP/کنترل و تازه‌محوری صف UDP در Multi-Port؛ امنیت Wire v4 و کنترل‌های موجود بدون تغییر |
-| **3.4.2** | نسخهٔ جدید پس از موفقیت CI؛ کنترل اشباع صف TCP/UDP و دریافت آپدیت از Commit تغییرناپذیر انتشار پایدار |
-| **3.4.1** | نسخه پایدار پیشین؛ جداسازی صف‌های TCP و UDP در Multi-Port |
-| **3.3.24** | نسخهٔ پایدار قبلی؛ اجرای اجباری AEAD در CLI، محدودسازی pprof به Loopback، صحت‌سنجی ارتباط همتا و کاهش رقابت قفل رمزنگاری |
-| **3.3.23** | نسخهٔ پایدار قبلی؛ بازیابی Direct و تست واقعی ICMP |
-| **3.3.9** | نسخهٔ جدید؛ Auto Tune اختیاری TCP/UDP با کنترل محدوده، پیش‌نمایش و بازگشت خودکار؛ بدون تغییر Wire v4 و رمزنگاری |
-| **3.3.8** | نسخه قبلی؛ شناسایی بازتاب دقیق PING/DATA، پاک‌سازی رکوردهای منقضی و حفظ احراز هویت کامل |
-| **3.3.7** | نسخه قبلی؛ جلوگیری از ارسال بازتاب رمزمتن خروجی به رمزگشا با تطبیق هش کامل و شناسهٔ ICMP |
-| **3.3.6** | نسخه قبلی؛ ادامهٔ کنترل‌شدهٔ Poll در وقفه‌های کوتاه BBR و آمار تأخیر صف بدون تغییر رمزنگاری |
-| **3.3.5** | نسخه قبلی؛ ظرفیت Replay Cache مطابق نرخ ۵۰۰ Poll/s و شمارندهٔ جداگانهٔ اشباع |
-| **3.3.4** | نسخه قبلی؛ کنترل نرخ Poll براساس دادهٔ معتبر دوطرفه و سنجش تأخیر صف؛ بدون تغییر Wire v4 |
-| **3.3.3** | نسخه قبلی؛ تفکیک پاسخ بازتابی Poll از فریم‌های رمزنگاری معتبر و آمار خطا |
-| **3.3.2** | نسخه قبلی؛ اولویت دائمی Reverse و Failover اضطراری مبتنی بر شواهد احرازشده |
-| **3.3.1** | نسخه قبلی؛ Poll تطبیقی، صف محدود و بازگرداندن فریم ناموفق بدون تمدید مهلت |
-| **3.3.0** | نسخه قبلی؛ Reverse-first، Poll دارای HMAC و کنترل Replay، بازگشت به Direct و صف محدود |
-| **3.2.6** | نسخه قبلی؛ بازیابی مبتنی بر آخرین ترافیک احرازشده |
-| **3.2.5** | گیرنده و watchdog بازیابی |
-| **3.2.4** | اصلاح منو و CRLF ترمینال |
-| **3.2.3** | پایش منابع و Restart بعد از Update |
-| **3.2.2** | بهبود نمایش منو؛ همان Wire v4 |
-| **3.2.1** | نسخه قبلی؛ اصلاح Data Race و سلامت سرویس |
-| **3.2.0** | نسخه قبلی Wire v4؛ ارتقا توصیه می‌شود |
-| **3.1.0** | پروتکل Wire v4؛ ارتقا به 3.2 توصیه می‌شود |
-| **3.0.0** | پروتکل قدیمی؛ ارتباط مستقیم با 3.1/3.2 برقرار نمی‌شود |
-| **قبل از 3.0** | فرمت قدیمی؛ بدون مهاجرت خودکار |
+توصیه می‌شود از [آخرین انتشار پایدار](https://github.com/MSMSofts/MSM-Pingtunnel/releases) و فایل‌های Manager و Go Core متناظر استفاده شود. تنظیمات فعلی با **Config Schema 3** و نشست امن **Wire v4** کار می‌کنند. فهرست تغییرات و ملاحظات امنیتی هر انتشار در [یادداشت‌های انتشار](https://github.com/MSMSofts/MSM-Pingtunnel/releases) ثبت شده است.
+
+استفاده هم‌زمان از انتشارهای متفاوت روی دو VPS باید صرفاً طبق سازگاری مستند و پس از آزمون انجام شود؛ به حالت قدیمی یا بدون رمزنگاری تنزل خودکار انجام نمی‌شود.
 
 ### چه چیزی حفاظت می‌شود؟
 
@@ -78,13 +50,13 @@
 
 ## English security notes
 
-Pingtunnel Manager uses a **custom authenticated ICMP transport**. Version **3.4.7** fixes mislabeled Foreign TCP replies and adds per-service pre-Multi-Port TCP/UDP queues; the previous v3.4.6 restored pre-Multi-Port UDP FIFO/drop-new scheduling and full configured UDP worker count, while retaining v3.4.5's bounded fair TCP ICMP sending and reuse of idle timers; exact Direct Echo reflection authentication checks remain. Automated CI covers Go/Rust, race and Linux namespace ICMP, but is not a substitute for field testing. Real two-VPS field testing and an independent cryptographic audit are still outstanding. This project has **not been independently audited**, and encryption does **not** guarantee resistance to traffic analysis, ICMP blocking, denial of service, or endpoint compromise.
+Pingtunnel Manager uses a **custom authenticated ICMP transport**. Automated Go/Rust CI exercises key transport scenarios, but an independent cryptographic audit and real two-VPS reliability testing remain necessary. The project **has not been independently security audited**. Encryption does not guarantee anonymity, traffic-analysis resistance, ICMP availability or endpoint security.
 
 **Supported security properties:** a random 256-bit pairing root, PSK-authenticated ephemeral X25519 agreement, HKDF-SHA256 directional session keys, auto-selected AES-256-GCM/XChaCha20-Poly1305, authenticated 64-bit sequence numbers, a 1,024-packet replay window, and an overseas server policy restricting ingress peer IPv4 and the forwarding target to local loopback.
 
 **Limitations:** ICMP is observable and the wire framing has identifiable fixed markers. Root-key compromise can enable future impersonation. Active process compromise may reveal session data. Bounded recovery buffers can lose application traffic. Automatic failover is available in the two AUTO routing policies, with authenticated path proofs and bounded grace periods. Manual routes never switch automatically. Full ICMP DoS protection and zero-downtime pairing-root rotation are not provided.
 
-**Compatibility:** config schema 3 and authenticated Wire v4 remain unchanged in 3.4.7. Use matching 3.4.7 manager and core builds on both peers; there is no silent downgrade to plaintext or legacy wire versions.
+**Compatibility:** Current stable builds use config schema 3 and authenticated Wire v4. Use matching or explicitly compatible manager/core builds on both peers; there is no silent downgrade to plaintext or legacy wire versions. See [Releases](https://github.com/MSMSofts/MSM-Pingtunnel/releases) for version-specific changes.
 
 **Responsible reporting:** Do not disclose exploit details or keys in public issues. Use private GitHub vulnerability reporting if enabled, or coordinate privately with the maintainer before sharing details. Non-sensitive bugs can be filed in [Issues](https://github.com/MSMSofts/MSM-Pingtunnel/issues).
 
