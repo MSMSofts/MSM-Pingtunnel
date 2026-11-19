@@ -2,12 +2,12 @@
 
 **An authenticated, encrypted ICMP tunnel for forwarding TCP/UDP traffic between two Linux VPSs, with a Go transport core and a Rust control menu.**
 
-[فارسی](README.md) · [Stable release: v3.4.8](https://github.com/MSMSofts/MSM-Pingtunnel/releases/tag/v3.4.8) · [All release notes](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0](LICENSE)
+[فارسی](README.md) · [Latest release and changelog](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [CI](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml) · [Apache 2.0](LICENSE)
 
 ## Features
 
 - **Authenticated encryption:** shared 256-bit pairing key, ephemeral X25519 sessions, AEAD transport encryption and anti-replay controls.
-- **Three routing choices:** automatic Reverse-first, automatic Direct-first, or Manual with a locked Direct / Reverse direction.
+- **Four route policies:** automatic Reverse-first and Direct-first, plus two locked Manual choices (Reverse or Direct).
 - **Adaptive Reverse polling:** signed FIFO queue-age/depth observations, bounded demand-responsive ICMP opportunities and write-error backoff.
 - **Mixed Multi-Port:** up to 12 TCP and UDP services over one authenticated ICMP session, each mapped from an Iran ingress port to an overseas loopback target.
 - **Unified Rust manager:** setup, route selection, systemd controls, health and security diagnostics, RTT/jitter observations, and logs.
@@ -15,74 +15,19 @@
 
 Pingtunnel **is not a VPN server**. It forwards traffic from multiple Iran-side TCP/UDP listeners over one encrypted ICMP tunnel to Foreign VPS loopback services. See the [Multi-Port setup guide](docs/MULTI_PORT.en.md) for port mapping, firewall and profile import/export.
 
-## v3.4.8 — Reverse egress prioritization and safer worker shutdown
+## How it works
 
-This release addresses the remaining **shared Reverse outbound FIFO contention**. Encrypted control frames go first; interactive UDP/QUIC receives latency-focused scheduling, while TCP retains an explicit 4:1 UDP/TCP service opportunity ratio under contention. FIFO order within each service is preserved. Bulk TCP can no longer evict queued UDP/control from Reverse egress. The existing 256-frame/2-MiB bound, Wire v4, config schema 3 and ingress policies remain unchanged.
+```text
+TCP/UDP client → Iran VPS ingress port
+                     ↓
+           Authenticated ICMP tunnel
+                     ↓
+       Overseas VPS → 127.0.0.1:PORT → local service
+```
 
-- Serialize dynamic TCP/SOCKS/UDP worker registration with shutdown to avoid late WaitGroup Add calls.
-- Count application DATA only when admitted into the authenticated queue or successfully written to the ICMP socket; these are **not** end-to-end delivery acknowledgments.
-- `pingtunnel security` displays Reverse TCP/UDP/control queue depths, admission/expiry drops and scheduler activity.
-- Tighten local UDP delivery and p95/p99/max latency gates in CI. Real two-VPS A/B performance is still unverified.
+Both peers must share the pairing secret and matching service configuration. The transport operates in **Direct or Reverse** mode; automatic policies switch only after confirmed failure conditions and authenticated evidence. A single deployment supports up to **12 TCP/UDP services**, sharing the underlying ICMP socket and tunnel. See the [architecture](docs/ARCHITECTURE.md) and [Multi-Port guide](docs/MULTI_PORT.en.md) for queueing behavior, resource bounds and setup.
 
-[Technical changes, compatibility and limitations](docs/RELEASE_NOTES_v3.4.8.md)
-
-## v3.4.7 — restore pre-Multi-Port per-service TCP/UDP queues and reply classification
-
-Source comparison with the actual pre-Multi-Port v3.3.24 uncovered a material protocol regression: **the Foreign server labeled TCP DATA replies with the UDP flag**, causing the mixed receiver to admit real TCP frames to the shared 256-datagram UDP queue and compete with games, QUIC and video.
-
-This version fixes the reply wire metadata and creates one **independent v3.3.24-sized FIFO per enabled service**: 10,000 frames for each TCP service and 256 datagrams for each UDP service. The Iran receiver also resolves reply protocol by its **registered local connection**, protecting rolling upgrades from previously mislabeled Foreign replies.
-
-All 12 services, authenticated Wire 4, pinned peer, Direct/Reverse policies and independent control handling remain. `pingtunnel security` reports each service's FIFO occupancy, capacity and drops. The single authenticated ICMP socket is still shared, and we deliberately do not introduce v3.3.24's TCP 3-second blocking-on-full behavior into a shared reader that would freeze UDP.
-
-[Root cause, full comparison, regression tests and limitations](docs/RELEASE_NOTES_v3.4.7.md)
-
-## v3.4.6 — revert UDP queue/worker behavior to pre-Multi-Port v3.3.24
-
-Following degraded real-world UDP responsiveness, we compared the **actual v3.3.24 source tag** (before Multi-Port) against v3.4.5 and restored the changed UDP behavior:
-
-- **Legacy FIFO 256-datagram queue:** preserve already accepted UDP DATA and discard the *incoming* packet when the queue is full. Remove v3.4.3's newest-first/evict-oldest speculative mixed-UDP policy.
-- **Legacy configured UDP worker count:** remove the new 16-worker cap on Foreign; honor the original configured process worker count (typically 100), preserving per-flow hash order.
-- **Keep security and Multi-Port:** TCP/control lanes remain separate, 12 mixed services remain configured, Wire 4 and Direct/Reverse exact Echo-reflection authentication protection are unchanged.
-- `pingtunnel security` explicitly reports `v3.3.24-fifo-drop-new` and the Foreign UDP worker count.
-
-**Important limitation:** a single shared ICMP socket carrying 12 services is still structurally different from v3.3.24's UDP-only single-service process. This is a rollback of the changed UDP scheduling behavior, not a claim of identical on-wire performance or a guarantee of no buffering.
-
-[Source comparison, revert design and verification](docs/RELEASE_NOTES_v3.4.6.md)
-
-## v3.4.5 — Upstream-inspired fair ICMP TCP transmission
-
-Compared with [original esrrhs/pingtunnel](https://github.com/esrrhs/pingtunnel/tree/a557d2169ff8b13ca64f227b0549bbd6f1f84587), v3.4.4 had isolated TCP/UDP **receive** lanes but could still burst an entire bulk TCP FrameMgr window into the shared ICMP kernel socket. v3.4.5 introduces a **FIFO 8 KiB TCP send quantum** across connections on both peers, covering initial handshake, active transfer and close/drain.
-
-- **Independent UDP/control:** UDP and authenticated control bypass the TCP fairness gate; support for up to 12 mixed services remains.
-- **No unproven queue inflation:** 10,000 TCP, 256 UDP and 128 control frames stay unchanged. Wire v4, anti-replay, AEAD and FrameMgr resend/congestion decisions are preserved.
-- **Lower allocation pressure:** TCP idle loops reuse lazily allocated timers rather than allocating `time.After` on every spin.
-- **Measured tail:** `pingtunnel performance` reports individual ICMP RTT **P50/P95/P99/max** and probe samples over **250/1000ms** during the last 120 seconds. `security` reports fair TCP turns, contention and peak handoff wait.
-
-[Design details, regression tests and limitations](docs/RELEASE_NOTES_v3.4.5.md)
-
-**Scope:** Better fair transmission is not a promise of stall-free Instagram; real two-VPS tail latency and packet loss must still be correlated with playback.
-
-## v3.4.4 — Separate Direct kernel Echo reflections from real authentication errors
-
-In **Manual Direct**, the Foreign Linux kernel can echo Iran's outbound encrypted ICMP request *unchanged*, separately from the userspace application's legitimately re-encrypted reply. v3.4.3 only filtered exact Reverse-origin reflections. The Direct receiver now rejects **only an exact recent own ciphertext + ICMP Echo ID + sequence match**, after peer-IP pinning and before AEAD, without dropping the actual peer's independently authenticated ACK/DATA.
-
-`sudo pingtunnel security` now reports exact **Direct kernel Echo reflections (DATA/PING/other)** and distinguishes **invalid framing / wrong session / AEAD tag / handshake MAC** failures. Cumulative counts alone do not establish the cause of Instagram buffering: measure timestamped deltas during a real pause.
-
-[Detailed release explanation and tests](docs/RELEASE_NOTES_v3.4.4.md)
-
-## v3.4.3 — Resolve mixed Multi-Port UDP head-of-line blocking
-
-**Why v3.3.24 felt smoother:** It effectively handled one application protocol per process. v3.4.3 added separate TCP/UDP receive channels but still had **one sequential packet processor and a shared Foreign worker pool**. A slow TCP destination dial or frame-processing task could therefore delay unrelated UDP/QUIC video packets.
-
-- **End-to-end protocol isolation:** TCP, UDP and authenticated control have separate dispatch workers on both peers. Foreign UDP also has a bounded dedicated keyed worker pool, separate from blocking TCP dial processing.
-- **Fresh UDP under saturation:** The unchanged 256-packet UDP queue now evicts the oldest UDP DATA on overflow to keep newer video/QUIC traffic; authenticated control has a separate reliable 128-packet lane and cannot be evicted as UDP.
-- **Immediate saturated TCP admission:** The 10,000-packet mixed TCP queue is unchanged; repeated 2ms waits when completely full are eliminated. Excess TCP DATA is counted and left to existing TCP FrameMgr retransmission.
-- **Operational evidence:** `sudo pingtunnel security` now shows maximum UDP/TCP local dispatch queue delay and counts of DATA frames waiting over 250ms. If those stay flat during app stalls, investigate ICMP shaping, upstream link loss, reverse polling and the application.
-- **Compatibility:** Four route policies, secure Wire 4, config schema 3, same pairing keys and up to 12 mixed services. Single-port legacy handling remains intact.
-
-[Full explanation and limitations](docs/RELEASE_NOTES_v3.4.3.md) · [CI and testing](https://github.com/MSMSofts/MSM-Pingtunnel/actions/workflows/rust.yml)
-
-**Scope:** This targets one evidenced source of head-of-line stalls; it is not a guarantee of real-world Instagram or game performance on a particular two-VPS path.
+Version-specific changes and test evidence live in [GitHub Releases](https://github.com/MSMSofts/MSM-Pingtunnel/releases) and technical notes under [docs](docs/), rather than in this overview.
 
 ## Choose a route policy
 
@@ -99,18 +44,7 @@ CLI: `sudo pingtunnel route auto-reverse`, `auto-direct`, `manual-reverse`, `man
 
 **Configure the same policy on BOTH VPSs**. Each local change restarts its service; coordinate changes to avoid path mismatch. The pairing secret and forwarding parameters are preserved. There is no scheduled three-hour route rotation.
 
-### Four-mode UDP RTT comparison — v3.3.24 CI
-
-| Policy | Baseline p95 RTT | Impaired p95 RTT | After restoration p95 RTT | UDP echoes after restoration |
-| --- | ---: | ---: | ---: | ---: |
-| **Manual Direct** | **0.5 ms** | **64.7 ms** | **58.5 ms** | 28/32 |
-| **AUTO Direct-first** | **0.6 ms** | **62.4 ms** | **64.9 ms** | 28/32 |
-| **Manual Reverse** | **4.9 ms** | **75.5 ms** | **81.4 ms** | 30/32 |
-| **AUTO Reverse-first** | **5.0 ms** | **69.0 ms** | **72.6 ms** | 30/32 |
-
-**Source and interpretation:** [Successful 12 Nov 2026 CI run](https://github.com/MSMSofts/MSM-Pingtunnel/actions/runs/43178280092). These are **authenticated application UDP echo round-trip times in disposable Linux namespaces**, **not public-Internet/game RTT**. The impaired test configured 25±9ms egress delay, 4% loss and 2% reordering on **each side**. After a brief one-way 100% Iran egress blackhole, links returned to the **impaired profile**, not to the clean baseline. p95 excludes lost packets, reported separately; the short outage did **not** exercise full automatic route-failover grace.
-
-[Full p50/p95, packet-loss results and testing methodology](docs/FOUR_ROUTE_RTT_COMPARISON_v3.3.24.md). Choose the best route using comparable measurements on your own two VPSs.
+For experimental RTT results, methodology and limitations, see the [four-policy comparison](docs/FOUR_ROUTE_RTT_COMPARISON_v3.3.24.md). Lab measurements must not be interpreted as public-Internet or gaming latency.
 
 
 ## Queue-aware latency control
@@ -159,7 +93,8 @@ Session and replay checks → decryption → data delivery
 
 ## Quick installation
 
-> **v3.4.7:** accurate TCP reply protocol tag, per-service legacy queue isolation, and prevention of TCP admission to UDP lanes.
+The commands below pin a known release for reproducibility. Check [Releases](https://github.com/MSMSofts/MSM-Pingtunnel/releases) before choosing a newer tag; coordinate updates on both peers.
+
 ### ⚠️ Important: install and set up the OVERSEAS VPS first
 
 > **Required first-time setup order: 1) Overseas VPS → 2) Iran VPS.**
@@ -239,4 +174,4 @@ If traffic fails, check both peers' pairing keys, matching transport, opposite I
 
 The Go core is based on [esrrhs/pingtunnel](https://github.com/esrrhs/pingtunnel); the Rust manager handles setup and service controls. The project provides a two-VPS transport, not a VPN service, high-availability cluster or guarantee against filtering or packet loss.
 
-[Architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Release notes by version](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [License](LICENSE)
+[Multi-Port guide](docs/MULTI_PORT.en.md) · [Route policies](docs/ROUTE_MODES_AND_QUEUE_RECOVERY.md) · [Architecture](docs/ARCHITECTURE.md) · [Security policy](SECURITY.md) · [Release history](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [License](LICENSE)
