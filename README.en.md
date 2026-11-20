@@ -175,3 +175,8 @@ If traffic fails, check both peers' pairing keys, matching transport, opposite I
 The Go core is based on [esrrhs/pingtunnel](https://github.com/esrrhs/pingtunnel); the Rust manager handles setup and service controls. The project provides a two-VPS transport, not a VPN service, high-availability cluster or guarantee against filtering or packet loss.
 
 [Multi-Port guide](docs/MULTI_PORT.en.md) · [Route policies](docs/ROUTE_MODES_AND_QUEUE_RECOVERY.md) · [Architecture](docs/ARCHITECTURE.md) · [Security policy](SECURITY.md) · [Release history](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [License](LICENSE)
+
+
+## Optional standalone AutoSSL utility
+
+A hardened Let's Encrypt certificate helper with signed acme.sh, systemd renewal, and bilingual docs: [AutoSSL](tools/autossl/README.md). It is independent of ICMP tunnel encryption.

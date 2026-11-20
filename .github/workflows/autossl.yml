@@ -1,0 +1,26 @@
+name: AutoSSL tests
+on:
+  push:
+    paths:
+      - 'tools/autossl/**'
+      - '.github/workflows/autossl.yml'
+  pull_request:
+    paths:
+      - 'tools/autossl/**'
+      - '.github/workflows/autossl.yml'
+permissions:
+  contents: read
+jobs:
+  lint-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Bash syntax
+        run: bash -n tools/autossl/autossl.sh tools/autossl/tests/test_autossl.sh
+      - name: ShellCheck
+        run: shellcheck -S warning tools/autossl/autossl.sh tools/autossl/tests/test_autossl.sh
+      - name: Mocked issuance, renew and validation
+        run: sudo bash tools/autossl/tests/test_autossl.sh

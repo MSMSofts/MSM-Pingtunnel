@@ -175,3 +175,8 @@ sudo pingtunnel security
 هستهٔ Go بر پایهٔ [esrrhs/pingtunnel](https://github.com/esrrhs/pingtunnel) توسعه یافته و مدیر Rust کنترل راه‌اندازی و سرویس را انجام می‌دهد. پشتیبانی از دو سرور و یک نوع انتقال در هر نمونه، جایگزین سرویس VPN نیست و تضمینی در برابر محدودسازی شبکه یا افت بسته ارائه نمی‌کند.
 
 [راهنمای Multi-Port](docs/MULTI_PORT.md) · [سیاست‌های مسیر](docs/ROUTE_MODES_AND_QUEUE_RECOVERY.md) · [معماری فنی](docs/ARCHITECTURE.md) · [سیاست امنیتی](SECURITY.md) · [تاریخچه انتشار](https://github.com/MSMSofts/MSM-Pingtunnel/releases) · [مجوز](LICENSE)
+
+
+## ابزار مستقل AutoSSL
+
+مدیریت گواهی‌های Let's Encrypt و تمدید خودکار با systemd، همراه با بررسی امضای acme.sh و مستندات فارسی: [AutoSSL](tools/autossl/README.fa.md). این ابزار ارتباطی با رمزنگاری تونل ICMP ندارد.
